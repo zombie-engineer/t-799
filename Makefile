@@ -6,7 +6,7 @@ OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
 $(info $(CC))
 
-OBJS := start.o kernel.o
+OBJS := start.o kernel.o uart_pl011.o
 
 kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary $< $@
