@@ -7,5 +7,8 @@ _bootload_start:
 _start:
 
 mov x0, #0xf7
+mov sp, #0x80000
 bl kernel_c_entry
+1:
 mov x0, x0
+b 1b
