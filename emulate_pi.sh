@@ -16,3 +16,4 @@ $RUNCMD -kernel kernel.bin\
 	-nodefaults \
 	-s -S
 
+#	-monitor stdio \
