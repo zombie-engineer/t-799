@@ -1,7 +1,7 @@
 #!/bin/bash
 
-QEMU=qemu-system-aarch64
 QEMU=/home/user_user/git/qemu/build/qemu-system-aarch64
+QEMU=qemu-system-aarch64
 RUNCMD=$QEMU
 echo DEBUG_QEMU=$DEBUG_QEMU
 if [ -v DEBUG_QEMU ]; then
