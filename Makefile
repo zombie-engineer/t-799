@@ -9,7 +9,8 @@ $(info $(CC))
 OBJS := \
   start \
   main \
-  uart_pl011
+  uart_pl011 \
+  gpio
 
 OBJS := $(addsuffix .o, $(OBJS))
 
