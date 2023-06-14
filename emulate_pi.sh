@@ -1,7 +1,7 @@
 #!/bin/bash
 
 QEMU=qemu-system-aarch64
-QEMU=/home/user-user/git/qemu/build/qemu-system-aarch64
+QEMU=/home/user_user/git/qemu/build/qemu-system-aarch64
 RUNCMD=$QEMU
 echo DEBUG_QEMU=$DEBUG_QEMU
 if [ -v DEBUG_QEMU ]; then
@@ -9,7 +9,7 @@ if [ -v DEBUG_QEMU ]; then
 fi
 
 echo $RUNCMD
-$RUNCMD -kernel kernel.bin\
+$RUNCMD -kernel kernel8.bin\
 	-machine raspi3b \
 	-nographic \
 	-serial stdio \

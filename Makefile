@@ -1,4 +1,4 @@
-CROSSCOMPILE= /home/user-user/crosscompile/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
+CROSSCOMPILE := /home/user_user/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
 
 CC := $(CROSSCOMPILE)-gcc
 LD := $(CROSSCOMPILE)-ld
@@ -6,24 +6,29 @@ OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
 $(info $(CC))
 
-OBJS := start.o kernel.o uart_pl011.o
+OBJS := \
+  start \
+  main \
+  uart_pl011
 
-kernel.bin: kernel.elf
+OBJS := $(addsuffix .o, $(OBJS))
+
+kernel8.bin: kernel8.elf
 	$(OBJCOPY) -O binary $< $@
 
-kernel.elf: $(OBJS) link.ld
-	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel.map
+kernel8.elf: $(OBJS) link.ld
+	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map
 
-start.o: start.S
+%.o: %.S
 	$(CC) -g -c $? -o $@
 
-kernel.o: kernel.c
+%.o: %.c
 	$(CC) -g -c $? -o $@
 
-db: kernel.bin
+db: kernel8.bin
 	$(OBJDUMP) -m aarch64 -b binary -D $^
 
-e: kernel.bin
+e: kernel8.bin
 	./emulate_pi.sh
 
 d:
