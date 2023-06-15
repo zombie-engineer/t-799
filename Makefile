@@ -1,5 +1,10 @@
 CROSSCOMPILE := /home/user_user/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
 
+# Using fixed version of openocd to support configuration scripts for
+# Raspberry PI 3B+, found on the internet
+# LID_LIBRARY_PATH is used to find custom build libjaylink library
+OPENOCD := openocd
+
 CC := $(CROSSCOMPILE)-gcc
 LD := $(CROSSCOMPILE)-ld
 OBJDUMP := $(CROSSCOMPILE)-objdump
@@ -32,8 +37,17 @@ db: kernel8.bin
 e: kernel8.bin
 	./emulate_pi.sh
 
-d:
+j:
+	@echo "Connecting to Raspberry PI 3B+ over JTAG"
+	$(OPENOCD) -f openocd-raspberrypi3.cfg
+
+de:
+	@echo "Starting session to debug emulated Raspberry PI 3B+"
 	./debug_emulated_pi.sh
+
+dj:
+	@echo "Starting session to debug emulated Raspberry PI 3B+"
+	./debug_pi_jtag.sh
 
 clean:
 	git clean -xfd

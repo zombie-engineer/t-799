@@ -29,8 +29,23 @@ static inline void test_gpio(void)
 	}
 }
 
+static inline void jtag_enable(void)
+{
+	volatile int wait_on_jtag = 1;
+	gpio_set_pin_function(22, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(23, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(24, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(25, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(26, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(27, GPIO_FUNCTION_ALT_4);
+
+	while(wait_on_jtag)
+		asm volatile ("wfe");
+}
+
 void main(void)
 {
+	jtag_enable();
 	test_gpio();
 	uart_pl011_init();
 	uart_send("hello\n", 6);
