@@ -10,7 +10,9 @@ LD := $(CROSSCOMPILE)-ld
 OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
 
+CFLAGS := -Iinclude -g
 OBJS := \
+  armv8 \
   start \
   main \
   uart_pl011 \
@@ -28,7 +30,7 @@ kernel8.elf: $(OBJS) link.ld
 	$(CC) -g -c $? -o $@
 
 %.o: %.c
-	$(CC) -g -c $? -o $@
+	$(CC) $(CFLAGS) -c $? -o $@
 
 db: kernel8.bin
 	$(OBJDUMP) -m aarch64 -b binary -D $^
