@@ -1,7 +1,5 @@
 #include "uart_pl011.h"
 #include "gpio.h"
-// #define uart_init uart_pl011_init
-#define uart_send uart_pl011_send
 #include "bcm2835_gpio.h"
 #include <mbox_props.h>
 
@@ -55,4 +53,7 @@ void main(void)
 #endif
 	mbox_get_board_serial(&serial);
 	mbox_get_mac_addr(mac, mac + 6);
+	uart_pl011_init(115200);
+	while(1)
+		uart_pl011_send("hello\n", 6);
 }
