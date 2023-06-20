@@ -3,6 +3,7 @@
 
 // #define uart_init uart_pl011_init
 #define uart_send uart_pl011_send
+#include "bcm2835_gpio.h"
 
 static inline void test_gpio(void)
 {
@@ -29,24 +30,25 @@ static inline void test_gpio(void)
 	}
 }
 
+#ifdef CONFIG_JTAG_ENABLE_AT_RUNTIME
 static inline void jtag_enable(void)
 {
 	volatile int wait_on_jtag = 1;
-	gpio_set_pin_function(22, GPIO_FUNCTION_ALT_4);
-	gpio_set_pin_function(23, GPIO_FUNCTION_ALT_4);
-	gpio_set_pin_function(24, GPIO_FUNCTION_ALT_4);
-	gpio_set_pin_function(25, GPIO_FUNCTION_ALT_4);
-	gpio_set_pin_function(26, GPIO_FUNCTION_ALT_4);
-	gpio_set_pin_function(27, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_TRST_B, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_RTCK_B, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_TDO_B, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_TCK_B, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_TDI_B, GPIO_FUNCTION_ALT_4);
+	gpio_set_pin_function(GPIO_PIN_ARM_TMS_B, GPIO_FUNCTION_ALT_4);
 
 	while(wait_on_jtag)
 		asm volatile ("wfe");
 }
+#endif
 
 void main(void)
 {
+#ifdef CONFIG_JTAG_ENABLE_AT_RUNTIME
 	jtag_enable();
-	test_gpio();
-	uart_pl011_init();
-	uart_send("hello\n", 6);
+#endif
 }

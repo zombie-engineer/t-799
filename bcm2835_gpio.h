@@ -1,0 +1,20 @@
+#pragma once
+
+#define GPIO_PIN_ARM_RTCK_A 6
+#define GPIO_PIN_ARM_TDO_A  5
+#define GPIO_PIN_ARM_TCK_A  13
+#define GPIO_PIN_ARM_TDI_A  4
+#define GPIO_PIN_ARM_TMS_A  12
+
+#define GPIO_PIN_ARM_TRST_B 22
+#define GPIO_PIN_ARM_RTCK_B 23
+#define GPIO_PIN_ARM_TDO_B  24
+#define GPIO_PIN_ARM_TCK_B  25
+#define GPIO_PIN_ARM_TDI_B  26
+#define GPIO_PIN_ARM_TMS_B  27
+
+#define GPIO_PIN_UART_TXD0 14
+#define GPIO_PIN_UART_RXD0 15
+
+#define GPIO_PIN_UART_TXD1 14
+#define GPIO_PIN_UART_RXD1 15
