@@ -39,6 +39,9 @@ kernel8.elf: $(OBJS) link.ld
 db: kernel8.bin
 	$(OBJDUMP) -m aarch64 -b binary -D $^
 
+dbe: kernel8.elf
+	$(OBJDUMP) -D $^
+
 e: kernel8.bin
 	./emulate_pi.sh
 
