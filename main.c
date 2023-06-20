@@ -1,9 +1,9 @@
 #include "uart_pl011.h"
 #include "gpio.h"
-
 // #define uart_init uart_pl011_init
 #define uart_send uart_pl011_send
 #include "bcm2835_gpio.h"
+#include <mbox_props.h>
 
 static inline void test_gpio(void)
 {
@@ -48,7 +48,11 @@ static inline void jtag_enable(void)
 
 void main(void)
 {
+	char mac[6];
+	uint64_t serial;
 #ifdef CONFIG_JTAG_ENABLE_AT_RUNTIME
 	jtag_enable();
 #endif
+	mbox_get_board_serial(&serial);
+	mbox_get_mac_addr(mac, mac + 6);
 }

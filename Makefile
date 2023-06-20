@@ -13,7 +13,11 @@ OBJCOPY := $(CROSSCOMPILE)-objcopy
 CFLAGS := -Iinclude -g
 OBJS := \
   armv8 \
+  mbox/mbox_routines \
+  mbox/mbox \
+  mbox/mbox_props \
   start \
+  stringlib \
   main \
   uart_pl011 \
   gpio
