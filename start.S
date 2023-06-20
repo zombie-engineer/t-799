@@ -2,7 +2,7 @@
 .global _bootload_start
 _bootload_start:
 
-.section .text
+.section .text.startup
 .globl _start
 _start:
   mrs x0, mpidr_el1

@@ -4,6 +4,7 @@ SECTIONS
 
 	. = 0x80000;
 	.text : {
+		*.o(.text.startup)
 		*.o(.text)
 	}
 }
