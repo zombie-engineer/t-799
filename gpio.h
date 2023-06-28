@@ -26,8 +26,8 @@ void gpio_set_pin_function(int pin, gpio_function_t function);
  */
 typedef enum {
 	GPIO_PULLUPDOWN_MODE_TRISTATE,
-	GPIO_PULLUPDOWN_MODE_UP,
 	GPIO_PULLUPDOWN_MODE_DOWN,
+	GPIO_PULLUPDOWN_MODE_UP,
 } gpio_pullupdown_mode_t;
 void gpio_set_pin_pullupdown_mode(int pin, gpio_pullupdown_mode_t mode);
 
