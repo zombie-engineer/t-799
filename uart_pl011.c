@@ -17,6 +17,7 @@
 #define PL011_LCRH_EPS_PARITY_ODD 0
 #define PL011_LCRH_EPS_PARITY_EVEN 1
 #define PL011_LCRH_STP2_POS 3
+#define PL011_LCRH_FEN_POS 4
 #define PL011_LCRH_WLEN_POS 5
 #define PL011_LCRH_WLEN_8BITS 3
 #define PL011_LCRH_WLEN_7BITS 2
@@ -106,8 +107,9 @@ bool uart_pl011_init(int baudrate)
 
 	gpio_set_pin_function(GPIO_PIN_UART_TXD0, GPIO_FUNCTION_ALT_0);
 	gpio_set_pin_function(GPIO_PIN_UART_RXD0, GPIO_FUNCTION_ALT_0);
-	gpio_set_pin_pullupdown_mode(GPIO_PIN_UART_TXD0, GPIO_PULLUPDOWN_MODE_UP);
-	gpio_set_pin_pullupdown_mode(GPIO_PIN_UART_RXD0, GPIO_PULLUPDOWN_MODE_UP);
+
+	gpio_set_pin_pullupdown_mode(GPIO_PIN_UART_RXD0,
+		GPIO_PULLUPDOWN_MODE_DOWN);
 
 	if (!mbox_get_clock_rate(2, &clock_rate_hz)) {
 		return false;
@@ -135,4 +137,16 @@ int uart_pl011_send(const void *buf, int num)
 		pl011_uart->dr = *ptr++;
 	}
 	return ptr - (const char *)buf;
+}
+
+int uart_pl011_recv(void *buf, int num)
+{
+	int i;
+	char *ptr = buf;
+
+	for (i = 0; i < num; ++i) {
+		while(pl011_uart->fr & (1<<4));
+		*ptr = pl011_uart->dr;
+	}
+	return num;
 }
