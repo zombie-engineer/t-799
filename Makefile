@@ -10,7 +10,7 @@ LD := $(CROSSCOMPILE)-ld
 OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
 
-CFLAGS := -Iinclude -g
+CFLAGS := -Iinclude -g -Werror
 OBJS := \
   armv8 \
   mbox/mbox_routines \
