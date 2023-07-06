@@ -49,9 +49,20 @@ static inline void jtag_enable(void)
 }
 #endif
 
+static inline void reboot(void)
+{
+  ioreg32_write((ioreg32_t)0x3f100024, (0x5a << 24) | 1);
+  ioreg32_write((ioreg32_t)0x3f10001c, (0x5a << 24) | 0x20);
+  while(1) asm volatile("wfe");
+}
+
+volatile bool should_reboot = 0;
+
 void panic(void)
 {
-	while(1) asm volatile ("wfe");
+	while(!should_reboot)
+		asm volatile ("wfe");
+	reboot();
 }
 
 void test_spi(void)
@@ -92,6 +103,8 @@ void test_spi(void)
 
 void main(void)
 {
+	should_reboot = false;
+
 	test_spi();
 
 	panic();
