@@ -2,6 +2,11 @@
 #include "gpio.h"
 #include "bcm2835_gpio.h"
 #include <mbox_props.h>
+#include <spi.h>
+#include <errcode.h>
+#include <io_flags.h>
+#include "ioreg.h"
+#include <stddef.h>
 
 static inline void test_gpio(void)
 {
@@ -44,8 +49,52 @@ static inline void jtag_enable(void)
 }
 #endif
 
+void panic(void)
+{
+	while(1) asm volatile ("wfe");
+}
+
+void test_spi(void)
+{
+	int len;
+	int actual_len;
+	struct spi_device *spi;
+	const uint8_t payload[] = { 0b10101010, 0b11110000 };
+	spi = spi_get_device(0);
+	if (!spi)
+		panic();
+
+	if (!spi->fns || !spi->fns->do_transfer)
+		panic();
+
+	if (spi->fns->init && spi->fns->init(spi) != SUCCESS)
+		panic();
+
+	/* testing SPI write */
+	while(1) {
+		for (volatile int x = 0; x < 40000; ++x);
+		if (spi->fns->start_transfer &&
+		spi->fns->start_transfer(spi, IO_FLAG_WRITE, 0) != SUCCESS)
+		panic();
+
+		for (int i = 0; i < 100; ++i) {
+			if (spi->fns->do_transfer(spi, payload, NULL, sizeof(payload),
+				&actual_len) != SUCCESS) {
+				panic();
+			}
+		}
+
+		if (spi->fns->finish_transfer &&
+			spi->fns->finish_transfer(spi) != SUCCESS)
+			panic();
+	}
+}
+
 void main(void)
 {
+	test_spi();
+
+	panic();
 	char mac[6];
 	uint64_t serial;
 #ifdef CONFIG_JTAG_ENABLE_AT_RUNTIME

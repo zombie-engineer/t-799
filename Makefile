@@ -20,7 +20,8 @@ OBJS := \
   stringlib \
   main \
   uart_pl011 \
-  gpio
+  gpio \
+  spi
 
 OBJS := $(addsuffix .o, $(OBJS))
 
