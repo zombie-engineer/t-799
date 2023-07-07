@@ -86,11 +86,11 @@ struct spi_gpio_group_desc {
 
 static const struct spi_gpio_group_desc gpio_desc = {
 	.pins = {
-		PIN_DESC(7, ALT_0, INPUT),
-		PIN_DESC(8, ALT_0, INPUT),
-		PIN_DESC(9, ALT_0, INPUT),
-		PIN_DESC(10, ALT_0, INPUT),
-		PIN_DESC(11, ALT_0, INPUT)
+		PIN_DESC(GPIO_PIN_7, ALT_0, INPUT),
+		PIN_DESC(GPIO_PIN_8, ALT_0, INPUT),
+		PIN_DESC(GPIO_PIN_9, ALT_0, INPUT),
+		PIN_DESC(GPIO_PIN_10, ALT_0, INPUT),
+		PIN_DESC(GPIO_PIN_11, ALT_0, INPUT)
 	}
 };
 
