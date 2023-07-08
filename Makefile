@@ -17,6 +17,7 @@ OBJS := \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \
+  panic \
   start \
   stringlib \
   main \

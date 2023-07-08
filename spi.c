@@ -8,6 +8,7 @@
 #include "ioreg.h"
 #include <bitops.h>
 #include <io_flags.h>
+#include <delay.h>
 
 #define SPI_BASE ((unsigned long long)BCM2835_MEM_PERIPH_BASE + 0x00204000)
 
