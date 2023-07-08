@@ -17,6 +17,7 @@ typedef enum {
 } gpio_function_t;
 
 typedef enum {
+	GPIO_PIN_NA = -1,
 	GPIO_PIN_0 = 0,
 	GPIO_PIN_1,
 	GPIO_PIN_2,

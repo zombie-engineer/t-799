@@ -32,4 +32,10 @@ struct spi_device {
 	int io_flags;
 };
 
+#define SPI_DEV_0 0
+#define SPI_DEV_BITBANG 3
+
 struct spi_device *spi_get_device(int spi);
+
+int spi_configure_bitbang(struct spi_device *d, int sck, int mosi,
+	int miso, const int *cs, int num_cs_pins);
