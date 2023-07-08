@@ -13,6 +13,7 @@ OBJCOPY := $(CROSSCOMPILE)-objcopy
 CFLAGS := -Iinclude -g -Werror
 OBJS := \
   armv8 \
+  delay \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \

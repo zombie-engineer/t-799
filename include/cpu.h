@@ -17,3 +17,13 @@ void dcache_invalidate_rng(uint64_t vaddr_start, uint64_t vaddr_end);
 
 #define dcache_invalidate(addr, size)\
   dcache_invalidate_rng((uint64_t)(addr), (uint64_t)(addr) + (size))
+
+/*
+ * Returns system clock frequency in Hz
+ */
+uint64_t get_cpu_counter_64_freq(void);
+
+/*
+ *  reads cpu-specific generic 64 bit counter
+ */
+uint64_t read_cpu_counter_64(void);

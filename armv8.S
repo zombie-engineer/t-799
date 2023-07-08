@@ -55,3 +55,14 @@ dcache_invalidate_rng:
   b.lo  1b
   dsb sy
   ret
+
+.globl get_cpu_counter_64_freq
+get_cpu_counter_64_freq:
+  mrs x0, cntfrq_el0
+  ubfx x0, x0, #0, #32
+  ret
+
+.globl read_cpu_counter_64
+read_cpu_counter_64:
+  mrs x0, cntpct_el0
+  ret
