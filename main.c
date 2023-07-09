@@ -1,6 +1,6 @@
 #include "gpio.h"
 #include "bcm2835_gpio.h"
-#include "common.h"
+#include <common.h>
 
 void main(void)
 {

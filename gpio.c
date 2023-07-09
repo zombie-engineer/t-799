@@ -1,7 +1,7 @@
-#include "gpio.h"
-#include "memory_map.h"
-#include "ioreg.h"
-#include "common.h"
+#include <gpio.h>
+#include <memory_map.h>
+#include <ioreg.h>
+#include <common.h>
 
 #define BCM2835_GPIO_MAX_PIN 53
 #define GPIO_MAX_PIN BCM2835_GPIO_MAX_PIN

@@ -1,11 +1,10 @@
 #include "spi.h"
-#include "memory_map.h"
-#include "ioreg.h"
+#include <memory_map.h>
+#include <ioreg.h>
 #include <stringlib.h>
-#include "common.h"
-#include "gpio.h"
+#include <common.h>
+#include <gpio.h>
 #include <errcode.h>
-#include "ioreg.h"
 #include <bitops.h>
 #include <io_flags.h>
 #include <delay.h>

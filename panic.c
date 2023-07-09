@@ -1,6 +1,6 @@
-#include "common.h"
+#include <common.h>
+#include <ioreg.h>
 #include <stdbool.h>
-#include "ioreg.h"
 
 static volatile bool should_reboot = false;
 

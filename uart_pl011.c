@@ -1,8 +1,7 @@
 #include "uart_pl011.h"
 #include "bcm2835_gpio.h"
 #include <mbox_props.h>
-#include "types.h"
-#include "gpio.h"
+#include <gpio.h>
 #include <stdint.h>
 #include <assert.h>
 
