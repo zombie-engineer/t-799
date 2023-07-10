@@ -1,8 +1,10 @@
 #include <common.h>
 #include <ioreg.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 static volatile bool should_reboot = false;
+static const char *panic_log = NULL;
 
 void request_reboot(void)
 {
@@ -29,3 +31,8 @@ void panic(void)
 	reboot();
 }
 
+void panic_with_log(const char *log)
+{
+	panic_log = log;
+	panic();
+}

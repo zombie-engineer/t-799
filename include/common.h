@@ -10,3 +10,4 @@ void request_reboot(void);
 void reboot(void);
 
 void panic(void);
+void panic_with_log(const char *);
