@@ -1,6 +1,81 @@
 #include <stddef.h>
 #include <common.h>
 
+int strcmp(const char *s1, const char *s2)
+{
+	while (*s1 && *s2 && *s1 == *s2) {
+		s1++;
+		s2++;
+	}
+	return *s1 - *s2;
+}
+
+int memcmp(const void *a, const void *b, size_t n)
+{
+	const char *p1 = a;
+	const char *p2 = b;
+	while(n--) {
+		if (*p1 != *p2)
+			return *p1 - *p2;
+	}
+	return 0;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n)
+{
+	while (n && *s1 && *s2 && *s1 == *s2) {
+		s1++;
+		s2++;
+		n--;
+	}
+	if (!n)
+		return 0;
+	return *s1 - *s2;
+}
+
+int strlen(const char* ptr)
+{
+	int res;
+	res = 0;
+	while(*ptr++)
+		res++;
+	return res;
+}
+
+int strnlen(const char* ptr, size_t n)
+{
+	int res;
+	res = 0;
+	while(*ptr++ && n--)
+		res++;
+	return res;
+}
+
+char *strcpy(char *dst, const char *src)
+{
+	char *res = dst;
+	while(*src)
+		*dst++ = *src++;
+	*dst = 0;
+	return res;
+}
+
+char *strncpy(char *dst, const char *src, size_t n)
+{
+	char *res = dst;
+	char tmp;
+	while(n) {
+		tmp = *src++;
+		*dst++ = tmp;
+		n--;
+		if (!tmp)
+			break;
+	}
+	while(n--)
+		*dst++ = 0;
+	return res;
+}
+
 void *memset(void *dst, int value, long unsigned int n)
 {
 	char *ptr = (char *)dst;
