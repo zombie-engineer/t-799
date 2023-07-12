@@ -2,6 +2,8 @@
 
 #define ARRAY_SIZE(__a) (sizeof(__a)/sizeof(__a[0]))
 #define ASSERT(__a) {}
+#define MAX(__a, __b) (__a) > (__b) ? (__a) : (__b)
+#define MIN(__a, __b) (__a) < (__b) ? (__a) : (__b)
 
 
 void clear_reboot_request(void);
