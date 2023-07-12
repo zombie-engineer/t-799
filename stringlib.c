@@ -1,5 +1,11 @@
+#include <stringlib.h>
 #include <stddef.h>
 #include <common.h>
+
+int isprint(char ch)
+{
+	return (ch >= 0x20 && ch < 0x7f) || ch == '\n' || ch == ' ';
+}
 
 int strcmp(const char *s1, const char *s2)
 {
@@ -96,7 +102,7 @@ void *memset(void *dst, int value, long unsigned int n)
 #define CPY_INT_EL(dst, src, idx) CPY_ARRAY_EL(int, dst, src, idx)
 #define CPY_LONG_EL(dst, src, idx) CPY_ARRAY_EL(long, dst, src, idx)
 
-void * memcpy_8aligned(void *dst, const void *src, size_t n)
+void *memcpy_8aligned(void *dst, const void *src, size_t n)
 {
 	int i;
 #ifndef TEST_STRING
@@ -110,7 +116,7 @@ void * memcpy_8aligned(void *dst, const void *src, size_t n)
 	return dst;
 }
 
-void * memcpy(void *dst, const void *src, size_t n)
+void *memcpy(void *dst, const void *src, size_t n)
 {
 	unsigned int i, imax;
 	if (!IS_8_ALIGNED(dst) || !IS_8_ALIGNED(src)) {

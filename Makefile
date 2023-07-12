@@ -11,6 +11,9 @@ OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
 
 CFLAGS := -Iinclude -g -Werror
+# Required to implement standard library functions like sprintf and memset
+CFLAGS += -ffreestanding
+
 OBJS := \
   armv8 \
   delay \
@@ -19,6 +22,7 @@ OBJS := \
   mbox/mbox_props \
   panic \
   start \
+  sprintf \
   stringlib \
   main \
   uart_pl011 \
