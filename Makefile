@@ -15,6 +15,9 @@ CFLAGS := -Iinclude -g -Werror
 CFLAGS += -ffreestanding
 
 OBJS := \
+  armv8_exception_vector \
+  armv8_exception_sync \
+  armv8_exception \
   armv8 \
   delay \
   mbox/mbox_routines \
