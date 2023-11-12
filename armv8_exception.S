@@ -127,15 +127,17 @@ __armv8_cpuctx_eret:
 
 .globl armv8_handle_exception_sync
 armv8_handle_exception_sync:
-  str x30, [sp, #-8]!
+  sub sp, sp, #16
+  str x30, [sp]
   mrs x0, esr_el1
   bl armv8_exception_handler_sync
-  ldr x30, [sp], #-8
+  ldr x30, [sp]
+  add sp, sp, #16
   ret
 
 .globl armv8_handle_exception_irq
 armv8_handle_exception_irq:
-bl irq_handler
+bl __handle_irq
 ret
 
 .globl armv8_handle_exception_fiq

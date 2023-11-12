@@ -19,7 +19,11 @@ OBJS := \
   armv8_exception_sync \
   armv8_exception \
   armv8 \
+  bcm2835_systimer \
+  bcm2835_ic \
+  sched \
   delay \
+  irq \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \

@@ -1,10 +1,12 @@
 #include <gpio.h>
 // #include "bcm2835_gpio.h"
+#include <bcm2835/bcm2835_systimer.h>
 #include <common.h>
 #include "uart_pl011.h"
 #include <stringlib.h>
 #include <mbox.h>
 #include <mbox_props.h>
+#include <irq.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -90,11 +92,24 @@ void print_mbox_props(void)
 	GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
+volatile int global_timer = 0;
+static void timer_callback_irq(void *arg)
+{
+	global_timer++;
+	bcm2835_systimer_clear_irq(1);
+	bcm2835_systimer_start_oneshot(60000, timer_callback_irq, NULL);
+}
+
 void main(void)
 {
 	uart_pl011_init(115200);
 	clear_reboot_request();
 	print_mbox_props();
+	irq_init();
+	bcm2835_systimer_init();
+	bcm2835_systimer_start_oneshot(60000, timer_callback_irq, NULL);
+  asm volatile("msr daifclr, #(1<<1)");
+	while(1);
 	asm volatile("svc 1");
 	sprintf((char *)buf1, "test_sprintf '44'->%d", 44);
 	uart_pl011_send((const void *)buf1, 0);

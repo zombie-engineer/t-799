@@ -27,9 +27,10 @@ start_primary_cpu:
   /*
    * Set exception vector table
    */
-  ldr   x0, =__exception_vector_table
+  ldr   x0, =__exception_vector_table_el1
   msr   vbar_el1, x0
-  mrs   x1, vbar_el1
+  ldr   x0, =__exception_vector_table_el2
+  msr   vbar_el2, x0
 
   /*
    * EL0VCTEN == 1 - don't trap EL0 access to CNTVCT_EL0, CNTFRQ_EL0 to EL2

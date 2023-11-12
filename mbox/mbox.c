@@ -2,7 +2,8 @@
 // #include <compiler.h>
 #include <cpu.h>
 
-#define VIDEOCORE_MBOX (PERIPHERAL_BASE_PHY + 0xb880)
+
+#define VIDEOCORE_MBOX (BCM2835_MEM_PERIPH_BASE + 0xb880)
 #define MBOX_READ   ((volatile unsigned int*)(VIDEOCORE_MBOX + 0x00))
 #define MBOX_POLL   ((volatile unsigned int*)(VIDEOCORE_MBOX + 0x10))
 #define MBOX_SENDER ((volatile unsigned int*)(VIDEOCORE_MBOX + 0x14))
