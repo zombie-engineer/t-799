@@ -27,3 +27,13 @@ uint64_t get_cpu_counter_64_freq(void);
  *  reads cpu-specific generic 64 bit counter
  */
 uint64_t read_cpu_counter_64(void);
+
+static inline void irq_enable(void)
+{
+  asm volatile ("msr daifclr, #(1 << 1)");
+}
+
+static inline void irq_disable(void)
+{
+  asm volatile ("msr daifset, #(1 << 1)");
+}
