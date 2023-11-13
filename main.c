@@ -92,6 +92,21 @@ void print_mbox_props(void)
 	GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
+
+#define GPIO_IDX_NATIVE_DEBUG_LED 29
+
+static void debug_led_init(void)
+{
+	gpio_set_pin_function(GPIO_IDX_NATIVE_DEBUG_LED, GPIO_FUNCTION_OUTPUT);
+	gpio_set_pin_output(GPIO_IDX_NATIVE_DEBUG_LED, 1);
+}
+
+static void debug_led_toggle(void)
+{
+	gpio_toggle_pin_output(GPIO_IDX_NATIVE_DEBUG_LED);
+}
+
+
 volatile int global_timer = 0;
 volatile int global_timer2 = 0;
 static void timer_callback_irq(void *arg)
