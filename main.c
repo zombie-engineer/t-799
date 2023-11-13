@@ -109,11 +109,13 @@ static void debug_led_toggle(void)
 
 volatile int global_timer = 0;
 volatile int global_timer2 = 0;
+
 static void timer_callback_irq(void *arg)
 {
-	global_timer++;
 	bcm2835_systimer_clear_irq(1);
-	bcm2835_systimer_start_oneshot(60000, timer_callback_irq, NULL);
+	global_timer++;
+	debug_led_toggle();
+	bcm2835_systimer_start_oneshot(1000000, timer_callback_irq, NULL);
 }
 
 static void test_context_switch(void)
@@ -187,18 +189,21 @@ static void test_context_switch(void)
 
 void main(void)
 {
-
 	uart_pl011_init(115200);
 	clear_reboot_request();
 	print_mbox_props();
 	irq_init();
 	bcm2835_systimer_init();
+	debug_led_init();
+	global_timer = 0;
+	global_timer2 = 0;
 	irq_disable();
-	bcm2835_systimer_start_oneshot(60000, timer_callback_irq, NULL);
+	bcm2835_systimer_start_oneshot(600000, timer_callback_irq, NULL);
 
-	test_context_switch();
 	while(1) {
 		global_timer2++;
+		if (global_timer2 == 1000)
+			irq_enable();
 	}
 	asm volatile("svc 1");
 	sprintf((char *)buf1, "test_sprintf '44'->%d", 44);
