@@ -26,12 +26,6 @@ const char * _printf(const char* fmt, ...)
 }
 #define printf _printf
 
-void irq_handler(void)
-{
-	gpio_set_pin_function(29, GPIO_FUNCTION_OUTPUT);
-	gpio_set_pin_output(29, 1);
-}
-
 void fiq_handler(void)
 {
 }
