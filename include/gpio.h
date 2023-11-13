@@ -74,4 +74,6 @@ void gpio_set_pin_pullupdown_mode(int pin, gpio_pullupdown_mode_t mode);
  *          if false - to logical low
  */
 void gpio_set_pin_output(int pin, bool is_set);
+void gpio_toggle_pin_output(int pin);
+bool gpio_pin_is_set(int pin);
 

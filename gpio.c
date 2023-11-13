@@ -116,6 +116,17 @@ void gpio_set_pin_pullupdown_mode(int pin, gpio_pullupdown_mode_t mode)
   ioreg32_write(GPIO_REG_GPPUDCLK1, 0);
 }
 
+bool gpio_pin_is_set(int pin)
+{
+	ioreg32_t r;
+
+	ASSERT(pin <= GPIO_MAX_PIN);
+
+	r = GPIO_REG_GPLEV0 + pin / 32;
+
+	return (ioreg32_read(r) >> (pin % 32)) & 1;
+}
+
 void gpio_set_pin_output(int pin, bool is_set)
 {
 	ioreg32_t r;
@@ -126,4 +137,9 @@ void gpio_set_pin_output(int pin, bool is_set)
 	r += pin / 32;
 
 	ioreg32_write(r, 1 << (pin % 32));
+}
+
+void gpio_toggle_pin_output(int pin)
+{
+  gpio_set_pin_output(pin, !gpio_pin_is_set(pin));
 }
