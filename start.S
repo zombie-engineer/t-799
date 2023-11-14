@@ -11,6 +11,12 @@ __stack_el1:
 .rept 512
 .long 0x00112233
 .endr
+.align 4
+.globl __stack_el2
+__stack_el2:
+.rept 512
+.long 0x00112233
+.endr
 
 
 .section .text.startup
@@ -90,14 +96,14 @@ start_primary_cpu:
   /*
    * Change execution level to EL1.
    * Set SPSR_EL2 to simulate exception context to which to return
-   * spsr_el2 = 0x3c4
+   * spsr_el2 = 0x3c5
    * SPSR_EL2.M = EL1 (0b0100) - exception came from EL1
    * SPSR_EL2.F = 1 - FIQ interrupts will be masked upon returning to EL1
    * SPSR_EL2.I = 1 - IRQ interrupts will be masked upon returning to EL1
    * SPSR_EL2.A = 1 - SError interrupts will be masked upon returning to EL1
    * SPSR_EL2.D = 1 - Debug interrupts will be masked upon returning to EL1
    */
-  mov   x0, #0x3c4
+  mov   x0, #0x3c5
   msr   spsr_el2, x0
 
 debug_wait:
@@ -106,6 +112,10 @@ debug_wait:
   /*
    * Set ELR_EL2 to point to __start_el1 from where it proceeds execution
    */
+  adr   x0, __stack_el0
+  msr   sp_el0, x0
+  adr   x0, __stack_el1
+  msr   sp_el1, x0
   adr   x0, __start_el1
   msr   elr_el2, x0
   eret
@@ -115,6 +125,6 @@ debug_wait:
   b 1b
 
 __start_el1:
-  adr   x0, __stack_el1
-  mov sp, x0
+  mrs   x1, currentel
+  lsr   x1, x1, #2
   bl main

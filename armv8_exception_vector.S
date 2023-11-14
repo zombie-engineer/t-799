@@ -217,7 +217,8 @@ tmp_2_reg .req w5
 
 .macro __exception_vec_group suffix
 __exception_handler sync \suffix
-__exception_handler_irq \suffix
+.align 7
+b __exception_handler_irq_\()\suffix
 __exception_handler fiq \suffix
 __exception_handler serror \suffix
 .endm
@@ -254,3 +255,12 @@ __exception_vec_group curr_sp0_el2
 __exception_vec_group curr_spx_el2
 __exception_vec_group lower_aarch64_el2
 __exception_vec_group lower_aarch32_el2
+
+__exception_handler_irq curr_sp0
+__exception_handler_irq curr_spx
+__exception_handler_irq lower_aarch64
+__exception_handler_irq lower_aarch32
+__exception_handler_irq curr_sp0_el2
+__exception_handler_irq curr_spx_el2
+__exception_handler_irq lower_aarch64_el2
+__exception_handler_irq lower_aarch32_el2
