@@ -100,9 +100,19 @@ __armv8_store_cpu_context:
    * [ELR_EL1]
    * [SPSR_EL1]
    */
-  mrs   x1, sp_el0
-  mrs   x2, elr_el1
   mrs   x3, spsr_el1
+  ands  x4, x3, #0xf
+  beq sp_is_sp0
+  /* PSTATE.SP */
+  ands  x5, x3, #1
+  bne sp_is_sp1
+sp_is_sp0:
+  mrs   x1, sp_el0
+  b store_ctx_last
+sp_is_sp1:
+  add x1, sp, #16
+store_ctx_last:
+  mrs   x2, elr_el1
   stp   x1, x2, [x0], #16
   str   x3, [x0]
 
@@ -116,12 +126,27 @@ __armv8_store_cpu_context:
 .globl __armv8_cpuctx_eret
 __armv8_cpuctx_eret:
   GET_CURRENT_CTX x30
-  /* restore elr and sp0 first */
-  ldp   x0 , x1 , [x30, #(31 << 3)]
-  msr   sp_el0, x0
-  msr   elr_el1, x1
   /* restore spsr */
-  ldr   x0 , [x30, #(33 << 3)]
+saved_pstate .req x0
+saved_sp     .req x1
+  ldr saved_pstate , [x30, #(33 << 3)]
+  msr spsr_el1, saved_pstate
+  ands x1, saved_pstate, #1
+  beq __restore_sp_to_el0
+__restore_sp_to_el0:
+  msr   sp_el0, saved_sp
+  b __restore_continue
+__restore_sp_to_el1:
+.unreq saved_pstate
+
+  /* restore elr and sp0 first */
+__restore_continue:
+  saved_lr .req x1
+  ldp   saved_sp , saved_lr, [x30, #(31 << 3)]
+  msr   elr_el1, saved_lr
+.unreq saved_sp
+.unreq saved_lr
+
   LOAD_REGS_X0_X30 x30
   eret
 

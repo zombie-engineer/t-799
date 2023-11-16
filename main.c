@@ -7,6 +7,8 @@
 #include <mbox.h>
 #include <mbox_props.h>
 #include <irq.h>
+#include <sched.h>
+#include <task.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -87,51 +89,43 @@ void print_mbox_props(void)
 }
 
 
-#define GPIO_IDX_NATIVE_DEBUG_LED 29
-
-static void debug_led_init(void)
-{
-	gpio_set_pin_function(GPIO_IDX_NATIVE_DEBUG_LED, GPIO_FUNCTION_OUTPUT);
-	gpio_set_pin_output(GPIO_IDX_NATIVE_DEBUG_LED, 1);
-}
-
-static void debug_led_toggle(void)
-{
-	gpio_toggle_pin_output(GPIO_IDX_NATIVE_DEBUG_LED);
-}
-
-
-volatile int global_timer = 0;
-volatile int global_timer2 = 0;
-
-static void timer_callback_irq(void *arg)
-{
-	bcm2835_systimer_clear_irq(1);
-	global_timer++;
-	debug_led_toggle();
-	bcm2835_systimer_start_oneshot(1000000, timer_callback_irq, NULL);
-}
-
-void main(void)
+static void kernel_init(void)
 {
 	uart_pl011_init(115200);
 	clear_reboot_request();
 	print_mbox_props();
 	irq_init();
 	bcm2835_systimer_init();
-	debug_led_init();
-	global_timer = 0;
-	global_timer2 = 0;
 	irq_disable();
-	bcm2835_systimer_start_oneshot(600000, timer_callback_irq, NULL);
+	scheduler_init();
+}
 
+static void kernel_start_task(void)
+{
+	while(1) {
+		asm volatile("svc 1");
+	}
+}
+
+static void kernel_run(void)
+{
+	struct task *t;
+	t = task_create(kernel_start_task);
+	scheduler_start_task(t);
+	panic();
+#if 0
 	while(1) {
 		global_timer2++;
 		if (global_timer2 == 1000)
 			irq_enable();
 	}
-	asm volatile("svc 1");
 	sprintf((char *)buf1, "test_sprintf '44'->%d", 44);
 	uart_pl011_send((const void *)buf1, 0);
-	panic();
+#endif
+}
+
+void main(void)
+{
+	kernel_init();
+	kernel_run();
 }

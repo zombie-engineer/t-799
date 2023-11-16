@@ -21,7 +21,7 @@ OBJS := \
   armv8 \
   bcm2835_systimer \
   bcm2835_ic \
-  sched \
+  debug_led \
   delay \
   irq \
   mbox/mbox_routines \
@@ -31,6 +31,9 @@ OBJS := \
   start \
   sprintf \
   stringlib \
+  sched \
+  scheduler_start \
+  task \
   main \
   uart_pl011 \
   gpio \

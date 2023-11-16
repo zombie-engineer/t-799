@@ -125,6 +125,13 @@ debug_wait:
   b 1b
 
 __start_el1:
+  mov   x0, #0x3c5
+  msr   spsr_el1, x0
+  adr   x0, __start_el0
+  msr   elr_el1, x0
+  eret
+
+__start_el0:
   mrs   x1, currentel
   lsr   x1, x1, #2
   bl main
