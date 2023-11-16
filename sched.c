@@ -5,19 +5,15 @@
 #include <stdint.h>
 #include <common.h>
 #include <bcm2835/bcm2835_systimer.h>
+#include "armv8_cpuctx.h"
+
+extern struct armv8_cpuctx *__current_cpuctx;
+extern struct armv8_cpuctx __cpuctx_stub;
 
 #define SCHED_TIME_SLICE_MS 60000
 
 volatile int global_timer = 0;
 volatile int global_timer2 = 0;
-
-static void sched_timer_irq_cb(void *arg)
-{
-	bcm2835_systimer_clear_irq(1);
-	global_timer++;
-	debug_led_toggle();
-	bcm2835_systimer_start_oneshot(1000000, sched_timer_irq_cb, NULL);
-}
 
 static void sched_idle_task_fn(void)
 {
@@ -88,10 +84,11 @@ static void scheduler_select_next(void)
     list_del(h);
     t = container_of(h, struct task, scheduler_list);
     sched.current = t;
-    return;
   }
+  else
+    sched.current = sched.idle_task;
 
-  sched.current = sched.idle_task;
+  __current_cpuctx = (void *)&t->cpuctx;
 }
 
 static void scheduler_do_job(void)
@@ -100,12 +97,23 @@ static void scheduler_do_job(void)
   scheduler_select_next();
 }
 
-void scheduler_start(void)
+static void sched_timer_irq_cb(void *arg)
+{
+	global_timer++;
+	debug_led_toggle();
+	scheduler_do_job();
+	bcm2835_systimer_start_oneshot(1000000, sched_timer_irq_cb, NULL);
+}
+
+void NORETURN scheduler_start(void)
 {
 	irq_disable();
+	scheduler_select_next();
+	__current_cpuctx = &__cpuctx_stub;
 	bcm2835_systimer_start_oneshot(SCHED_TIME_SLICE_MS, sched_timer_irq_cb, NULL);
-	extern void __scheduler_start_asm();
-	__scheduler_start_asm();
+	irq_enable();
+	while(1)
+		asm volatile("wfe");
 }
 
 void scheduler_init(void)

@@ -97,6 +97,7 @@ static void kernel_init(void)
 	irq_init();
 	bcm2835_systimer_init();
 	irq_disable();
+	mem_allocator_init();
 	scheduler_init();
 }
 
@@ -112,6 +113,7 @@ static void kernel_run(void)
 	struct task *t;
 	t = task_create(kernel_start_task);
 	scheduler_start_task(t);
+	scheduler_start();
 	panic();
 #if 0
 	while(1) {

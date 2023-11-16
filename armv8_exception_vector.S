@@ -116,13 +116,13 @@ get_irqnr_and_base_end_\@:
 .globl __exception_handler_\()\exception_type\()_\()\suffix
 __exception_handler_\()\exception_type\()_\()\suffix:
   /*
-   * Below code before call to __armv8_store_cpu_context solves the problem
-   * that __armv8_store_cpu_context can not be called with BL, because this
+   * Below code before call to __armv8_cpuctx_save solves the problem
+   * that __armv8_cpuctx_save can not be called with BL, because this
    * will change value of x30 (link-register). And the problem is that
-   * __armv8_store_cpu_context will not know what should be done after
+   * __armv8_cpuctx_save will not know what should be done after
    * it will finish storing context.
    * Solution is to pass address of next instruction on stack =). Then
-   * __armv8_store_cpu_context will first do its job, then it will recover
+   * __armv8_cpuctx_save will first do its job, then it will recover
    * address of next instruction from stack and branch there.
    * In order to do that we need one scratch register, so we are temp storing
    * original value of x0 on stack also and recover it as soon as next
@@ -135,7 +135,7 @@ __exception_handler_\()\exception_type\()_\()\suffix:
    * 1:  LINK_REG  : sp-8
    * SP: XXXXXXXX
    *
-   * This should be before call to __armv8_store_cpu_context
+   * This should be before call to __armv8_cpuctx_save
    * 1:  SCRATCHR  : sp-8
    * SP: LINK_REG  : sp
    * --: XXXXXXXX
@@ -149,7 +149,7 @@ __exception_handler_\()\exception_type\()_\()\suffix:
   adr   x0, 1f
   str   x0, [sp]
   ldr   x0, [sp, #8]
-  b __armv8_store_cpu_context
+  b __armv8_cpuctx_save
 1:
   add   sp, sp, #16
   bl armv8_handle_exception_\()\exception_type
@@ -165,7 +165,7 @@ __exception_handler_irq_\()\suffix:
   adr   x0, 1f
   str   x0, [sp]
   ldr   x0, [sp, #8]
-  b __armv8_store_cpu_context
+  b __armv8_cpuctx_save
 1:
   add   sp, sp, #16
 

@@ -14,3 +14,4 @@ struct task {
 };
 
 struct task *task_create(task_fn fn);
+void mem_allocator_init(void);
