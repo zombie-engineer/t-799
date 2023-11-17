@@ -98,7 +98,7 @@ zero_reg .req x4
   ZERO_REGS_X0_X29 zero_reg, cpuctx
 .unreq zero_reg
 task_pstate .req x4
-  mov task_pstate, #0
+  mov task_pstate, #0x3c5
   stp task_lr, task_sp, [cpuctx], #16
   stp task_pc, task_pstate, [cpuctx], #16
 .unreq task_pstate
@@ -188,10 +188,10 @@ task_pstate .req x0
 task_sp     .req x1
 task_pc     .req x2
 
-  GET_CURRENT_CTX ctx_ptr
+  GET_CURRENT_CTX x30
   /* restore spsr */
-  ldp task_sp, task_pc, [ctx_ptr, #(31 * 8)]
-  ldr task_pstate,      [ctx_ptr, #(33 * 8)]
+  ldp task_sp, task_pc, [x30, #(31 * 8)]
+  ldr task_pstate,      [x30, #(33 * 8)]
   tst task_pstate, #1
   beq 1f
   mov sp, task_sp
@@ -205,7 +205,7 @@ task_pc     .req x2
 .unreq task_pstate
   msr elr_el1 , task_pc
 .unreq task_pc
-  LOAD_REGS_X0_X30 ctx_ptr
+  LOAD_REGS_X0_X30 x30
 .unreq ctx_ptr
   eret
 

@@ -103,8 +103,11 @@ static void kernel_init(void)
 
 static void kernel_start_task(void)
 {
+	irq_enable();
 	while(1) {
 		asm volatile("svc 1");
+		asm volatile("wfe");
+		asm volatile("wfe");
 	}
 }
 
