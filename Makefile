@@ -15,10 +15,11 @@ CFLAGS := -Iinclude -g -Werror
 CFLAGS += -ffreestanding
 
 OBJS := \
-  armv8_exception_vector \
-  armv8_exception_sync \
-  armv8_exception \
   armv8 \
+  armv8_cpu_context \
+  armv8_exception \
+  armv8_exception_sync \
+  armv8_exception_vector \
   bcm2835_systimer \
   bcm2835_ic \
   debug_led \
