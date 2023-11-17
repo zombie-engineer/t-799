@@ -153,7 +153,7 @@ __exception_handler_\()\exception_type\()_\()\suffix:
 1:
   add   sp, sp, #16
   bl armv8_handle_exception_\()\exception_type
-  b __armv8_cpuctx_eret
+  b __armv8_cpuctx_restore
 .endm
 
 .macro __exception_handler_irq suffix
@@ -211,7 +211,7 @@ tmp_2_reg .req w5
   bl   __handle_irq
   b    1b
 1:
-  b     __armv8_cpuctx_eret
+  b     __armv8_cpuctx_restore
 .unreq base_reg
 .endm
 

@@ -32,7 +32,6 @@ OBJS := \
   sprintf \
   stringlib \
   sched \
-  scheduler_start \
   task \
   main \
   uart_pl011 \

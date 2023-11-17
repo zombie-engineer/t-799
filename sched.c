@@ -102,7 +102,7 @@ static void sched_timer_irq_cb(void *arg)
 	global_timer++;
 	debug_led_toggle();
 	scheduler_do_job();
-	bcm2835_systimer_start_oneshot(1000000, sched_timer_irq_cb, NULL);
+	bcm2835_systimer_start_oneshot(1000, sched_timer_irq_cb, NULL);
 }
 
 void NORETURN scheduler_start(void)
