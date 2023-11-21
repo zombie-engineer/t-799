@@ -9,10 +9,34 @@ struct stack {
   uint64_t data[NUM_STACK_WORDS];
 };
 
+struct cpuctx {
+  uint64_t regs[40];
+};
+
+struct cpuctx cpuctx_array[32];
+
 static uint32_t stacks_busymask = 0;
+static uint32_t cpuctx_busymask = 0;
 
 struct stack stacks_array[32];
 struct task tasks_array[32];
+struct cpuctx cpuctx_array[32];
+
+static struct cpuctx *cpuctx_alloc(void)
+{
+  int i;
+  uint32_t bitmap = cpuctx_busymask;
+
+  for (i = 0; i < ARRAY_SIZE(cpuctx_array); ++i) {
+    if (!(bitmap & 1)) {
+      cpuctx_busymask |= (1<<i);
+      return &cpuctx_array[i];
+    }
+    bitmap >>= 1;
+  }
+
+  return NULL;
+}
 
 static struct stack *stack_alloc(void)
 {
@@ -34,6 +58,12 @@ static void stack_release(struct stack *s)
 {
   int stack_idx = s - &stacks_array[0];
   stacks_busymask &= ~(1<<stack_idx);
+}
+
+static void cpuctx_release(struct cpuctx *ctx)
+{
+  int cpuctx_idx = ctx - &cpuctx_array[0];
+  cpuctx_busymask &= ~(1<<cpuctx_idx);
 }
 
 static struct task *task_alloc(void)
@@ -65,9 +95,10 @@ void task_init_cpuctx(struct task *t, task_fn fn, uint64_t stack_base)
     (uint64_t)task_return_to_nowhere);
 }
 
-struct task *task_create(task_fn fn)
+struct task *task_create(task_fn fn, const char *task_name)
 {
   struct stack *s;
+  struct cpuctx *ctx;
   struct task *t;
   uint64_t stack_base;
 
@@ -80,14 +111,26 @@ struct task *task_create(task_fn fn)
   if (!s)
     return NULL;
 
-  t = task_alloc();
-  if (!t) {
+  ctx = cpuctx_alloc();
+  if (!ctx)
+  {
     stack_release(s);
     return NULL;
   }
 
+  t = task_alloc();
+  if (!t) {
+    stack_release(s);
+    cpuctx_release(ctx);
+    return NULL;
+  }
+
   stack_base = (uint64_t)&s->data[NUM_STACK_WORDS - 1];
+  t->scheduler_request = 0;
+  t->cpuctx = ctx;
   task_init_cpuctx(t, fn, stack_base);
+  memset(t->name, 0, sizeof(t->name));
+  strncpy(t->name, task_name, sizeof(t->name));
   return t;
 }
 
@@ -95,4 +138,5 @@ void mem_allocator_init(void)
 {
   tasks_busymask = 0;
   stacks_busymask = 0;
+  cpuctx_busymask = 0;
 }

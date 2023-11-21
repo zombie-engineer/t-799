@@ -2,6 +2,7 @@
 #include <cpu.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include <common.h>
+#include <debug_led.h>
 #include "uart_pl011.h"
 #include <stringlib.h>
 #include <mbox.h>
@@ -9,6 +10,7 @@
 #include <irq.h>
 #include <sched.h>
 #include <task.h>
+#include <os_api.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -99,34 +101,34 @@ static void kernel_init(void)
 	irq_disable();
 	mem_allocator_init();
 	scheduler_init();
+	debug_led_init();
 }
 
-static void kernel_start_task(void)
+static void kernel_start_task1(void)
 {
-	irq_enable();
 	while(1) {
+		os_wait_ms(3000);
 		asm volatile("svc 1");
-		asm volatile("wfe");
-		asm volatile("wfe");
+	}
+}
+
+static void kernel_start_task2(void)
+{
+	while(1) {
+		os_wait_ms(1000);
+		asm volatile("svc 1");
 	}
 }
 
 static void kernel_run(void)
 {
 	struct task *t;
-	t = task_create(kernel_start_task);
+	t = task_create(kernel_start_task1, "t1");
+	scheduler_start_task(t);
+	t = task_create(kernel_start_task2, "t2");
 	scheduler_start_task(t);
 	scheduler_start();
 	panic();
-#if 0
-	while(1) {
-		global_timer2++;
-		if (global_timer2 == 1000)
-			irq_enable();
-	}
-	sprintf((char *)buf1, "test_sprintf '44'->%d", 44);
-	uart_pl011_send((const void *)buf1, 0);
-#endif
 }
 
 void main(void)

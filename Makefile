@@ -28,6 +28,7 @@ OBJS := \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \
+  os_api \
   panic \
   start \
   sprintf \

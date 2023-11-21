@@ -127,3 +127,7 @@ void bcm2835_systimer_init(void)
   irq_set(BCM2835_IRQNR_SYSTIMER_1, bcm2835_systimer_irq_handler);
   bcm2835_ic_enable_irq(BCM2835_IRQNR_SYSTIMER_1);
 }
+
+void bcm2835_systimer_get(void)
+{
+}

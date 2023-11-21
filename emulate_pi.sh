@@ -10,6 +10,7 @@ fi
 
 echo $RUNCMD
 $RUNCMD -kernel kernel8.bin\
+	-trace "bcm2835_*" \
 	-machine raspi3b \
 	-nographic \
 	-serial stdio \

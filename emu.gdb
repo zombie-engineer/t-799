@@ -4,5 +4,5 @@ displ/8i $pc
 b debug_wait
 c
 p $pc += 4
-b __exception_handler_sync_curr_sp0
-b *0x85880
+hb __exception_handler_sync_curr_sp0
+hb __exception_handler_sync_curr_spx

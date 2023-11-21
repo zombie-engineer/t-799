@@ -1,6 +1,7 @@
 #include <compiler.h>
 #include <stdint.h>
 #include <common.h>
+#include <os_api.h>
 
 /*
  * Incomplete list of ARMv8 exception class types encoded into ELx_ECR register.
@@ -43,7 +44,7 @@
 #define ARMV8_EXCEPTION_CLASS_BRK_AARCH64			 0b111100
 
 #define SYNC_HANDLER(__suffix) \
-static void armv8_handle_exception_sync_ ##__suffix(void)
+static void armv8_handle_exception_sync_ ##__suffix(uint32_t iss)
 
 SYNC_HANDLER(unknown)
 {
@@ -91,6 +92,7 @@ SYNC_HANDLER(svc_aarch32)
 
 SYNC_HANDLER(svc_aarch64)
 {
+  svc_handler(iss);
 }
 
 SYNC_HANDLER(trap_msr_mrs)
@@ -189,7 +191,7 @@ SYNC_HANDLER(brk_aarch64)
 	[ARMV8_EXCEPTION_CLASS_##__exception_class] = \
 		armv8_handle_exception_sync_ ## __handler_name
 
-typedef void (*armv8_exception_handler_sync_fn)(void);
+typedef void (*armv8_exception_handler_sync_fn)(uint32_t iss);
 
 static armv8_exception_handler_sync_fn armv8_exception_sync_handlers[] = {
 	ITEM(UNKNOWN, unknown),
@@ -230,13 +232,17 @@ static armv8_exception_handler_sync_fn armv8_exception_sync_handlers[] = {
 };
 
 #define ESR_GET_SYNC_EXCEPTION_CLASS(__value) \
-	(__value >> 26) & 0x7f
+	((__value >> 26) & 0x7f)
+
+#define ESR_GET_SYNC_ISS(__value) \
+	(__value & ((1<<25) - 1))
 
 void armv8_exception_handler_sync(uint64_t esr)
 {
 	armv8_exception_handler_sync_fn sync_cb;
 
 	int exception_class = ESR_GET_SYNC_EXCEPTION_CLASS(esr);
+	int iss = ESR_GET_SYNC_ISS(esr);
 
 	if (exception_class >= ARRAY_SIZE(armv8_exception_sync_handlers))
 		panic();
@@ -245,5 +251,5 @@ void armv8_exception_handler_sync(uint64_t esr)
 	if (!sync_cb)
 		panic();
 
-	sync_cb();
+	sync_cb(iss);
 }

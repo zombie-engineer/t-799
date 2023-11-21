@@ -61,6 +61,7 @@
 
 .section .text
 .globl __cpuctx_stub
+.align 4
 __cpuctx_stub:
 .rept 256
 .long 0
@@ -68,7 +69,7 @@ __cpuctx_stub:
 
 .globl __current_cpuctx
 __current_cpuctx:
-.long __cpuctx_stub
+.quad __cpuctx_stub
 
 /*
  * Called from C, initializes cpu context, arguments:
@@ -98,7 +99,12 @@ zero_reg .req x4
   ZERO_REGS_X0_X29 zero_reg, cpuctx
 .unreq zero_reg
 task_pstate .req x4
-  mov task_pstate, #0x3c5
+# SPSR_EL1:
+# M[3:0] = 5 EL1h, exception return to EL1, SP is from EL1
+# BIT 5:4  = 0
+# BIT 9:6 / DAIF = 0 - all exceptions are unmasked (enabled)
+
+  mov task_pstate, #(0x000 | 5)
   stp task_lr, task_sp, [cpuctx], #16
   stp task_pc, task_pstate, [cpuctx], #16
 .unreq task_pstate
