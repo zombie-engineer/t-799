@@ -11,6 +11,7 @@
 #include <sched.h>
 #include <task.h>
 #include <os_api.h>
+#include <mmu.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -18,6 +19,7 @@ volatile char buf2[1024];
 #define PRINTF_BUF_SIZE 1024
 
 char printfbuf[PRINTF_BUF_SIZE];
+volatile int myvar = 10;
 
 const char * _printf(const char* fmt, ...)
 {
@@ -102,6 +104,7 @@ static void kernel_init(void)
 	mem_allocator_init();
 	scheduler_init();
 	debug_led_init();
+	mmu_init();
 }
 
 static void kernel_start_task1(void)
@@ -123,6 +126,8 @@ static void kernel_start_task2(void)
 static void kernel_run(void)
 {
 	struct task *t;
+
+	printf("Hello %d\n", myvar);
 	t = task_create(kernel_start_task1, "t1");
 	scheduler_start_task(t);
 	t = task_create(kernel_start_task2, "t2");

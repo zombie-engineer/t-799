@@ -223,7 +223,7 @@ __exception_handler fiq \suffix
 __exception_handler serror \suffix
 .endm
 
-.section exception_vector, "ax"
+.section .exception_vector, "ax"
 .align 11
 .globl __exception_vector_table_el1
 __exception_vector_table_el1:
@@ -247,7 +247,7 @@ __exception_vec_group lower_aarch64
  */
 __exception_vec_group lower_aarch32
 
-.section exception_vector, "ax"
+.section .exception_vector, "ax"
 .align 11
 .globl __exception_vector_table_el2
 __exception_vector_table_el2:

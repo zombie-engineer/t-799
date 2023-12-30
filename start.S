@@ -18,8 +18,15 @@ __stack_el2:
 .long 0x00112233
 .endr
 
+#.section .stacks_no_mmu, "a"
+#.globl stack_no_mmu
+#stack_no_mmu:
+#.rept 256
+#.quad 0x1122334455667788
+#.endr
 
-.section .text.startup
+
+.section .init.nommu
 .globl _start
 _start:
   mrs x0, mpidr_el1
@@ -110,13 +117,12 @@ debug_wait:
   1: b 1b
 
   /*
-   * Set ELR_EL2 to point to __start_el1 from where it proceeds execution
+   * Set ELR_EL2 to point to __start_el1_nommu from where it proceeds execution
    */
-  adr   x0, __stack_el0
-  msr   sp_el0, x0
-  adr   x0, __stack_el1
+#  adr   x0, __stack_el1
+  adr   x0, __stack_no_mmu_base
   msr   sp_el1, x0
-  adr   x0, __start_el1
+  adr   x0, __start_el1_nommu
   msr   elr_el2, x0
   eret
 1:
@@ -124,14 +130,29 @@ debug_wait:
   wfe
   b 1b
 
-__start_el1:
+__start_el1_nommu:
   mov   x0, #0x3c5
   msr   spsr_el1, x0
-  adr   x0, __start_el0
-  msr   elr_el1, x0
-  eret
-
-__start_el0:
+  bl mmu_init
+  ldr x0, =__start_el1_mmu
+  blr x0
+.section .start_el1_mmu
+__start_el1_mmu:
   mrs   x1, currentel
   lsr   x1, x1, #2
+  ldr   x0, =__bss_start
+  ldr   x2, =__bss_end
   bl main
+##
+#  adr   x0, __stack_el0
+#  msr   sp_el0, x0
+#  adr   x0, __start_el0
+#  msr   elr_el1, x0
+#  eret
+#
+#__start_el0:
+#  mrs   x1, currentel
+#  lsr   x1, x1, #2
+#  ldr   x0, =__bss_start
+#  ldr   x2, =__bss_end
+#  bl main
