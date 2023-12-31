@@ -83,53 +83,54 @@
 extern char __pagetable_start;
 extern char __pagetable_end;
 
-NO_MMU void mmu_map_range(uint64_t vaddr_start, uint32_t paddr_start,
-  size_t size, uint64_t *page_table_base, uint64_t *page_table_end)
+struct mmu_info {
+  uint64_t *pagetable_start;
+  uint64_t *pagetable_end;
+
+  /* Max input address */
+  uint32_t virtual_mem_size;
+  int num_pages;
+  int num_l0_ptes;
+  int num_l1_ptes;
+  int num_l2_ptes;
+  int num_l3_ptes;
+
+  int num_l0_pages;
+  int num_l1_pages;
+  int num_l2_pages;
+  int num_l3_pages;
+
+  uint64_t *l0_pte_base;
+  uint64_t *l1_pte_base;
+  uint64_t *l2_pte_base;
+  uint64_t *l3_pte_base;
+  const uint64_t *page_table_real_end;
+};
+
+NO_MMU void mmu_map_range(struct mmu_info *mmui, uint64_t vaddr_start,
+  uint32_t paddr_start, size_t size)
 {
   int i;
   uint64_t desc;
 
-  int num_pages = size / MMU_PAGE_GRANULE;
-  int num_l3_ptes = MAX(num_pages, 1);
-  int num_l2_ptes = MAX((num_l3_ptes * 8) / MMU_PAGE_GRANULE, 1);
-  int num_l1_ptes = MAX((num_l2_ptes * 8) / MMU_PAGE_GRANULE, 1);
-  int num_l0_ptes = MAX((num_l1_ptes * 8) / MMU_PAGE_GRANULE, 1);
-
-#define NUM_DESCRIPTOR_PAGES(__num_descriptors) \
-  ((__num_descriptors * 8 + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE);
-
-  int num_l0_pages = NUM_DESCRIPTOR_PAGES(num_l0_ptes);
-  int num_l1_pages = NUM_DESCRIPTOR_PAGES(num_l1_ptes);
-  int num_l2_pages = NUM_DESCRIPTOR_PAGES(num_l2_ptes);
-  int num_l3_pages = NUM_DESCRIPTOR_PAGES(num_l3_ptes);
-
-  uint64_t *l0_pte_base = page_table_base;
-  uint64_t *l1_pte_base = l0_pte_base + num_l0_pages * MMU_PAGE_GRANULE / 8;
-  uint64_t *l2_pte_base = l1_pte_base + num_l1_pages * MMU_PAGE_GRANULE / 8;
-  uint64_t *l3_pte_base = l2_pte_base + num_l2_pages * MMU_PAGE_GRANULE / 8;
-  uint64_t *page_table_real_end = l3_pte_base + num_l3_ptes;
-
-  if (page_table_real_end > page_table_end)
-    while(1);
-
-  for (i = 0; i < num_l0_ptes; ++i) {
-    desc = ((uint64_t)l1_pte_base + 512 * i) | 3;
-    l0_pte_base[i] = desc;
+  for (i = 0; i < mmui->num_l0_ptes; ++i) {
+    desc = ((uint64_t)mmui->l1_pte_base + 512 * i) | 3;
+    mmui->l0_pte_base[i] = desc;
   }
 
-  for (i = 0; i < num_l1_ptes; ++i) {
-    desc = ((uint64_t)l2_pte_base + 512 * i) | 3;
-    l1_pte_base[i] = desc;
+  for (i = 0; i < mmui->num_l1_ptes; ++i) {
+    desc = ((uint64_t)mmui->l2_pte_base + 512 * i) | 3;
+    mmui->l1_pte_base[i] = desc;
   }
 
-  for (i = 0; i < num_l2_ptes; ++i) {
-    desc = ((uint64_t)l3_pte_base + 512 * i) | 3;
-    l2_pte_base[i] = desc;
+  for (i = 0; i < mmui->num_l2_ptes; ++i) {
+    desc = ((uint64_t)mmui->l3_pte_base + 512 * i) | 3;
+    mmui->l2_pte_base[i] = desc;
   }
 
-  for (i = 0; i < num_l3_ptes; ++i) {
-    desc = (paddr_start + i * 4096) | 3 | (1<<10);
-    l3_pte_base[i] = desc;
+  for (i = 0; i < mmui->num_l3_ptes; ++i) {
+    desc = (paddr_start + i * 4096) | (1<<10) | 3;
+    mmui->l3_pte_base[i] = desc;
   }
 }
 
@@ -259,6 +260,65 @@ NO_MMU int mmu_get_max_va_size(void)
   return max_va_size;
 }
 
+NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size)
+{
+  int i;
+  uint64_t desc;
+
+  mmui->pagetable_start = (uint64_t *)&__pagetable_start;
+  mmui->pagetable_end = (uint64_t *)&__pagetable_end;
+  uint64_t section_size = &__pagetable_end - &__pagetable_start;
+
+  mmui->virtual_mem_size = max_mem_size;
+  mmui->num_pages = (max_mem_size + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE;
+  mmui->num_l3_ptes = MAX(mmui->num_pages, 1);
+  mmui->num_l2_ptes = MAX((mmui->num_l3_ptes * 8) / MMU_PAGE_GRANULE, 1);
+  mmui->num_l1_ptes = MAX((mmui->num_l2_ptes * 8) / MMU_PAGE_GRANULE, 1);
+  mmui->num_l0_ptes = MAX((mmui->num_l1_ptes * 8) / MMU_PAGE_GRANULE, 1);
+
+#define NUM_DESCRIPTOR_PAGES(__num_descriptors) \
+  ((__num_descriptors * 8 + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE);
+
+  mmui->num_l0_pages = NUM_DESCRIPTOR_PAGES(mmui->num_l0_ptes);
+  mmui->num_l1_pages = NUM_DESCRIPTOR_PAGES(mmui->num_l1_ptes);
+  mmui->num_l2_pages = NUM_DESCRIPTOR_PAGES(mmui->num_l2_ptes);
+  mmui->num_l3_pages = NUM_DESCRIPTOR_PAGES(mmui->num_l3_ptes);
+
+  mmui->l0_pte_base = mmui->pagetable_start;
+  mmui->l1_pte_base = mmui->l0_pte_base + mmui->num_l0_pages * MMU_PAGE_GRANULE / 8;
+  mmui->l2_pte_base = mmui->l1_pte_base + mmui->num_l1_pages * MMU_PAGE_GRANULE / 8;
+  mmui->l3_pte_base = mmui->l2_pte_base + mmui->num_l2_pages * MMU_PAGE_GRANULE / 8;
+  mmui->page_table_real_end = mmui->l3_pte_base + mmui->num_l3_ptes;
+
+  if (mmui->page_table_real_end > mmui->pagetable_end)
+    while(1);
+
+  for (i = 0; i < mmui->num_l0_ptes; ++i) {
+    desc = ((uint64_t)(mmui->l1_pte_base + 512 * i)) | 3;
+    mmui->l0_pte_base[i] = desc;
+  }
+
+  for (i = 0; i < mmui->num_l1_ptes; ++i) {
+    desc = ((uint64_t)(mmui->l2_pte_base + 512 * i)) | 3;
+    mmui->l1_pte_base[i] = desc;
+  }
+
+  for (i = 0; i < mmui->num_l2_ptes; ++i) {
+    desc = ((uint64_t)(mmui->l3_pte_base + 512 * i)) | 3;
+    mmui->l2_pte_base[i] = desc;
+  }
+
+  for (i = 0; i < 65536; ++i) {
+    desc = (i * 4096) | (1<<10) | 3;
+    mmui->l3_pte_base[i] = desc;
+  }
+
+  for (i = 258048; i < 262144; ++i) {
+    desc = (i * 4096) | (1<<10) | 3;
+    mmui->l3_pte_base[i] = desc;
+  }
+}
+
 NO_MMU void mmu_init(void)
 {
   int va_size = 48;
@@ -271,8 +331,9 @@ NO_MMU void mmu_init(void)
     : "=r"(num_paddr_bits)
   );
 
-  mmu_map_range(0xffff000000080000, 0x00000, 0x100000,
-    (uint64_t *)&__pagetable_start, (uint64_t *)&__pagetable_end);
+  struct mmu_info mmu;
+  mmu_page_table_init(&mmu, 0x40000000);
+  // mmu_map_range(&mmu, 0xffff000000080000, 0x00000, 0x100000);
 
   if (va_size > mmu_get_max_va_size())
     while(1);

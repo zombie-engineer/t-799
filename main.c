@@ -92,7 +92,6 @@ void print_mbox_props(void)
 	GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
-
 static void kernel_init(void)
 {
 	uart_pl011_init(115200);
@@ -104,7 +103,6 @@ static void kernel_init(void)
 	mem_allocator_init();
 	scheduler_init();
 	debug_led_init();
-	mmu_init();
 }
 
 static void kernel_start_task1(void)
