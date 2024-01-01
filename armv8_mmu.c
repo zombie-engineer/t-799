@@ -3,6 +3,8 @@
 #include <common.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <memory_map.h>
+#include "armv8_mair.h"
 
 #define MMU_GRANULE_4K 4096
 #define MMU_GRANULE_16K (1024 * 16)
@@ -10,6 +12,9 @@
 
 #define MMU_PAGE_GRANULE MMU_GRANULE_4K
 #define NO_MMU __attribute__((section(".init.nommu")))
+
+#define KERNEL_RAM0_PADDR_START 0
+#define KERNEL_RAM0_PADDR_END   0x10000000
 
 /*
  * We setup 4096 bytes GRANULE.
@@ -105,34 +110,10 @@ struct mmu_info {
   uint64_t *l2_pte_base;
   uint64_t *l3_pte_base;
   const uint64_t *page_table_real_end;
+
+  int memattr_idx_normal;
+  int memattr_idx_device;
 };
-
-NO_MMU void mmu_map_range(struct mmu_info *mmui, uint64_t vaddr_start,
-  uint32_t paddr_start, size_t size)
-{
-  int i;
-  uint64_t desc;
-
-  for (i = 0; i < mmui->num_l0_ptes; ++i) {
-    desc = ((uint64_t)mmui->l1_pte_base + 512 * i) | 3;
-    mmui->l0_pte_base[i] = desc;
-  }
-
-  for (i = 0; i < mmui->num_l1_ptes; ++i) {
-    desc = ((uint64_t)mmui->l2_pte_base + 512 * i) | 3;
-    mmui->l1_pte_base[i] = desc;
-  }
-
-  for (i = 0; i < mmui->num_l2_ptes; ++i) {
-    desc = ((uint64_t)mmui->l3_pte_base + 512 * i) | 3;
-    mmui->l2_pte_base[i] = desc;
-  }
-
-  for (i = 0; i < mmui->num_l3_ptes; ++i) {
-    desc = (paddr_start + i * 4096) | (1<<10) | 3;
-    mmui->l3_pte_base[i] = desc;
-  }
-}
 
 typedef enum {
   /* 4GB */
@@ -260,14 +241,38 @@ NO_MMU int mmu_get_max_va_size(void)
   return max_va_size;
 }
 
+static inline NO_MMU uint64_t mmu_make_page_desc(uint64_t page_idx,
+  int memattr_idx)
+{
+  uint64_t lower_attributes = ((memattr_idx & 7) << 2) | (1 << 10);
+  uint64_t output_address = (page_idx << 12) & ((1ull << 48) - 1);
+  return output_address | lower_attributes | 3;
+}
+
 NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size)
 {
   int i;
   uint64_t desc;
+  uint64_t section_size;
+
+  uint64_t page_idx_periph_mem_start = PERIPHERAL_ADDR_RANGE_START
+    / MMU_PAGE_GRANULE;
+
+  uint64_t page_idx_periph_mem_end = PERIPHERAL_ADDR_RANGE_END
+    / MMU_PAGE_GRANULE;
+
+  uint64_t page_idx_ram_0_start = KERNEL_RAM0_PADDR_START
+    / MMU_PAGE_GRANULE;
+
+  uint64_t page_idx_ram_0_end = KERNEL_RAM0_PADDR_END
+    / MMU_PAGE_GRANULE;
+
+  uint64_t page_idx_ram0_start = 0;
+  uint64_t page_idx_ram0_end = 0;
 
   mmui->pagetable_start = (uint64_t *)&__pagetable_start;
   mmui->pagetable_end = (uint64_t *)&__pagetable_end;
-  uint64_t section_size = &__pagetable_end - &__pagetable_start;
+  section_size = &__pagetable_end - &__pagetable_start;
 
   mmui->virtual_mem_size = max_mem_size;
   mmui->num_pages = (max_mem_size + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE;
@@ -308,21 +313,15 @@ NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size)
     mmui->l2_pte_base[i] = desc;
   }
 
-  for (i = 0; i < 65536; ++i) {
-    desc = (i * 4096) | (1<<10) | 3;
-    mmui->l3_pte_base[i] = desc;
-  }
+  for (i = page_idx_ram_0_start; i < page_idx_ram_0_end; ++i)
+    mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_normal);
 
-  for (i = 258048; i < 262144; ++i) {
-    desc = (i * 4096) | (1<<10) | 3;
-    mmui->l3_pte_base[i] = desc;
-  }
+  for (i = page_idx_periph_mem_start; i < page_idx_periph_mem_end; ++i)
+    mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_device);
 }
 
-NO_MMU void mmu_init(void)
+NO_MMU int mmu_get_num_paddr_bits(void)
 {
-  int va_size = 48;
-
   paddr_bits_t num_paddr_bits;
 
   asm volatile(
@@ -331,9 +330,32 @@ NO_MMU void mmu_init(void)
     : "=r"(num_paddr_bits)
   );
 
+  return num_paddr_bits;
+}
+
+#define ARMV8_MAIR_DEVICE_MEM MEMATTR_DEVICE_NGNRNE
+#define ARMV8_MAIR_NORMAL_MEM ARMV8_MAIR_NORMAL(\
+  MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA),\
+  MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA))
+
+NO_MMU void mmu_init(void)
+{
+  struct armv8_mair mair = { 0 };
   struct mmu_info mmu;
+
+  int va_size = 48;
+
+  mmu.memattr_idx_normal = 0;
+  mmu.memattr_idx_device = 1;
+
+  mair.memattrs[mmu.memattr_idx_normal] = ARMV8_MAIR_NORMAL_MEM;
+  mair.memattrs[mmu.memattr_idx_device] = ARMV8_MAIR_DEVICE_MEM;
+
+  asm volatile(
+      "msr mair_el1, %0\n" :: "r"(mair.value)
+      );
+
   mmu_page_table_init(&mmu, 0x40000000);
-  // mmu_map_range(&mmu, 0xffff000000080000, 0x00000, 0x100000);
 
   if (va_size > mmu_get_max_va_size())
     while(1);
@@ -343,7 +365,7 @@ NO_MMU void mmu_init(void)
   asm volatile (
     "msr ttbr0_el1, %0\n"
     "msr ttbr1_el1, %0\n"
-    :: "r"(&__pagetable_start));
+    :: "r"(mmu.pagetable_start));
 
   asm volatile("at s1e1r, %0"::"r"(0));
 
