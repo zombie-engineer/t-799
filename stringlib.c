@@ -39,18 +39,18 @@ int strncmp(const char *s1, const char *s2, size_t n)
 	return *s1 - *s2;
 }
 
-int strlen(const char* ptr)
+size_t strlen(const char* ptr)
 {
-	int res;
+	size_t res;
 	res = 0;
 	while(*ptr++)
 		res++;
 	return res;
 }
 
-int strnlen(const char* ptr, size_t n)
+size_t strnlen(const char* ptr, size_t n)
 {
-	int res;
+	size_t res;
 	res = 0;
 	while(*ptr++ && n--)
 		res++;
