@@ -8,11 +8,14 @@ if [ -v DEBUG_QEMU ]; then
 	RUNCMD="gdb -silent -x debug_qemu.gdb --args $QEMU"
 fi
 
+TRACE_ARGS=
+# TRACE_ARGS="-trace 'bcm2835_*'"
+
 echo $RUNCMD
 $RUNCMD -kernel kernel8.bin\
-	-trace "bcm2835_*" \
 	-machine raspi3b \
 	-nographic \
+	$TRACE_ARGS \
 	-serial stdio \
 	-nodefaults \
 	-s -S
