@@ -18,7 +18,7 @@ struct cpuctx cpuctx_array[32];
 static uint32_t stacks_busymask = 0;
 static uint32_t cpuctx_busymask = 0;
 
-struct stack stacks_array[32];
+ALIGNED(16) struct stack stacks_array[32];
 struct task tasks_array[32];
 struct cpuctx cpuctx_array[32];
 
@@ -125,7 +125,7 @@ struct task *task_create(task_fn fn, const char *task_name)
     return NULL;
   }
 
-  stack_base = (uint64_t)&s->data[NUM_STACK_WORDS - 1];
+  stack_base = (uint64_t)&s->data[NUM_STACK_WORDS - 2];
   t->scheduler_request = 0;
   t->cpuctx = ctx;
   task_init_cpuctx(t, fn, stack_base);

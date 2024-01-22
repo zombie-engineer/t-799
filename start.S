@@ -5,7 +5,7 @@ __stack_el0:
 .rept 512
 .long 0x13131313
 .endr
-.align 4
+.align 16
 .globl __stack_el1
 __stack_el1:
 .rept 512
