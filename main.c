@@ -96,7 +96,7 @@ static void kernel_start_task1(void)
 {
 	while(1) {
 		os_wait_ms(3000);
-		asm volatile("svc 1");
+		os_yield();
 	}
 }
 
@@ -104,7 +104,7 @@ static void kernel_start_task2(void)
 {
 	while(1) {
 		os_wait_ms(1000);
-		asm volatile("svc 1");
+		os_yield();
 	}
 }
 

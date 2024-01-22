@@ -181,3 +181,8 @@ void scheduler_init(void)
 	sched.idle_task = task_create(sched_idle_task_fn, "idle");
 	BUG_IF(!sched.idle_task);
 }
+
+void scheduler_yield(void)
+{
+	__schedule();
+}
