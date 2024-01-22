@@ -31,6 +31,7 @@ OBJS := \
   mbox/mbox_props \
   os_api \
   panic \
+  printf \
   start \
   sprintf \
   stringlib \

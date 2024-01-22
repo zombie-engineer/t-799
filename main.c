@@ -12,25 +12,12 @@
 #include <task.h>
 #include <os_api.h>
 #include <mmu.h>
+#include <printf.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
 
-#define PRINTF_BUF_SIZE 1024
-
-char printfbuf[PRINTF_BUF_SIZE];
 volatile int myvar = 10;
-
-const char * _printf(const char* fmt, ...)
-{
-	const char *res = fmt;
-	__builtin_va_list args;
-	__builtin_va_start(args, fmt);
-	vsnprintf(printfbuf, sizeof(printfbuf), fmt, &args);
-	uart_pl011_send(printfbuf, 0);
-	return res;
-}
-#define printf _printf
 
 void fiq_handler(void)
 {
