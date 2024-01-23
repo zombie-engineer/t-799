@@ -5,6 +5,9 @@
 #include <common.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include "armv8_cpuctx.h"
+#if 0
+#include <printf.h>
+#endif
 
 #define SCHED_MS_PER_TICK 100
 #define MS_TO_US(__ms) (__ms * 1000)
@@ -85,6 +88,10 @@ static inline void scheduler_insert_to_blocked_on_timer(struct task *t)
   t->scheduler_list.prev->next = &t->scheduler_list;
   t->scheduler_list.next = node;
   node->prev = &t->scheduler_list;
+#if 0
+  list_for_each_entry(t, head, scheduler_list)
+    printf("timer_list: %p, %s, %ld\n", t, t->name, t->next_wakeup_time);
+#endif
 }
 
 static inline void scheduler_drop_current(void)
