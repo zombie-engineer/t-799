@@ -1,6 +1,7 @@
 #pragma once
 #include <list.h>
 #include <stdint.h>
+#include <event.h>
 
 typedef void (*task_fn)(void);
 
@@ -15,6 +16,7 @@ struct task {
   void *cpuctx;
   uint64_t next_wakeup_time;
   uint8_t scheduler_request;
+  struct event *wait_event;
 };
 
 struct task *task_create(task_fn fn, const char *task_name);

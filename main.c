@@ -95,22 +95,28 @@ static void kernel_init(void)
 
 atomic_t test_atomic;
 
+struct event test_ev;
+
 static void kernel_start_task1(void)
 {
 	while(1) {
-		os_wait_ms(3000);
+		os_wait_ms(1000);
 		os_yield();
 		atomic_cmp_and_swap(&test_atomic, 0, 1);
+		printf("waiting \n");
+		os_event_clear(&test_ev);
+		os_event_wait(&test_ev);
+		printf("wait complete\n");
 	}
 }
 
 static void kernel_start_task2(void)
 {
 	while(1) {
-		os_wait_ms(1000);
-		printf("hello %lld\n", test_atomic);
+		os_wait_ms(5000);
 		atomic_cmp_and_swap(&test_atomic, 1, 0);
 		os_yield();
+		os_event_notify(&test_ev);
 	}
 }
 

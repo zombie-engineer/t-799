@@ -37,3 +37,17 @@ static inline void irq_disable(void)
 {
   asm volatile ("msr daifset, #(1 << 1)");
 }
+
+#define disable_irq_save_flags(__flags)\
+  asm volatile(\
+      "mrs %0, daif\n"\
+      "msr daifset, #2\n"\
+      : "=r"(__flags)\
+      :\
+      : "memory")
+
+#define restore_irq_flags(__flags)\
+  asm volatile("msr daif, %0\n"\
+      :\
+      : "r"(__flags)\
+      : "memory")

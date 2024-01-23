@@ -6,6 +6,7 @@
 
 #define SVC_WAIT 0
 #define SVC_YIELD 1
+#define SVC_WAIT_EVENT 2
 
 void os_wait_ms(uint32_t ms)
 {
@@ -18,15 +19,31 @@ void os_yield(void)
   asm inline volatile("svc %0" :: "i"(SVC_YIELD));
 }
 
-static inline void os_api_handle_svc_wait(uint64_t arg)
+void os_event_init(struct event *ev)
 {
-  scheduler_delay_current_ms(arg);
+  ev->ev = 0;
 }
 
-static inline void os_api_handle_svc_yield(void)
+void os_event_clear(struct event *ev)
 {
-  scheduler_yield();
+  ev->ev = 0;
 }
+
+void os_event_wait(struct event *ev)
+{
+  struct task *t = sched_get_current_task();
+  if (ev->ev == 1)
+    return;
+
+  asm inline volatile("mov x0, %0\r\nsvc %1"
+    :: "r"(ev), "i"(SVC_WAIT_EVENT));
+}
+
+void os_event_notify(struct event *ev)
+{
+  sched_event_notify(ev);
+}
+
 
 void svc_handler(uint32_t imm)
 {
@@ -39,10 +56,13 @@ void svc_handler(uint32_t imm)
   switch(imm)
   {
   case SVC_WAIT:
-    os_api_handle_svc_wait(arg0);
+    scheduler_delay_current_ms_isr(arg0);
     break;
   case SVC_YIELD:
-    os_api_handle_svc_yield();
+    scheduler_yield_isr();
+    break;
+  case SVC_WAIT_EVENT:
+    sched_event_wait_isr((struct event *)arg0);
     break;
   default:
     panic();

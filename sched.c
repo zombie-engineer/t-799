@@ -31,6 +31,7 @@ struct scheduler {
 	int timer_interval_ms;
 	struct task *idle_task;
 	uint64_t ticks;
+	bool has_pending_event;
 };
 
 static struct scheduler sched;
@@ -118,6 +119,18 @@ static void scheduler_select_next(void)
 	struct task *t;
 	struct list_head *h;
 
+	if (sched.has_pending_event) {
+			/* having has_pending_event and no pending events is valid */
+			sched.has_pending_event = false;
+			if (!list_empty(&sched.blocked_on_event)) {
+				h = sched.blocked_on_event.next;
+				list_del(h);
+				t = container_of(h, struct task, scheduler_list);
+				sched.current = t;
+				goto done;
+		}
+	}
+
 	if (!list_empty(&sched.blocked_on_timer)) {
 		h = sched.blocked_on_timer.next;
 		t = container_of(h, struct task, scheduler_list);
@@ -168,12 +181,30 @@ void NORETURN scheduler_start(void)
 		asm volatile("wfe");
 }
 
-void scheduler_delay_current_ms(uint64_t ms)
+void scheduler_delay_current_ms_isr(uint64_t ms)
 {
 	struct task *t = sched.current;
 	t->scheduler_request = TASK_SCHED_RQ_BLOCK_ON_TIMER;
 	t->next_wakeup_time = sched.ticks + MS_TO_TICKS(ms);
 	__schedule();
+}
+
+void sched_event_wait_isr(struct event *ev)
+{
+	struct task *t = sched.current;
+	t->scheduler_request = TASK_SCHED_RQ_BLOCK_ON_EVENT;
+	t->wait_event = ev;
+	__schedule();
+}
+
+void sched_event_notify(struct event *ev)
+{
+  int irqflags;
+
+  disable_irq_save_flags(irqflags);
+  ev->ev = 1;
+  sched.has_pending_event = true;
+  restore_irq_flags(irqflags);
 }
 
 void scheduler_init(void)
@@ -189,7 +220,7 @@ void scheduler_init(void)
 	BUG_IF(!sched.idle_task);
 }
 
-void scheduler_yield(void)
+void scheduler_yield_isr(void)
 {
 	__schedule();
 }
