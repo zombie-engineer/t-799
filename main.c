@@ -13,6 +13,7 @@
 #include <os_api.h>
 #include <mmu.h>
 #include <printf.h>
+#include <atomic.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -92,11 +93,14 @@ static void kernel_init(void)
 	debug_led_init();
 }
 
+atomic_t test_atomic;
+
 static void kernel_start_task1(void)
 {
 	while(1) {
 		os_wait_ms(3000);
 		os_yield();
+		atomic_cmp_and_swap(&test_atomic, 0, 1);
 	}
 }
 
@@ -104,6 +108,8 @@ static void kernel_start_task2(void)
 {
 	while(1) {
 		os_wait_ms(1000);
+		printf("hello %lld\n", test_atomic);
+		atomic_cmp_and_swap(&test_atomic, 1, 0);
 		os_yield();
 	}
 }
