@@ -14,8 +14,8 @@ void reboot(void);
 void panic(void);
 void panic_with_log(const char *);
 
-#define BUG_IF(__cond) \
-  do { if ((__cond)) panic(); } while(0)
+#define BUG_IF(__cond, __msg) \
+  do { if ((__cond)) panic_with_log(__msg); } while(0)
 
 #define container_of(__var, __type, __member) \
   (__type *)(((char *)__var) - offsetof(__type, __member))

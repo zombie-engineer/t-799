@@ -217,7 +217,7 @@ void scheduler_init(void)
 
 	/* __current_cpuctx should be initilized before first call to task_create */
 	sched.idle_task = task_create(sched_idle_task_fn, "idle");
-	BUG_IF(!sched.idle_task);
+	BUG_IF(!sched.idle_task, "Faild to add idle task");
 }
 
 void scheduler_yield_isr(void)
