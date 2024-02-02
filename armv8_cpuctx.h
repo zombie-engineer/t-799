@@ -7,4 +7,4 @@ struct armv8_cpuctx {
   uint64_t sp;
   uint64_t pc;
   uint64_t pstate;
-} PAKCED;
+} PACKED;
