@@ -14,11 +14,11 @@
 #define BCM2835_IC_DISABLE_IRQ_2 (ioreg32_t)(BCM2835_IC_BASE + 0x20)
 #define BCM2835_IC_DISABLE_BASIC (ioreg32_t)(BCM2835_IC_BASE + 0x24)
 
-void bcm2835_ic_enable_irq(int irqnr)
+void bcm2835_ic_write_irq_reg(int irqnr, ioreg32_t basereg)
 {
   uint32_t regval;
 
-  ioreg32_t reg = BCM2835_IC_ENABLE_IRQ_1;
+  ioreg32_t reg = basereg;
   if (irqnr > 32) {
     irqnr %= 32;
     reg++;
@@ -27,4 +27,14 @@ void bcm2835_ic_enable_irq(int irqnr)
   regval = ioreg32_read(reg);
   regval |= 1 << irqnr;
   ioreg32_write(reg, regval);
+}
+
+void bcm2835_ic_enable_irq(int irqnr)
+{
+  bcm2835_ic_write_irq_reg(irqnr, BCM2835_IC_ENABLE_IRQ_1);
+}
+
+void bcm2835_ic_disable_irq(int irqnr)
+{
+  bcm2835_ic_write_irq_reg(irqnr, BCM2835_IC_DISABLE_IRQ_1);
 }
