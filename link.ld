@@ -87,4 +87,11 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   .stacks : {
     *.o(.stacks)
   } > VIRTUAL_MEM
+
+  . = ALIGN(4096);
+  .kernel_memory : {
+    kmalloc.o(.kernel_memory)
+  } > VIRTUAL_MEM
+  __kernel_memory_start = ADDR(.kernel_memory);
+  __kernel_memory_end = __kernel_memory_start + SIZEOF(.kernel_memory);
 }

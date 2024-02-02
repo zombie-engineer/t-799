@@ -27,6 +27,7 @@ OBJS := \
   debug_led \
   delay \
   irq \
+  kmalloc \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \

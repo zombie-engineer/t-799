@@ -1,5 +1,6 @@
 #include <gpio.h>
 #include <cpu.h>
+#include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include <common.h>
 #include <debug_led.h>
@@ -84,6 +85,7 @@ static void kernel_init(void)
 {
 	uart_pl011_init(115200);
 	clear_reboot_request();
+	kmalloc_init();
 	print_mbox_props();
 	irq_init();
 	bcm2835_systimer_init();
