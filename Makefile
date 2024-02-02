@@ -34,10 +34,11 @@ OBJS := \
   os_api \
   panic \
   printf \
-  start \
-  sprintf \
-  stringlib \
   sched \
+  semaphore \
+  sprintf \
+  start \
+  stringlib \
   task \
   main \
   uart_pl011 \
