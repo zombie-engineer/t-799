@@ -86,6 +86,7 @@ static void kernel_init(void)
 	uart_pl011_init(115200);
 	clear_reboot_request();
 	kmalloc_init();
+	dma_memory_init();
 	print_mbox_props();
 	irq_init();
 	bcm2835_systimer_init();

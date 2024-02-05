@@ -26,6 +26,7 @@ OBJS := \
   bcm2835_ic \
   debug_led \
   delay \
+  dma_memory \
   irq \
   kmalloc \
   mbox/mbox_routines \

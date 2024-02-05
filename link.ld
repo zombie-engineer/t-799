@@ -63,6 +63,7 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   .text VMA : {
     start.o(.start_el1_mmu)
     *.o(.text)
+    dma_memory.o(.text)
   } >VIRTUAL_MEM AT>RAM
 
   VMA += SIZEOF(.text);
@@ -89,9 +90,19 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   } > VIRTUAL_MEM
 
   . = ALIGN(4096);
-  .kernel_memory : {
+  .kernel_memory (NOLOAD) : {
     kmalloc.o(.kernel_memory)
   } > VIRTUAL_MEM
   __kernel_memory_start = ADDR(.kernel_memory);
   __kernel_memory_end = __kernel_memory_start + SIZEOF(.kernel_memory);
+
+  . = ALIGN(4096);
+  .dma_memory (NOLOAD) : {
+    dma_memory.o(.dma_memory)
+  } > VIRTUAL_MEM
+
+  __dma_memory_start = ADDR(.dma_memory);
+  __dma_memory_end = __dma_memory_start + SIZEOF(.dma_memory);
+  __dma_memory_start_phys = __dma_memory_start - KERNEL_ADDR_SPACE_START;
+  __dma_memory_end_phys = __dma_memory_end - KERNEL_ADDR_SPACE_START;
 }

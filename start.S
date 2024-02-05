@@ -133,6 +133,8 @@ debug_wait:
 __start_el1_nommu:
   mov   x0, #0x3c5
   msr   spsr_el1, x0
+  ldr x0, =__dma_memory_start_phys
+  ldr x1, =__dma_memory_end_phys
   bl mmu_init
   ldr x0, =__start_el1_mmu
   blr x0

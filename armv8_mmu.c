@@ -249,26 +249,21 @@ static inline NO_MMU uint64_t mmu_make_page_desc(uint64_t page_idx,
   return output_address | lower_attributes | 3;
 }
 
-NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size)
+
+static NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size,
+    uint64_t dma_mem_start, uint64_t dma_mem_end)
 {
   int i;
   uint64_t desc;
   uint64_t section_size;
 
-  uint64_t page_idx_periph_mem_start = PERIPHERAL_ADDR_RANGE_START
-    / MMU_PAGE_GRANULE;
-
-  uint64_t page_idx_periph_mem_end = PERIPHERAL_ADDR_RANGE_END
-    / MMU_PAGE_GRANULE;
-
-  uint64_t page_idx_ram_0_start = KERNEL_RAM0_PADDR_START
-    / MMU_PAGE_GRANULE;
-
-  uint64_t page_idx_ram_0_end = KERNEL_RAM0_PADDR_END
-    / MMU_PAGE_GRANULE;
-
-  uint64_t page_idx_ram0_start = 0;
-  uint64_t page_idx_ram0_end = 0;
+extern char __dma_memory_start;
+  uint64_t page_idx_ram_0_start = KERNEL_RAM0_PADDR_START / MMU_PAGE_GRANULE;
+  uint64_t page_idx_ram_0_end = dma_mem_start / MMU_PAGE_GRANULE;
+  uint64_t page_idx_dma_start = dma_mem_start / MMU_PAGE_GRANULE;
+  uint64_t page_idx_dma_end = dma_mem_start / MMU_PAGE_GRANULE;
+  uint64_t page_idx_periph_start = PERIPH_ADDR_RANGE_START / MMU_PAGE_GRANULE;
+  uint64_t page_idx_periph_end = PERIPH_ADDR_RANGE_END / MMU_PAGE_GRANULE;
 
   mmui->pagetable_start = (uint64_t *)&__pagetable_start;
   mmui->pagetable_end = (uint64_t *)&__pagetable_end;
@@ -316,7 +311,10 @@ NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size)
   for (i = page_idx_ram_0_start; i < page_idx_ram_0_end; ++i)
     mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_normal);
 
-  for (i = page_idx_periph_mem_start; i < page_idx_periph_mem_end; ++i)
+  for (i = page_idx_dma_start; i < page_idx_dma_end; ++i)
+    mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_device);
+
+  for (i = page_idx_periph_start; i < page_idx_periph_end; ++i)
     mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_device);
 }
 
@@ -338,7 +336,7 @@ NO_MMU int mmu_get_num_paddr_bits(void)
   MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA),\
   MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA))
 
-NO_MMU void mmu_init(void)
+NO_MMU void mmu_init(uint64_t dma_memory_start, uint64_t dma_memory_end)
 {
   struct armv8_mair mair = { 0 };
   struct mmu_info mmu;
@@ -355,7 +353,7 @@ NO_MMU void mmu_init(void)
       "msr mair_el1, %0\n" :: "r"(mair.value)
       );
 
-  mmu_page_table_init(&mmu, 0x40000000);
+  mmu_page_table_init(&mmu, 0x40000000, dma_memory_start, dma_memory_end);
 
   if (va_size > mmu_get_max_va_size())
     while(1);
