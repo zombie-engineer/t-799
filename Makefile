@@ -65,7 +65,7 @@ ddb:
 	$(OBJDUMP) -d start.o
 
 db: kernel8.bin
-	$(OBJDUMP) -m aarch64 -b binary -D $^
+	$(OBJDUMP) -z -m aarch64 -b binary -D $^
 
 dbe: kernel8.elf
 	$(OBJDUMP) -D $^
