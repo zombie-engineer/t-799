@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <memory_map.h>
 #include "armv8_mair.h"
+#include <stringlib.h>
+#include <printf.h>
+#include <log.h>
 
 #define MMU_GRANULE_4K 4096
 #define MMU_GRANULE_16K (1024 * 16)
@@ -372,4 +375,105 @@ NO_MMU void mmu_init(uint64_t dma_memory_start, uint64_t dma_memory_end)
     "orr x0, x0, #1\n"
     "msr sctlr_el1, x0\n"
   );
+}
+
+static inline void par_to_string(uint64_t par, char *par_desc,
+  int par_desc_len)
+{
+  char sh, memattr;
+  const char *sh_str;
+
+  if (!par_desc_len)
+    return;
+
+  *par_desc = 0;
+  sh = (par >> 7) & 3;
+  memattr = (par >> 56) & 0xff;
+  switch(sh) {
+    case 0: sh_str = "Non-Shareable"  ; break;
+    case 1: sh_str = "Reserved"       ; break;
+    case 2: sh_str = "Outer-Shareable"; break;
+    case 3: sh_str = "Inner-Shareable"; break;
+    default:sh_str = "Undefined"      ; break;
+  }
+
+  snprintf(par_desc, par_desc_len, "memattr:%02x,sh:%d(%s)", memattr, sh,
+    sh_str);
+}
+
+static inline void mair_to_string(char attr, char *attr_desc, int attr_desc_len)
+{
+  int i, n = 0;
+  if (!attr_desc_len)
+    return;
+
+  *attr_desc = 0;
+  if ((attr & 0x0c) == attr) {
+    n = snprintf(attr_desc, attr_desc_len, "Device, ");
+    switch(attr >> 2) {
+        /* read documentation of mmu_memattr.h */
+      case 0: snprintf(attr_desc + n, attr_desc_len - n, "nGnRnE"); return;
+      case 1: snprintf(attr_desc + n, attr_desc_len - n, "nGnRE");  return;
+      case 2: snprintf(attr_desc + n, attr_desc_len - n, "nGRE");   return;
+      case 3: snprintf(attr_desc + n, attr_desc_len - n, "GRE");    return;
+      default: return;
+    }
+  }
+
+  if (attr == 0xf0) {
+    snprintf(attr_desc, attr_desc_len,
+      "Tagged Normal In/Out Write-Back Non-Trans Rd/Wr-Alloc");
+    return;
+  }
+
+  if ((attr & 0xf0) && (attr & 0x0f)) {
+    const char *in_out_string[2] = {"In", "Out"};
+    n = snprintf(attr_desc, attr_desc_len, "Normal");
+    for (i = 0; i < 2; ++i) {
+      char nattr = (attr >> (4 * i)) & 0xf;
+      n += snprintf(attr_desc + n, attr_desc_len - n, ",%s", in_out_string[i]);
+      if (nattr == 0xc) {
+        n += snprintf(attr_desc + n, attr_desc_len - n, ",Non-Cacheable");
+      } else {
+        switch(nattr & 0xc) {
+          case 0x0:
+            n += snprintf(attr_desc + n, attr_desc_len - n, ",Wr-Thr Trans");
+          break;
+          case 0x4:
+            n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Back Trans");
+          break;
+          case 0x8:
+            n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Thr Non-Trans");
+          break;
+          case 0xc:
+            n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Back Non-Trans");
+          break;
+        }
+        if (nattr & 1)
+          n += snprintf(attr_desc + n, attr_desc_len - n, " WrAlloc");
+        if (nattr & 2)
+          n += snprintf(attr_desc + n, attr_desc_len - n, " RdAlloc");
+      }
+    }
+  }
+}
+
+void mmu_print_va(uint64_t addr, int verbose)
+{
+  uint64_t va = addr;
+  uint64_t par = 0xffffffff;
+  char par_desc[256];
+  char attr_desc[256];
+  char memattr;
+  asm volatile ("at s1e1r, %1\nmrs %0, PAR_EL1" : "=r"(par) : "r"(va));
+  par_to_string(par, par_desc, sizeof(par_desc));
+  printf("MMUINFO: VA:%016llx -> PAR:%016llx %s" __endline, va, par,
+    par_desc);
+
+  if (verbose) {
+    attr_desc[0] = 0;
+    memattr = (par >> 56) & 0xff;
+    mair_to_string(memattr, attr_desc, sizeof(attr_desc));
+    printf("-------: MEMATTR:%02x %s" __endline, memattr, attr_desc);
+  }
 }
