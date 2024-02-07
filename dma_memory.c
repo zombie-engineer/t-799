@@ -47,8 +47,8 @@ extern char __dma_memory_end;
 DMA_CHUNK_GROUP(6 , 64, 64);
 DMA_CHUNK_GROUP(7 , 64, 64);
 DMA_CHUNK_GROUP(9 , 64, 1024);
-DMA_CHUNK_GROUP(12, 64, 4096);
-DMA_CHUNK_GROUP(19, 64, 4096);
+DMA_CHUNK_GROUP(12, 32, 4096);
+DMA_CHUNK_GROUP(19, 32, 4096);
 
 static struct chunk_area dma_chunk_areas[] = {
   __CHUNK(6),
