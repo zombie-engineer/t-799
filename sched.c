@@ -152,7 +152,9 @@ static void scheduler_select_next(void)
 	sched.current = sched.idle_task;
 
 done:
-	__current_cpuctx = sched.current->cpuctx;
+  asm volatile (
+    "ldr x1, =__current_cpuctx\n"
+    "str %0, [x1]\n"::"r"(sched.current->cpuctx));
 }
 
 static void __schedule(void)
@@ -174,9 +176,14 @@ void NORETURN scheduler_start(void)
 {
 	irq_disable();
 	sched.current = sched.idle_task;
-	__current_cpuctx = &__cpuctx_stub;
-	bcm2835_systimer_start_oneshot(MS_TO_US(SCHED_MS_PER_TICK), sched_timer_irq_cb, NULL);
+	asm volatile (
+		"ldr x1, =__current_cpuctx\n"
+		"str %0, [x1]\n"::"r"(sched.current->cpuctx));
+
+	bcm2835_systimer_start_oneshot(MS_TO_US(SCHED_MS_PER_TICK),
+		sched_timer_irq_cb, NULL);
 	irq_enable();
+
 	while(1)
 		asm volatile("wfe");
 }

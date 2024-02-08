@@ -21,7 +21,9 @@ SECTIONS
     . += 0x2000;
   } > RAM
 
-  .init.nommu KERNEL_START : {
+  PHY_ADDR = KERNEL_START;
+
+  .init.nommu PHY_ADDR : AT(PHY_ADDR) {
     start.o(.init.nommu)
     *.o(.init.nommu)
     __stack_no_mmu_top = ALIGN(0x10);
@@ -30,7 +32,9 @@ SECTIONS
     __stack_no_mmu_base = .;
   } > RAM
 
-  .exception_vector : {
+  PHY_ADDR += SIZEOF(.init.nommu);
+
+  .exception_vector PHY_ADDR : AT(PHY_ADDR) {
     *.o(.exception_vector)
   } > RAM
 
@@ -45,61 +49,80 @@ PAGE_TABLE_SIZE = PAGE_TABLE_SIZE_L0
 
 PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
-  .pagetable : {
+  .pagetable PHY_ADDR : AT(PHY_ADDR) {
     . = ALIGN(4096);
     __pagetable_start = .;
     . += PAGE_TABLE_SIZE;
     __pagetable_end = .;
   } > RAM
 
-  .data_nommu : {
+  PHY_ADDR += SIZEOF(.pagetable);
+
+  .bss_nommu PHY_ADDR : AT(PHY_ADDR) {
+    *.o(.bss_nommu)
   } > RAM
 
-  .bss_nommu : {
+  PHY_ADDR += SIZEOF(.bss_nommu);
+
+  .data_nommu PHY_ADDR : AT(PHY_ADDR) {
+    *.o(.data_nommu)
   } > RAM
 
-  VMA = KERNEL_ADDR_SPACE_START + __pagetable_end;
+  PHY_ADDR += SIZEOF(.data_nommu);
 
-  .text VMA : {
+  .rodata_nommu PHY_ADDR : AT(PHY_ADDR) {
+    *.o(.rodata_nommu)
+  } > RAM
+
+  PHY_ADDR += SIZEOF(.rodata_nommu);
+
+  .text KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     start.o(.start_el1_mmu)
     *.o(.text)
     dma_memory.o(.text)
-  } >VIRTUAL_MEM AT>RAM
+  }
 
-  VMA += SIZEOF(.text);
+  PHY_ADDR += SIZEOF(.text);
 
-  .data VMA : {
+  .data KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     data_start = .;
     *.(.data)
-  } >VIRTUAL_MEM AT>RAM
+  }
+  PHY_ADDR += SIZEOF(.data);
 
-  .rodata : {
-    *.(.rodata)
-  } >VIRTUAL_MEM AT>RAM
+  .rodata KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+    *.o(.rodata*)
+  }
+  PHY_ADDR += SIZEOF(.rodata);
 
-  .bss (NOLOAD) : {
-    __bss_start = .;
+  .bss  KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+    __bss_start = ALIGN(16);
     *(.bss)
     *(COMMON)
-    __bss_end = .;
-  } > VIRTUAL_MEM
+    __bss_end = ALIGN(16);
+  }
+  __bss_start_phys = __bss_start - KERNEL_ADDR_SPACE_START;
+  __bss_end_phys = __bss_end - KERNEL_ADDR_SPACE_START;
+  PHY_ADDR += SIZEOF(.bss);
+  PHY_ADDR = ALIGN(PHY_ADDR, 0x10);
 
-  . = ALIGN(0x10);
-  .stacks : {
+  .stacks KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     *.o(.stacks)
-  } > VIRTUAL_MEM
+  }
 
-  . = ALIGN(4096);
-  .kernel_memory (NOLOAD) : {
+  PHY_ADDR += SIZEOF(.stacks);
+  PHY_ADDR = ALIGN(PHY_ADDR, 4096);
+  .kernel_memory KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     kmalloc.o(.kernel_memory)
-  } > VIRTUAL_MEM
+  }
   __kernel_memory_start = ADDR(.kernel_memory);
   __kernel_memory_end = __kernel_memory_start + SIZEOF(.kernel_memory);
 
-  . = ALIGN(4096);
-  .dma_memory (NOLOAD) : {
+  PHY_ADDR += SIZEOF(.kernel_memory);
+  PHY_ADDR = ALIGN(PHY_ADDR, 4096);
+  .dma_memory KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     dma_memory.o(.dma_memory)
-  } > VIRTUAL_MEM
+  }
 
   __dma_memory_start = ADDR(.dma_memory);
   __dma_memory_end = __dma_memory_start + SIZEOF(.dma_memory);

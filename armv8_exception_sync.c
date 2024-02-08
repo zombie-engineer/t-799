@@ -3,6 +3,8 @@
 #include <common.h>
 #include <os_api.h>
 
+#define EXCEPTION_VECTOR __attribute__((section(".exception_vector")))
+
 /*
  * Incomplete list of ARMv8 exception class types encoded into ELx_ECR register.
  * See ARM DDI0487B_b chapter D10.2.28
@@ -193,7 +195,7 @@ SYNC_HANDLER(brk_aarch64)
 
 typedef void (*armv8_exception_handler_sync_fn)(uint32_t iss);
 
-static armv8_exception_handler_sync_fn armv8_exception_sync_handlers[] = {
+static __attribute__((section(".rodata_nommu"))) armv8_exception_handler_sync_fn const armv8_exception_sync_handlers[] = {
 	ITEM(UNKNOWN, unknown),
 	ITEM(TRAP_WFI_WFE, trap_wfi_wfe),
 	ITEM(TRAP_MCR_MRC, trap_mcr_mrc),
@@ -237,7 +239,7 @@ static armv8_exception_handler_sync_fn armv8_exception_sync_handlers[] = {
 #define ESR_GET_SYNC_ISS(__value) \
 	(__value & ((1<<25) - 1))
 
-void armv8_exception_handler_sync(uint64_t esr)
+EXCEPTION_VECTOR void armv8_exception_handler_sync(uint64_t esr)
 {
 	armv8_exception_handler_sync_fn sync_cb;
 

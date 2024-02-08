@@ -4,9 +4,10 @@ displ/8i $pc
 b debug_wait
 c
 p $pc += 4
-b mmu_init
-b __start_el1
-c
+# b __clear_bss
+b task_create
+# b mmu_init
+# c
 
 #hb __exception_handler_sync_curr_sp0
 #hb __exception_handler_sync_curr_spx

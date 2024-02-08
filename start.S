@@ -140,10 +140,19 @@ __start_el1_nommu:
   blr x0
 .section .start_el1_mmu
 __start_el1_mmu:
-  mrs   x1, currentel
-  lsr   x1, x1, #2
-  ldr   x0, =__bss_start
+  mrs   x0, currentel
+  lsr   x0, x0, #2
+  ldr   x1, =__bss_start
   ldr   x2, =__bss_end
+  mov   x3, #0
+  mov   x4, #0
+  cmp   x1, x2
+  beq   __run_main
+__clear_bss:
+  stp x3, x4, [x1], #16
+  cmp   x1, x2
+  bne __clear_bss
+__run_main:
   bl main
 ##
 #  adr   x0, __stack_el0

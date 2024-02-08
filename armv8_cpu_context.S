@@ -59,7 +59,7 @@
   stp   \__zero_reg, \__zero_reg, [\__ctx_reg], #16 // x28, x29
 .endm
 
-.section .text
+.section .exception_vector
 .globl __cpuctx_stub
 .align 4
 __cpuctx_stub:
@@ -214,5 +214,3 @@ task_pc     .req x2
   LOAD_REGS_X0_X30 x30
 .unreq ctx_ptr
   eret
-
-

@@ -1,3 +1,4 @@
+.section .exception_vector
 .globl armv8_handle_exception_sync
 armv8_handle_exception_sync:
   sub sp, sp, #16

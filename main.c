@@ -15,17 +15,18 @@
 #include <mmu.h>
 #include <printf.h>
 #include <atomic.h>
+#include <sections.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
 
 volatile int myvar = 10;
 
-void fiq_handler(void)
+EXCEPTION void fiq_handler(void)
 {
 }
 
-void serror_handler(void)
+EXCEPTION void serror_handler(void)
 {
 }
 

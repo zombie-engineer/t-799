@@ -260,11 +260,10 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_s
   uint64_t desc;
   uint64_t section_size;
 
-extern char __dma_memory_start;
   uint64_t page_idx_ram_0_start = KERNEL_RAM0_PADDR_START / MMU_PAGE_GRANULE;
   uint64_t page_idx_ram_0_end = dma_mem_start / MMU_PAGE_GRANULE;
   uint64_t page_idx_dma_start = dma_mem_start / MMU_PAGE_GRANULE;
-  uint64_t page_idx_dma_end = dma_mem_start / MMU_PAGE_GRANULE;
+  uint64_t page_idx_dma_end = dma_mem_end / MMU_PAGE_GRANULE;
   uint64_t page_idx_periph_start = PERIPH_ADDR_RANGE_START / MMU_PAGE_GRANULE;
   uint64_t page_idx_periph_end = PERIPH_ADDR_RANGE_END / MMU_PAGE_GRANULE;
 
