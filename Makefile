@@ -45,7 +45,8 @@ OBJS := \
   uart_pl011 \
   gpio \
   self_test_context_switch \
-  spi
+  spi \
+  vchiq
 
 OBJS := $(addsuffix .o, $(OBJS))
 

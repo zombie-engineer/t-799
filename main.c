@@ -16,6 +16,7 @@
 #include <printf.h>
 #include <atomic.h>
 #include <sections.h>
+#include <vchiq.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -101,9 +102,13 @@ atomic_t test_atomic;
 
 struct event test_ev;
 
-static void kernel_start_task1(void)
+static void vchiq_main(void)
 {
+	int res;
+	res = vchiq_init();
 	while(1) {
+#if 0
+		printf("task1\n");
 		os_wait_ms(1000);
 		os_yield();
 		atomic_cmp_and_swap(&test_atomic, 0, 1);
@@ -111,12 +116,15 @@ static void kernel_start_task1(void)
 		os_event_clear(&test_ev);
 		os_event_wait(&test_ev);
 		printf("wait complete\n");
+#endif
+    asm volatile ("wfe");
 	}
 }
 
 static void kernel_start_task2(void)
 {
 	while(1) {
+		printf("task2\n");
 		os_wait_ms(5000);
 		atomic_cmp_and_swap(&test_atomic, 1, 0);
 		os_yield();
@@ -133,7 +141,7 @@ static void kernel_run(void)
 	mmu_print_va(0xffff00000201c000, 1);
 
 	printf("Hello %d\n", myvar);
-	t = task_create(kernel_start_task1, "t1");
+	t = task_create(vchiq_main, "vchiq_main");
 	sched_run_task_isr(t);
 	t = task_create(kernel_start_task2, "t2");
 	sched_run_task_isr(t);
