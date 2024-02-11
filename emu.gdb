@@ -1,15 +1,12 @@
 target remote :1234
 set pagination off
+set pri pre on
+source functions.gdb
 displ/8i $pc
-b debug_wait
+tb debug_wait
 c
 p $pc += 4
-# b __clear_bss
-b task_create
-# b mmu_init
-# c
 
-#hb __exception_handler_sync_curr_sp0
-#hb __exception_handler_sync_curr_spx
-#b aa64_va_parameters
-#b get_phys_addr_lpae
+tb vchiq_handmade
+tb vchiq_handmade_connect
+tb vchiq_loop_thread
