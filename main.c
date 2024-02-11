@@ -127,6 +127,10 @@ static void kernel_start_task2(void)
 static void kernel_run(void)
 {
 	struct task *t;
+	mmu_print_va(0x0000000001ff1000, 1);
+	mmu_print_va(0xffff000001ff0000, 1);
+	mmu_print_va(0xffff000001ff1000, 1);
+	mmu_print_va(0xffff00000201c000, 1);
 
 	printf("Hello %d\n", myvar);
 	t = task_create(kernel_start_task1, "t1");
