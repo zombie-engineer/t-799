@@ -126,8 +126,11 @@ static void scheduler_select_next(void)
 				h = sched.blocked_on_event.next;
 				list_del(h);
 				t = container_of(h, struct task, scheduler_list);
-				sched.current = t;
-				goto done;
+				if (t->wait_event && t->wait_event->ev == 1)
+				{
+					sched.current = t;
+					goto done;
+				}
 		}
 	}
 
