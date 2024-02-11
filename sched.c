@@ -173,7 +173,7 @@ static void sched_timer_irq_cb(void *arg)
 void NORETURN scheduler_start(void)
 {
 	irq_disable();
-	scheduler_select_next();
+	sched.current = sched.idle_task;
 	__current_cpuctx = &__cpuctx_stub;
 	bcm2835_systimer_start_oneshot(MS_TO_US(SCHED_MS_PER_TICK), sched_timer_irq_cb, NULL);
 	irq_enable();
