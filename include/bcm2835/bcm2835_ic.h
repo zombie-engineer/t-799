@@ -2,6 +2,7 @@
 
 #define GPU_IRQ(__nr) __nr
 #define ARM_IRQ(__nr) (__nr + 64)
+#define IS_GPU_IRQ(__nr) (__nr < 64)
 
 #define BCM2835_IRQNR_SYSTIMER_0 GPU_IRQ(0)
 #define BCM2835_IRQNR_SYSTIMER_1 GPU_IRQ(1)
