@@ -31,7 +31,6 @@ struct scheduler {
 	int timer_interval_ms;
 	struct task *idle_task;
 	uint64_t ticks;
-	bool has_pending_event;
 };
 
 static struct scheduler sched;
@@ -119,18 +118,14 @@ static void scheduler_select_next(void)
 	struct task *t;
 	struct list_head *h;
 
-	if (sched.has_pending_event) {
-			/* having has_pending_event and no pending events is valid */
-			sched.has_pending_event = false;
-			if (!list_empty(&sched.blocked_on_event)) {
-				h = sched.blocked_on_event.next;
-				list_del(h);
-				t = container_of(h, struct task, scheduler_list);
-				if (t->wait_event && t->wait_event->ev == 1)
-				{
-					sched.current = t;
-					goto done;
-				}
+	if (!list_empty(&sched.blocked_on_event)) {
+		h = sched.blocked_on_event.next;
+		t = container_of(h, struct task, scheduler_list);
+		BUG_IF(!t->wait_event, "wait_event should not be NULL");
+		if (t->wait_event->ev == 1) {
+			list_del(h);
+			sched.current = t;
+			goto done;
 		}
 	}
 
@@ -209,12 +204,26 @@ void sched_event_wait_isr(struct event *ev)
 
 void sched_event_notify(struct event *ev)
 {
-  int irqflags;
+	int irqflags;
+	struct list_head *node;
+	struct list_head *tmp;
 
-  disable_irq_save_flags(irqflags);
-  ev->ev = 1;
-  sched.has_pending_event = true;
-  restore_irq_flags(irqflags);
+	struct list_head tmp_head = LIST_HEAD_INIT(tmp_head);
+	struct task *t;
+
+	disable_irq_save_flags(irqflags);
+	ev->ev = 1;
+
+	list_for_each_safe(node, tmp, &sched.blocked_on_event) {
+		t = container_of(node, struct task, scheduler_list);
+		if (t->wait_event == ev)
+			list_move(node, &tmp_head);
+	}
+
+	list_for_each_safe(node, tmp, &tmp_head)
+		list_move(node, &sched.blocked_on_event);
+
+	restore_irq_flags(irqflags);
 }
 
 void scheduler_init(void)
