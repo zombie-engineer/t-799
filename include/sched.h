@@ -8,7 +8,6 @@ struct event;
 
 void scheduler_init(void);
 void scheduler_start(void);
-bool scheduler_start_task(struct task *t);
 
 struct task *sched_get_current_task(void);
 
@@ -25,6 +24,8 @@ void scheduler_yield_isr(void);
  * Should be called from ISR
  */
 void scheduler_delay_current_ms_isr(uint64_t ms);
+
+bool sched_run_task_isr(struct task *t);
 
 void sched_event_wait_isr(struct event *ev);
 

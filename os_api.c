@@ -7,6 +7,7 @@
 #define SVC_WAIT 0
 #define SVC_YIELD 1
 #define SVC_WAIT_EVENT 2
+#define SVC_SCHEDULE_TASK 3
 
 void os_wait_ms(uint32_t ms)
 {
@@ -27,6 +28,12 @@ void os_event_init(struct event *ev)
 void os_event_clear(struct event *ev)
 {
   ev->ev = 0;
+}
+
+void os_schedule_task(struct task *t)
+{
+  asm inline volatile("mov x0, %0\r\nsvc %1"
+    :: "r"(t), "i"(SVC_SCHEDULE_TASK));
 }
 
 void os_event_wait(struct event *ev)
@@ -63,6 +70,9 @@ void svc_handler(uint32_t imm)
     break;
   case SVC_WAIT_EVENT:
     sched_event_wait_isr((struct event *)arg0);
+    break;
+  case SVC_SCHEDULE_TASK:
+    sched_run_task_isr((struct task *)arg0);
     break;
   default:
     panic();

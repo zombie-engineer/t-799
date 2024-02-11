@@ -18,6 +18,10 @@ void os_event_init(struct event *ev);
 void os_event_clear(struct event *ev);
 void os_event_wait(struct event *ev);
 
+struct task;
+
+void os_schedule_task(struct task *t);
+
 void os_event_notify(struct event *ev);
 
 void svc_handler(uint32_t imm);

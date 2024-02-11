@@ -41,7 +41,7 @@ struct task *sched_get_current_task(void)
 	return sched.current;
 }
 
-bool scheduler_start_task(struct task *t)
+bool sched_run_task_isr(struct task *t)
 {
 	struct list_head *node;
 	struct task *old_task;

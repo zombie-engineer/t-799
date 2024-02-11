@@ -130,9 +130,9 @@ static void kernel_run(void)
 
 	printf("Hello %d\n", myvar);
 	t = task_create(kernel_start_task1, "t1");
-	scheduler_start_task(t);
+	sched_run_task_isr(t);
 	t = task_create(kernel_start_task2, "t2");
-	scheduler_start_task(t);
+	sched_run_task_isr(t);
 	scheduler_start();
 	panic();
 }
