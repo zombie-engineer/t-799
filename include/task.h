@@ -11,7 +11,7 @@ typedef void (*task_fn)(void);
 
 struct task {
   struct list_head scheduler_list;
-  char name[8];
+  char name[16];
   uint32_t task_id;
   void *cpuctx;
   uint64_t next_wakeup_time;
