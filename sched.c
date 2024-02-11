@@ -188,7 +188,7 @@ void NORETURN scheduler_start(void)
 		asm volatile("wfe");
 }
 
-void scheduler_delay_current_ms_isr(uint64_t ms)
+void sched_delay_current_ms_isr(uint64_t ms)
 {
 	struct task *t = sched.current;
 	t->scheduler_request = TASK_SCHED_RQ_BLOCK_ON_TIMER;

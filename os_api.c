@@ -63,7 +63,7 @@ void svc_handler(uint32_t imm)
   switch(imm)
   {
   case SVC_WAIT:
-    scheduler_delay_current_ms_isr(arg0);
+    sched_delay_current_ms_isr(arg0);
     break;
   case SVC_YIELD:
     scheduler_yield_isr();

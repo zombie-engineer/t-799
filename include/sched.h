@@ -23,7 +23,7 @@ void scheduler_yield_isr(void);
  * next task in the runlist.
  * Should be called from ISR
  */
-void scheduler_delay_current_ms_isr(uint64_t ms);
+void sched_delay_current_ms_isr(uint64_t ms);
 
 bool sched_run_task_isr(struct task *t);
 
