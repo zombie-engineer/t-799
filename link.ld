@@ -49,7 +49,7 @@ PAGE_TABLE_SIZE = PAGE_TABLE_SIZE_L0
 
 PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
-  .pagetable PHY_ADDR : AT(PHY_ADDR) {
+  .pagetable PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     . = ALIGN(4096);
     __pagetable_start = .;
     . += PAGE_TABLE_SIZE;
@@ -58,7 +58,7 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
   PHY_ADDR += SIZEOF(.pagetable);
 
-  .bss_nommu PHY_ADDR : AT(PHY_ADDR) {
+  .bss_nommu PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     *.o(.bss_nommu)
   } > RAM
 
@@ -95,7 +95,7 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   }
   PHY_ADDR += SIZEOF(.rodata);
 
-  .bss  KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+  .bss  KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     __bss_start = ALIGN(16);
     *(.bss)
     *(COMMON)
@@ -106,13 +106,13 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   PHY_ADDR += SIZEOF(.bss);
   PHY_ADDR = ALIGN(PHY_ADDR, 0x10);
 
-  .stacks KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+  .stacks KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     *.o(.stacks)
   }
 
   PHY_ADDR += SIZEOF(.stacks);
   PHY_ADDR = ALIGN(PHY_ADDR, 4096);
-  .kernel_memory KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+  .kernel_memory KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     kmalloc.o(.kernel_memory)
   }
   __kernel_memory_start = ADDR(.kernel_memory);
@@ -120,7 +120,7 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
   PHY_ADDR += SIZEOF(.kernel_memory);
   PHY_ADDR = ALIGN(PHY_ADDR, 4096);
-  .dma_memory KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+  .dma_memory KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     dma_memory.o(.dma_memory)
   }
 
