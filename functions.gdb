@@ -37,3 +37,11 @@ define lt
   end
   printf "---\n"
 end
+
+define reboot_cpu
+  printf "---REBOOTING\n"
+  p $pc = 0x80000
+  p *(uint32_t *)0x3f100024 = (0x5a << 24) | 1
+  p *(uint32_t *)0x3f10001c = (0x5a << 24) | 0x20
+  monitor reset init
+end
