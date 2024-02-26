@@ -209,7 +209,7 @@ static int spi0_start_transfer(struct spi_device *d, int io_flags,
 		return ERR_BUSY;
 
 	d->io_flags = io_flags;
-
+	*SPI_CS &= ~SPI_CS_REN;
 	*SPI_CS |= SPI_CS_CLEAR;
 	*SPI_CS |= SPI_CS_TA;
 
@@ -229,11 +229,11 @@ static bool spi0_read_possible(void)
 static int spi0_do_transfer(struct spi_device *d,
 	const uint8_t *src,
 	uint8_t *dst,
-	unsigned int len,
-	unsigned int *actual_len)
+	size_t len,
+	size_t *actual_len)
 {
 	int ret;
-	int i;
+	size_t i;
 	const uint8_t *src_byte = src;
 	uint8_t *dst_byte = dst;
 	uint8_t stub_src = 0;
@@ -256,10 +256,12 @@ static int spi0_do_transfer(struct spi_device *d,
 			while(!spi0_write_possible());
 
 		/* Write 1 byte to FIFO */
-		*SPI_FIFO = src[i];
+		if (d->io_flags & IO_FLAG_WRITE)
+			*SPI_FIFO = src[i];
 
 		/* Read 1 byte from FIFO */
-		dst[i] = *SPI_FIFO;
+		if (d->io_flags & IO_FLAG_READ)
+			dst[i] = *SPI_FIFO;
 		/* DONE - TX sent */
 		while(spi0_transfer_in_progress());
 	}
@@ -435,8 +437,8 @@ static void spi_bb_clock_byte(uint8_t b)
 static int spi_bb_do_transfer(struct spi_device *d,
 	const uint8_t *src,
 	uint8_t *dst,
-	unsigned int len,
-	unsigned int *actual_len)
+	size_t len,
+	size_t *actual_len)
 {
 	int ret;
 	int i;
@@ -494,11 +496,11 @@ static struct spi_device spi_bb_dev = {
 	.initialized = false
 };
 
-struct spi_device *spi_get_device(int spi)
+struct spi_device *spi_get_device(spi_device_id_t device_id)
 {
-	if (spi == SPI_DEV_0)
+	if (device_id == SPI_DEVICE_ID_SPI_0)
 		return &spi0_dev;
-	if (spi == SPI_DEV_BITBANG)
+	if (device_id == SPI_DEVICE_ID_BITBANG)
 		return &spi_bb_dev;
 	return NULL;
 }

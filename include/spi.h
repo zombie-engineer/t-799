@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 struct spi_device;
 
@@ -13,8 +14,8 @@ typedef int (*spi_start_transfer_fn)(struct spi_device *d, int io_flags,
 typedef int (*spi_do_transfer_fn)(struct spi_device *d,
 	const uint8_t *src,
 	uint8_t *dst,
-	unsigned int len,
-	unsigned int *transfered);
+	size_t len,
+	size_t *transfered);
 
 typedef int (*spi_finish_transfer_fn)(struct spi_device *d);
 
@@ -32,10 +33,13 @@ struct spi_device {
 	int io_flags;
 };
 
-#define SPI_DEV_0 0
-#define SPI_DEV_BITBANG 3
+typedef enum {
+  SPI_DEVICE_ID_SPI_0 = 0,
+  SPI_DEVICE_ID_BITBANG
+} spi_device_id_t;
+int spi0_init_dma(void);
 
-struct spi_device *spi_get_device(int spi);
+struct spi_device *spi_get_device(spi_device_id_t device_id);
 
 int spi_configure_bitbang(struct spi_device *d, int sck, int mosi,
 	int miso, const int *cs, int num_cs_pins);
