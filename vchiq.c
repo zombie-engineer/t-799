@@ -1361,11 +1361,13 @@ static int vchiq_mmal_port_parameter_set(struct vchiq_mmal_component *c,
   return SUCCESS;
 }
 
+static int num_capture_frames = 0;
 static int mmal_camera_capture_frames(struct vchiq_mmal_component *cam,
   struct vchiq_mmal_port *capture_port)
 {
   uint32_t frame_count = 1;
 
+  MMAL_INFO("capture_frames %d", num_capture_frames++);
   return vchiq_mmal_port_parameter_set(cam, capture_port,
     MMAL_PARAMETER_CAPTURE, &frame_count, sizeof(frame_count));
 }
@@ -1386,15 +1388,14 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
    * Buffer payload
    */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    /* MMAL_INFO("Received non-EOS, pushing to display"); */
-    // tft_lcd_print_data(b->buffer, h->length);
+    MMAL_DEBUG2("Received non-EOS, pushing to display");
   }
 
   err = mmal_port_buffer_send_one(p, b);
   CHECK_ERR("Failed to submit buffer");
 
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
-    // MMAL_INFO("EOS received, sending CAPTURE command");
+    MMAL_DEBUG2("EOS received, sending CAPTURE command");
     err = mmal_camera_capture_frames(c, p);
     CHECK_ERR("Failed to initiate frame capture");
   }
