@@ -2,7 +2,7 @@
 
 .globl atomic_cmp_and_swap
 atomic_cmp_and_swap:
-  str x3, [sp, #-8]!
+  str x3, [sp, #-16]!
   mov x3, x0
 1:
   ldxr x0, [x3]
@@ -12,7 +12,7 @@ atomic_cmp_and_swap:
   cbnz w0, 1b
   mov x0, x1
 2:
-  ldr x3, [sp], #8
+  ldr x3, [sp], #16
   ret
 
 .globl atomic_inc

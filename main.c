@@ -124,9 +124,9 @@ static void vchiq_main(void)
 static void kernel_start_task2(void)
 {
 	while(1) {
-		printf("task2\n");
+		printf("task2");
 		os_wait_ms(5000);
-		atomic_cmp_and_swap(&test_atomic, 1, 0);
+		// atomic_cmp_and_swap(&test_atomic, 1, 0);
 		os_yield();
 		os_event_notify(&test_ev);
 	}
