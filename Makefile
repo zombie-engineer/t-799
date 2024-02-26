@@ -27,6 +27,7 @@ OBJS := \
   debug_led \
   delay \
   dma_memory \
+  ili9341 \
   irq \
   kmalloc \
   mbox/mbox_routines \

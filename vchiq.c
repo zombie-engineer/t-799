@@ -20,6 +20,7 @@
 #include "mmal-parameters.h"
 #include "mmal-encodings.h"
 #include "vc_sm_defs.h"
+#include <ili9341.h>
 
 int mmal_log_level = LOG_LEVEL_INFO;
 
@@ -1389,6 +1390,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
    */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     MMAL_DEBUG2("Received non-EOS, pushing to display");
+    ili9341_draw_bitmap(b->buffer, h->length);
   }
 
   err = mmal_port_buffer_send_one(p, b);

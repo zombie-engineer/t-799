@@ -17,6 +17,7 @@
 #include <atomic.h>
 #include <sections.h>
 #include <vchiq.h>
+#include <ili9341.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -105,6 +106,7 @@ struct event test_ev;
 static void vchiq_main(void)
 {
 	int res;
+	ili9341_init();
 	res = vchiq_init();
 	while(1) {
 #if 0
