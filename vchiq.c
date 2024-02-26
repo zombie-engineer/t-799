@@ -73,7 +73,6 @@ static inline void wmb(void)
 #define VCHIQ_MSG_REMOTE_RELEASE    13  /* -                                 */
 #define VCHIQ_MSG_REMOTE_USE_ACTIVE 14  /* -                                 */
 
-#define VCHIQ_MAX_SLOTS_PER_SIDE 64
 #define VCHIQ_SLOT_SIZE 4096
 
 #define VCHIQ_MAKE_MSG(type, srcport, dstport) \
@@ -1174,6 +1173,7 @@ static struct mmal_msg_context *mmal_context_buffer[12] = { 0 };
 
 static uint32_t mmal_msg_context_to_handle(struct mmal_msg_context *ctx)
 {
+  return (uint32_t)((uint64_t)ctx & ~0xffff000000000000);
   for (int i = 0; i < ARRAY_SIZE(mmal_context_buffer); ++i) {
     if (!mmal_context_buffer[i]) {
       mmal_context_buffer[i] = ctx;
@@ -1185,6 +1185,7 @@ static uint32_t mmal_msg_context_to_handle(struct mmal_msg_context *ctx)
 
 static struct mmal_msg_context *mmal_msg_context_from_handle(uint32_t handle)
 {
+  return (struct mmal_msg_context *)(uint64_t)(handle | 0xffff000000000000);
   struct mmal_msg_context *result;
 
   if (handle >= ARRAY_SIZE(mmal_context_buffer)
@@ -2293,11 +2294,11 @@ static int vchiq_camera_run(struct vchiq_service_common *mmal_service,
   err = mmal_alloc_port_buffers(mems_service, still_port);
   CHECK_ERR("Failed to prepare buffer for still port");
 
+  err = mmal_port_buffer_send_all(still_port);
+  CHECK_ERR("Failed to send buffer to port");
+  mmal_camera_capture_frames(cam, still_port);
+  CHECK_ERR("Failed to initiate frame capture");
   while(1) {
-    err = mmal_port_buffer_send_all(still_port);
-    CHECK_ERR("Failed to send buffer to port");
-    mmal_camera_capture_frames(cam, still_port);
-    CHECK_ERR("Failed to initiate frame capture");
     err = mmal_port_buffer_receive(still_port);
     CHECK_ERR("Failed to receive buffer from VC");
   }
@@ -2379,7 +2380,7 @@ int vchiq_init(void)
   fragment_size = 2 * 64;
   /* Allocate space for the channels in coherent memory */
   /* TOTAL_SLOTS */
-  slot_mem_size = 80 * VCHIQ_SLOT_SIZE;
+  slot_mem_size = 16 * VCHIQ_SLOT_SIZE;
   frag_mem_size = fragment_size * MAX_FRAGMENTS;
 
   slot_mem = dma_alloc(slot_mem_size + frag_mem_size);
