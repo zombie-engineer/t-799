@@ -22,7 +22,8 @@
 #include "vc_sm_defs.h"
 #include <ili9341.h>
 
-int mmal_log_level = LOG_LEVEL_INFO;
+#define BELL0 ((ioreg32_t)(0x3f00b840))
+#define BELL2 ((ioreg32_t)(0x3f00b848))
 
 static inline void mb(void)
 {
@@ -78,19 +79,17 @@ static inline void wmb(void)
 
 #define VCHIQ_MAKE_MSG(type, srcport, dstport) \
   ((type<<24) | (srcport<<12) | (dstport<<0))
-#define VCHIQ_MSG_TYPE(msgid)          ((unsigned int)msgid >> 24)
+
+#define VCHIQ_MSG_TYPE(msgid) \
+  ((unsigned int)msgid >> 24)
+
 #define VCHIQ_MSG_SRCPORT(msgid) \
   (unsigned short)(((unsigned int)msgid >> 12) & 0xfff)
+
 #define VCHIQ_MSG_DSTPORT(msgid) \
   ((unsigned short)msgid & 0xfff)
 
 #define VCHIQ_MSGID_PADDING            VCHIQ_MAKE_MSG(VCHIQ_MSG_PADDING, 0, 0)
-#define VCHIQ_MSGID_CLAIMED            0x40000000
-
-#define VCHIQ_FOURCC_INVALID           0x00000000
-#define VCHIQ_FOURCC_IS_LEGAL(fourcc)  (fourcc != VCHIQ_FOURCC_INVALID)
-
-#define VCHIQ_BULK_ACTUAL_ABORTED -1
 
 #define VCHIQ_MAKE_FOURCC(x0, x1, x2, x3) \
   (((x0) << 24) | ((x1) << 16) | ((x2) << 8) | (x3))
@@ -99,20 +98,13 @@ static inline void wmb(void)
 
 /* The version of VCHIQ - change with any non-trivial change */
 #define VCHIQ_VERSION            8
-/* The minimum compatible version - update to match VCHIQ_VERSION with any
-** incompatible change */
+
+/*
+ * The minimum compatible version - update to match VCHIQ_VERSION with any
+ * incompatible change
+ */
 #define VCHIQ_VERSION_MIN        3
 
-/* The version that introduced the VCHIQ_IOC_LIB_VERSION ioctl */
-#define VCHIQ_VERSION_LIB_VERSION 7
-
-/* The version that introduced the VCHIQ_IOC_CLOSE_DELIVERED ioctl */
-#define VCHIQ_VERSION_CLOSE_DELIVERED 7
-
-/* The version that made it safe to use SYNCHRONOUS mode */
-#define VCHIQ_VERSION_SYNCHRONOUS_MODE 8
-
-#define VCHIQ_MAX_STATES         1
 #define VCHIQ_MAX_SERVICES       4096
 #define VCHIQ_MAX_SLOTS          128
 #define VCHIQ_MAX_SLOTS_PER_SIDE 64
@@ -120,15 +112,7 @@ static inline void wmb(void)
 #define VCHIQ_NUM_CURRENT_BULKS        32
 #define VCHIQ_NUM_SERVICE_BULKS        4
 
-#ifndef VCHIQ_ENABLE_DEBUG
 #define VCHIQ_ENABLE_DEBUG             1
-#endif
-
-#ifndef VCHIQ_ENABLE_STATS
-#define VCHIQ_ENABLE_STATS             1
-#endif
-
-#define BITSET_SIZE(b)        ((b + 31) >> 5)
 
 #define MAX_FRAGMENTS (VCHIQ_NUM_CURRENT_BULKS * 2)
 
@@ -148,24 +132,11 @@ static struct vchiq_state vchiq_state ALIGNED(64);
 
 static struct list_head mmal_io_work_list;
 static struct event mmal_io_work_waitflag;
-static struct spinlock mmal_io_work_list_lock;
 
 typedef int (*mmal_io_fn)(struct vchiq_mmal_component *,
   struct vchiq_mmal_port *, struct mmal_buffer_header *);
 
-typedef uint32_t vchiq_service_handle_t;
-
-typedef enum {
-  VCHIQ_CONNSTATE_DISCONNECTED,
-  VCHIQ_CONNSTATE_CONNECTING,
-  VCHIQ_CONNSTATE_CONNECTED,
-  VCHIQ_CONNSTATE_PAUSING,
-  VCHIQ_CONNSTATE_PAUSE_SENT,
-  VCHIQ_CONNSTATE_PAUSED,
-  VCHIQ_CONNSTATE_RESUMING,
-  VCHIQ_CONNSTATE_PAUSE_TIMEOUT,
-  VCHIQ_CONNSTATE_RESUME_TIMEOUT
-} vchiq_connstate_t;
+int mmal_log_level = LOG_LEVEL_INFO;
 
 enum {
   DEBUG_ENTRIES,
@@ -267,68 +238,32 @@ struct vchiq_slot_zero {
 };
 
 typedef enum {
-  VCHIQ_SERVICE_OPENED,         /* service, -, -             */
-  VCHIQ_SERVICE_CLOSED,         /* service, -, -             */
-  VCHIQ_MESSAGE_AVAILABLE,      /* service, header, -        */
-  VCHIQ_BULK_TRANSMIT_DONE,     /* service, -, bulk_userdata */
-  VCHIQ_BULK_RECEIVE_DONE,      /* service, -, bulk_userdata */
-  VCHIQ_BULK_TRANSMIT_ABORTED,  /* service, -, bulk_userdata */
-  VCHIQ_BULK_RECEIVE_ABORTED    /* service, -, bulk_userdata */
+  VCHIQ_SERVICE_OPENED,        /* service, -, -             */
+  VCHIQ_SERVICE_CLOSED,        /* service, -, -             */
+  VCHIQ_MESSAGE_AVAILABLE,     /* service, header, -        */
+  VCHIQ_BULK_TRANSMIT_DONE,    /* service, -, bulk_userdata */
+  VCHIQ_BULK_RECEIVE_DONE,     /* service, -, bulk_userdata */
+  VCHIQ_BULK_TRANSMIT_ABORTED, /* service, -, bulk_userdata */
+  VCHIQ_BULK_RECEIVE_ABORTED   /* service, -, bulk_userdata */
 } vchiq_reason_t;
 
 struct vchiq_header {
   /* The message identifier - opaque to applications. */
   int msgid;
 
-  /* Size of message data. */
+  /* Size of message data */
   unsigned int size;
 
-  char data[0];           /* message */
-};
-
-typedef enum {
-  VCHIQ_ERROR   = -1,
-  VCHIQ_SUCCESS = 0,
-  VCHIQ_RETRY   = 1
-} vchiq_status_t;
-
-typedef vchiq_status_t (*vchiq_callback_t)(vchiq_reason_t,
-  struct vchiq_header*,
-  vchiq_service_handle_t, void *);
-
-struct vchiq_service_base {
-  int fourcc;
-  vchiq_callback_t callback;
-  void *userdata;
+  /* message */
+  char data[0];
 };
 
 typedef void (*vchiq_userdata_term_t)(void *userdata);
 
 typedef uint32_t vchi_mem_handle_t;
 
-struct vchiq_bulk {
-  short mode;
-  short dir;
-  void *userdata;
-  vchi_mem_handle_t handle;
-  void *data;
-  int size;
-  void *remote_data;
-  int remote_size;
-  int actual;
-};
-
-struct vchiq_bulk_queue {
-  int local_insert;  /* Where to insert the next local bulk */
-  int remote_insert; /* Where to insert the next remote bulk (master) */
-  int process;       /* Bulk to transfer next */
-  int remote_notify; /* Bulk to notify the remote client of next (mstr) */
-  int remove;        /* Bulk to notify the local client of, and remove,
-                      ** next */
-  struct vchiq_bulk bulks[VCHIQ_NUM_SERVICE_BULKS];
-};
-
 struct vchiq_service_common;
+
 typedef int (*vchiq_data_callback_t)(struct vchiq_service_common *,
   struct vchiq_header *);
 
@@ -341,57 +276,12 @@ struct vchiq_service_common {
   vchiq_data_callback_t data_callback;
 };
 
-struct vchiq_service {
-  struct vchiq_service_base base;
-  vchiq_service_handle_t handle;
-  unsigned int ref_count;
-  int srvstate;
-  vchiq_userdata_term_t userdata_term;
-  unsigned int localport;
-  unsigned int remoteport;
-  int public_fourcc;
-  int client_id;
-  char auto_close;
-  char sync;
-  char closing;
-  atomic_t poll_flags;
-  short version;
-  short version_min;
-  short peer_version;
-
-  struct vchiq_state *state;
-
-  int service_use_count;
-
-  struct vchiq_bulk_queue bulk_tx;
-  struct vchiq_bulk_queue bulk_rx;
-
-  struct service_stats {
-    int quota_stalls;
-    int slot_stalls;
-    int bulk_stalls;
-    int error_count;
-    int ctrl_tx_count;
-    int ctrl_rx_count;
-    int bulk_tx_count;
-    int bulk_rx_count;
-    int bulk_aborted_count;
-    uint64_t ctrl_tx_bytes;
-    uint64_t ctrl_rx_bytes;
-    uint64_t bulk_tx_bytes;
-    uint64_t bulk_rx_bytes;
-  } stats;
-};
-
 struct vchiq_state {
-  int initialised;
-  vchiq_connstate_t conn_state;
-  int is_master;
-  short version_common;
+  bool is_connected;
 
   struct vchiq_shared_state *local;
   struct vchiq_shared_state *remote;
-  struct vchiq_slot *slot_data;
+  struct vchiq_slot *slots;
 
   /* Processes incoming messages */
   struct task *slot_handler_thread;
@@ -410,7 +300,6 @@ struct vchiq_state {
 
   char *tx_data;
   char *rx_data;
-  struct vchiq_slot_info *rx_info;
 
   /* Indicates the byte position within the stream from where the next
   ** message will be read. The least significant bits are an index into
@@ -424,32 +313,6 @@ struct vchiq_state {
 
   /* The slot_queue index of the slot to become available next. */
   int slot_queue_available;
-
-  /* A flag to indicate if any poll has been requested */
-  int poll_needed;
-
-  /* Ths index of the previous slot used for data messages. */
-  int previous_data_index;
-
-  /* The number of slots occupied by data messages. */
-  unsigned short data_use_count;
-
-  /* The maximum number of slots to be occupied by data messages. */
-  unsigned short data_quota;
-
-  /* Incremented when there are bulk transfers which cannot be processed
-   * whilst paused and must be processed on resume */
-  int deferred_bulks;
-
-  struct state_stats_struct {
-    int slot_stalls;
-    int data_stalls;
-    int ctrl_tx_count;
-    int ctrl_rx_count;
-    int error_count;
-  } stats;
-
-  struct vchiq_service *services[VCHIQ_MAX_SERVICES];
 };
 
 static struct vchiq_state vchiq_state ALIGNED(64);
@@ -497,7 +360,7 @@ static struct vchiq_slot_zero *vchiq_init_slots(void *mem_base, int mem_size)
   return slot_zero;
 }
 
-#define SLOT_DATA_FROM_INDEX(state, index) (state->slot_data + (index))
+#define SLOT_DATA_FROM_INDEX(state, index) (state->slots + (index))
 
 static inline void
 remote_event_create(struct vchiq_remote_event *event)
@@ -524,12 +387,11 @@ static void vchiq_init_state(struct vchiq_state *state,
   remote = &slot_zero->master;
 
   memset(state, 0, sizeof(*state));
-  state->is_master = 0;
 
   /* initialize shared state pointers */
   state->local = local;
   state->remote = remote;
-  state->slot_data = (struct vchiq_slot *)slot_zero;
+  state->slots = (struct vchiq_slot *)slot_zero;
 
   os_event_init(&state->trigger_waitflag);
   os_event_init(&state->recycle_waitflag);
@@ -541,10 +403,6 @@ static void vchiq_init_state(struct vchiq_state *state,
 
   for (i = local->slot_first; i <= local->slot_last; i++)
     local->slot_queue[state->slot_queue_available++] = i;
-
-  state->previous_data_index = -1;
-  state->data_use_count = 0;
-  state->data_quota = state->slot_queue_available - 1;
 
   remote_event_init(&local->trigger);
   local->tx_pos = 0;
@@ -603,16 +461,12 @@ struct mmal_io_work *mmal_io_work_pop(void)
 {
   int irqflags;
   struct mmal_io_work *w = NULL;
-  // spinlock_lock_disable_irq(&mmal_io_work_list_lock, irqflags);
   if (list_empty(&mmal_io_work_list))
-    goto out_unlock;
+    return NULL;
 
   w = list_first_entry(&mmal_io_work_list, typeof(*w), list);
   list_del_init(&w->list);
   wmb();
-
-out_unlock:
-  // spinlock_unlock_restore_irq(&mmal_io_work_list_lock, irqflags);
   return w;
 }
 
@@ -622,16 +476,11 @@ static void vchiq_io_thread(void)
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
-    // MMAL_INFO("io_thread: woke up");
     w = mmal_io_work_pop();
-    if (w) {
-      // MMAL_INFO("io_thread: have new work: %p", w);
+    if (w)
       w->fn(w->c, w->p, w->b);
-    }
   }
 }
-
-static uint64_t vchiq_events ALIGNED(64) = 0xfffffffffffffff4;
 
 static inline void vchiq_event_check(struct event *ev, struct vchiq_remote_event *e)
 {
@@ -654,7 +503,6 @@ static void vchiq_check_local_events()
 static void vchiq_irq_handler(void)
 {
   uint32_t bell_reg;
-  vchiq_events++;
 
   /*
    * This is a very specific undocumented part of vchiq IRQ
@@ -693,13 +541,11 @@ static void vchiq_irq_handler(void)
    * next number 64 is basic pending register bit 0, 65, is basic bit 1, and
    * the doorbell 0 is basic bit 2, thus 64+2 = 66.
    */
-#define BELL0 ((ioreg32_t)(0x3f00b840))
   bell_reg = ioreg32_read(BELL0);
   if (bell_reg & 4)
     vchiq_check_local_events();
 }
 
-#define BELL2 ((ioreg32_t)(0x3f00b848))
 void vchiq_ring_bell(void)
 {
   ioreg32_write(BELL2, 0);
@@ -724,7 +570,7 @@ struct vchiq_header *vchiq_get_next_header_rx(struct vchiq_state *state)
 next_header:
   slot_queue_index = ((int)((unsigned int)(state->rx_pos) / VCHIQ_SLOT_SIZE));
   slot_index = state->remote->slot_queue[slot_queue_index & VCHIQ_SLOT_QUEUE_MASK];
-  state->rx_data = (char *)(state->slot_data + slot_index);
+  state->rx_data = (char *)(state->slots + slot_index);
   rx_pos = state->rx_pos;
   h = (struct vchiq_header *)&state->rx_data[rx_pos & VCHIQ_SLOT_MASK];
   state->rx_pos += vchiq_calc_stride(h->size);
@@ -813,7 +659,7 @@ static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
   remoteport = VCHIQ_MSG_SRCPORT(h->msgid);
   switch(msg_type) {
     case VCHIQ_MSG_CONNECT:
-      s->conn_state = VCHIQ_CONNSTATE_CONNECTED;
+      s->is_connected = true;
       os_event_notify(&s->state_waitflag);
       break;
     case VCHIQ_MSG_OPENACK:
@@ -900,7 +746,7 @@ void vchiq_event_wait(struct event *ev, struct vchiq_remote_event *event)
 static void vchiq_process_free_queue(struct vchiq_state *s)
 {
   int slot_queue_available, pos, slot_index;
-  char *slot_data;
+  char *slots;
   struct vchiq_header *h;
 
   slot_queue_available = s->slot_queue_available;
@@ -910,13 +756,13 @@ static void vchiq_process_free_queue(struct vchiq_state *s)
   while (slot_queue_available != s->local->slot_queue_recycle) {
     slot_index = s->local->slot_queue[slot_queue_available & VCHIQ_SLOT_QUEUE_MASK];
     slot_queue_available++;
-    slot_data = (char *)&s->slot_data[slot_index];
+    slots = (char *)&s->slots[slot_index];
 
     rmb();
 
     pos = 0;
     while (pos < VCHIQ_SLOT_SIZE) {
-      h = (struct vchiq_header *)(slot_data + pos);
+      h = (struct vchiq_header *)(slots + pos);
 
       pos += vchiq_calc_stride(h->size);
       BUG_IF(pos > VCHIQ_SLOT_SIZE, "some");
@@ -959,7 +805,6 @@ static int vchiq_start_thread(struct vchiq_state *s)
 
   INIT_LIST_HEAD(&mmal_io_work_list);
   os_event_init(&mmal_io_work_waitflag);
-  // spinlock_init(&mmal_io_work_list_lock);
 
   t = task_create(vchiq_io_thread, "vchiq_io_thread");
   CHECK_ERR_PTR(t, "Failed to start vchiq_thread");
@@ -1016,7 +861,7 @@ static struct vchiq_header *vchiq_prep_next_header_tx(struct vchiq_state *s,
     slot_queue_index = ((int)((unsigned int)(tx_pos) / VCHIQ_SLOT_SIZE));
     slot_index = s->local->slot_queue[slot_queue_index & VCHIQ_SLOT_QUEUE_MASK];
 
-    s->tx_data = (char*)&s->slot_data[slot_index];
+    s->tx_data = (char*)&s->slots[slot_index];
 
     h = (struct vchiq_header *)(s->tx_data + (tx_pos & VCHIQ_SLOT_MASK));
     h->msgid = VCHIQ_MSGID_PADDING;
@@ -1028,7 +873,7 @@ static struct vchiq_header *vchiq_prep_next_header_tx(struct vchiq_state *s,
   slot_queue_index = ((int)((unsigned int)(tx_pos) / VCHIQ_SLOT_SIZE));
   slot_index = s->local->slot_queue[slot_queue_index & VCHIQ_SLOT_QUEUE_MASK];
 
-  s->tx_data = (char*)&s->slot_data[slot_index];
+  s->tx_data = (char*)&s->slots[slot_index];
   s->local_tx_pos += stride;
   s->local->tx_pos = s->local_tx_pos;
 
@@ -1111,10 +956,8 @@ static int mmal_io_work_push(struct vchiq_mmal_component *c,
   w->b = b;
   w->fn = fn;
   wmb();
-  // spinlock_lock_disable_irq(&mmal_io_work_list_lock, irqflags);
   list_add_tail(&w->list, &mmal_io_work_list);
   os_event_notify(&mmal_io_work_waitflag);
-  // spinlock_unlock_restore_irq(&mmal_io_work_list_lock, irqflags);
   return SUCCESS;
 }
 
@@ -2331,7 +2174,7 @@ static int vchiq_handmade_connect(struct vchiq_state *s)
 
   vchiq_event_signal(&s->remote->trigger);
 
-  if (s->conn_state != VCHIQ_CONNSTATE_CONNECTED) {
+  if (!s->is_connected) {
     err = ERR_GENERIC;
     goto out_err;
   }
@@ -2367,7 +2210,7 @@ out_err:
     asm volatile("wfe");
 }
 
-int vchiq_init(void)
+void vchiq_init(void)
 {
   struct vchiq_slot_zero *vchiq_slot_zero;
   void *slot_mem;
@@ -2390,12 +2233,12 @@ int vchiq_init(void)
   slot_phys = (uint32_t)(uint64_t)slot_mem;
   if (!slot_mem) {
     printf("failed to allocate DMA memory");
-   return ERR_MEMALLOC;
+    return;
   }
 
   vchiq_slot_zero = vchiq_init_slots(slot_mem, slot_mem_size);
   if (!vchiq_slot_zero)
-    return ERR_INVAL;
+    return;
 
   vchiq_init_state(s, vchiq_slot_zero);
 
@@ -2414,13 +2257,11 @@ int vchiq_init(void)
 
   if (!mbox_init_vchiq(&channelbase)) {
     LOG(0, ERR, "vchiq", "failed to set channelbase");
-    return ERR_GENERIC;
+    return;
   }
 
   asm volatile("dsb sy");
 
-  s->conn_state = VCHIQ_CONNSTATE_DISCONNECTED;
+  s->is_connected = false;
   vchiq_handmade(s, vchiq_slot_zero);
-
-  return SUCCESS;
 }

@@ -107,7 +107,7 @@ static void vchiq_main(void)
 {
 	int res;
 	ili9341_init();
-	res = vchiq_init();
+	vchiq_init();
 	while(1) {
 #if 0
 		printf("task1\n");

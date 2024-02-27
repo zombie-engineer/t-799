@@ -1,3 +1,3 @@
 #pragma once
 
-int vchiq_init(void);
+void vchiq_init(void);
