@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define BITS_PER_WORD_LOG 6
-#define BITS_PER_WORD (1<<BITS_PER_WORD_LOG)
+#define BITS_PER_WORD64_LOG 6
+#define BITS_PER_WORD64 (1<<BITS_PER_WORD64_LOG)
 
 static inline int bitword_set_next_free(uint64_t *ptr, int end_bit)
 {

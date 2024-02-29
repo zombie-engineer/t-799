@@ -1,47 +1,65 @@
 #pragma once
 #include <bitword.h>
+#include <common.h>
+#include <string.h>
+
+struct bitmap {
+  uint64_t *data;
+  size_t num_entries;
+};
+
+#define BITMAP_INIT(__data, __n_entries) \
+{ .data = __data, .num_entries = __n_entries }
+
+#define BITMAP_NUM_WORDS(__num_entries) \
+  ((__num_entries + BITS_PER_WORD64 - 1) / BITS_PER_WORD64)
+
+static inline size_t bitmap_num_bitwords(struct bitmap *b)
+{
+  return BITMAP_NUM_WORDS(b->num_entries);
+}
+
+static inline void bitmap_clear_all(struct bitmap *b)
+{
+  BUG_IF(!b->data, "bitmap: trying to clear NULL data");
+  memset(b->data, 0, bitmap_num_bitwords(b) * sizeof(b->data[0]));
+}
 
 /*
  * clear bit in bitmap
  */
-static inline void bitmap_clear(void *bitmap, int bit_idx)
+static inline void bitmap_clear_entry(struct bitmap *b, int idx)
 {
-  uint64_t *ptr = ((uint64_t*)bitmap) + (bit_idx >> BITS_PER_WORD_LOG);
-  bitword_clear_bit(ptr, bit_idx % BITS_PER_WORD);
+  BUG_IF(idx >= b->num_entries, "bitmap: out of range");
+
+  b->data[idx >> BITS_PER_WORD64_LOG] &= ~(1ull << (idx % BITS_PER_WORD64));
 }
 
 /*
  * bitmap_set_next_free - looks for first bit that is not set, sets it
  * and returns it's index. If no bits were clear, returns end_idx
  */
-int bitmap_set_next_free(void *bitmap, int end_idx)
+static inline int bitmap_set_next_free(struct bitmap *b)
 {
-  uint64_t *current_word = bitmap;
-  uint64_t *end_word = current_word + (end_idx >> BITS_PER_WORD_LOG);
+  uint64_t *bitword;
   int bit;
+  size_t i;
+  uint64_t mask;
 
-  do {
-    bit = bitword_set_next_free(current_word, BITS_PER_WORD);
-    if (bit <= (BITS_PER_WORD - 1))
-      goto out_result;
-    current_word++;
-  } while(current_word != end_word);
-
-  if (end_idx % BITS_PER_WORD) {
-    bit = bitword_set_next_free(current_word, end_idx % BITS_PER_WORD);
-    if (bit <= (end_idx % BITS_PER_WORD))
-      goto out_result;
+  for (i = 0; i < b->num_entries; ++i) {
+    mask = (uint64_t)1 << (i % BITS_PER_WORD64);
+    bitword = &b->data[i >> BITS_PER_WORD64_LOG];
+    if (!(*bitword & mask)) {
+      *bitword |= mask;
+      return i;
+    }
   }
 
-  return end_idx;
-
-out_result:
-  return ((current_word - (uint64_t *)bitmap) << BITS_PER_WORD_LOG) + bit;
+  return -1;
 }
 
-bool bitmap_bit_is_set(void *bitmap, int idx)
+static inline bool bitmap_bit_is_set(struct bitmap *b, int idx)
 {
-  uint64_t *word = ((uint64_t*)bitmap) + (idx >> BITS_PER_WORD_LOG);
-  return bitword_bit_is_set(word, idx % BITS_PER_WORD);
+  BUG_IF(idx >= b->num_entries, "bitmap: out of range");
+  return b->data[idx >> BITS_PER_WORD64_LOG] >> (idx % BITS_PER_WORD64);
 }
-

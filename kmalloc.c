@@ -14,8 +14,7 @@ char kernel_memory[16 * 1024 * 1024] SECTION(".kernel_memory");
 typedef void *(*kmalloc_fn)(size_t);
 
 struct kmalloc_descriptor {
-  uint64_t *bitmap;
-  int num_entries;
+  struct bitmap bitmap;
   int chunk_size_log;
   uint64_t offset;
 };
@@ -23,10 +22,9 @@ struct kmalloc_descriptor {
 static void *kmalloc_common(struct kmalloc_descriptor *d)
 {
   int idx;
-  int end_idx = d->num_entries;
 
-  idx = bitmap_set_next_free(d->bitmap, end_idx);
-  if (idx == end_idx)
+  idx = bitmap_set_next_free(&d->bitmap);
+  if (idx == -1)
     return NULL;
 
   return (char *)(kernel_memory) + d->offset + (idx << d->chunk_size_log);
@@ -42,16 +40,15 @@ static void kfree_common(struct kmalloc_descriptor *d, void *addr)
 
   idx = ((char *)addr - (kernel_memory + d->offset)) << d->chunk_size_log;
 
-  BUG_IF(!bitmap_bit_is_set(d->bitmap, idx), "kfree: double free");
-  bitmap_clear(d->bitmap, idx);
+  BUG_IF(!bitmap_bit_is_set(&d->bitmap, idx), "kfree: double free");
+  bitmap_clear_entry(&d->bitmap, idx);
 }
 
-#define DECL_MALLOC_DESC(__chunk_size_log, __num_entries) \
-  uint64_t kmalloc_bitmap ## __chunk_size_log[__num_entries >> BITS_PER_WORD_LOG]; \
+#define DECL_MALLOC_DESC(__chunk_size_log, __nents) \
+  uint64_t kmalloc_bitmap ## __chunk_size_log[BITMAP_NUM_WORDS(__nents)]; \
   static struct kmalloc_descriptor kmalloc_descriptor ## __chunk_size_log = { \
-    .bitmap = kmalloc_bitmap ## __chunk_size_log, \
-    .num_entries = __num_entries, \
-    .chunk_size_log = __chunk_size_log, \
+    .bitmap = BITMAP_INIT(kmalloc_bitmap ## __chunk_size_log, __nents), \
+    .chunk_size_log = __chunk_size_log \
   };
 
 DECL_MALLOC_DESC(3 , 4096);
@@ -154,10 +151,12 @@ void kmalloc_init(void)
   struct kmalloc_descriptor *d, *prev_d = NULL;
   for (i = 0; i < ARRAY_SIZE(kmalloc_all_descriptors); ++i) {
     d = kmalloc_all_descriptors[i];
+    bitmap_clear_all(&d->bitmap);
     if (!prev_d)
       d->offset = 0;
     else
-      d->offset = prev_d->offset + (prev_d->num_entries << prev_d->chunk_size_log);
+      d->offset = prev_d->offset +
+        (prev_d->bitmap.num_entries << prev_d->chunk_size_log);
 
     prev_d = d;
   }
