@@ -2,6 +2,7 @@
 #include <cpu.h>
 #include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
+#include <bcm2835_dma.h>
 #include <common.h>
 #include <debug_led.h>
 #include "uart_pl011.h"
@@ -97,6 +98,7 @@ static void kernel_init(void)
 	mem_allocator_init();
 	scheduler_init();
 	debug_led_init();
+	bcm2835_dma_init();
 }
 
 atomic_t test_atomic;
@@ -134,6 +136,34 @@ static void kernel_start_task2(void)
 	}
 }
 
+static void test_dma(void)
+{
+  uint64_t pa;
+  bool success;
+  struct bcm2835_dma_request_param p = { 0 };
+
+  void *src = dma_alloc(4096);
+  void *dst = dma_alloc(4096);
+  if (!src || !dst)
+  {
+    printf("Failed to test dma\n");
+    return;
+  }
+  memset(src, 0x7, 256);
+  success = mmu_get_pddr((uint64_t)src, &pa);
+  printf("%p->%lx\n", src, pa);
+  p.dreq = 0;
+  p.channel = 0;
+  p.dreq_type = BCM2835_DMA_DREQ_TYPE_NONE;
+  p.src = 0xc0000000 | (uint32_t)(uint64_t)src;
+  p.dst = 0xc0000000 | (uint32_t)(uint64_t)dst;
+  p.src_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+  p.dst_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+  p.len = 16;
+
+  bcm2835_dma_requests(&p, 1);
+}
+
 static void kernel_run(void)
 {
 	struct task *t;
@@ -141,6 +171,7 @@ static void kernel_run(void)
 	mmu_print_va(0xffff000001ff0000, 1);
 	mmu_print_va(0xffff000001ff1000, 1);
 	mmu_print_va(0xffff00000201c000, 1);
+	test_dma();
 
 	printf("Hello %d\n", myvar);
 	t = task_create(vchiq_main, "vchiq_main");
