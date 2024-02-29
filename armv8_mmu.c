@@ -457,6 +457,24 @@ static inline void mair_to_string(char attr, char *attr_desc, int attr_desc_len)
   }
 }
 
+bool mmu_get_pddr(uint64_t va, uint64_t *pa)
+{
+  uint64_t par = 0xffffffff;
+  asm volatile ("at s1e1r, %1\nmrs %0, PAR_EL1" : "=r"(par) : "r"(va));
+
+  if (par & 1)
+    return false;
+
+  if (!pa)
+    return false;
+
+  uint64_t bits_51_48 = (par >> 48) & 0xf;
+  uint64_t bits_47_12 = (par >> 12) & 0xffffffff;
+  uint64_t bits_11_0 = va & 0xfff;
+  *pa = bits_11_0 | (bits_47_12 << 12) | (bits_51_48 << 48);
+  return true;
+}
+
 void mmu_print_va(uint64_t addr, int verbose)
 {
   uint64_t va = addr;
