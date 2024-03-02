@@ -2,6 +2,7 @@
 #include <ioreg.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <printf.h>
 
 static volatile bool should_reboot = false;
 static const char *panic_log = NULL;
@@ -33,6 +34,7 @@ void panic(void)
 
 void panic_with_log(const char *log)
 {
+	printf(log);
 	panic_log = log;
 	panic();
 }
