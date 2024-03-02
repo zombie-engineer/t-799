@@ -117,11 +117,14 @@ static inline struct chunk_area *chunk_area_get_by_sz(int sz)
   int logsz = get_biggest_log2(sz);
 
   if ((logsz - 5) > ARRAY_SIZE(logsize_to_area_idx)) {
-    printf("chunk_area_get_by_sz: size too big, size:%d,  biggest_log: %d, array_len: %d"__endline, sz, logsz, ARRAY_SIZE(logsize_to_area_idx));
+    printf("chunk_area_get_by_sz: size too big, size:%d,"
+      "biggest_log: %d, array_len: %d"__endline, sz, logsz,
+      ARRAY_SIZE(logsize_to_area_idx));
+
     return NULL;
   }
 
-  return &dma_chunk_areas[logsize_to_area_idx[logsz - 5 - 1]];
+  return &dma_chunk_areas[logsize_to_area_idx[logsz - 5]];
 }
 
 uint64_t dma_memory_get_start_addr(void)
