@@ -21,7 +21,7 @@ struct bcm2835_dma_cb {
   uint32_t mode_2d_stride;
   uint32_t next_cb_addr;
   uint32_t res0;
-  uint32_t res1;;
+  uint32_t res1;
 };
 
 typedef void (*dma_irq_cb)(void);
@@ -212,6 +212,7 @@ static void bcm2835_dma_request(const struct bcm2835_dma_request_param *p,
   *next_cb = cb;
 }
 
+#if 0
 int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n)
 {
   size_t i;
@@ -222,6 +223,7 @@ int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n)
 
   *DMA_CONBLK_AD(p->channel) = RAM_PHY_TO_BUS_UNCACHED(next_cb);
 }
+#endif
 
 void bcm2835_dma_enable(int channel)
 {

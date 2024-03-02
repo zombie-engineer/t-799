@@ -8,6 +8,10 @@
 #include <spi.h>
 #include <errcode.h>
 #include <cpu.h>
+#include <bcm2835_dma.h>
+#include <kmalloc.h>
+#include <common.h>
+#include <mmu.h>
 
 #define ILI9341_CMD_SOFT_RESET   0x01
 #define ILI9341_CMD_READ_ID      0x04
@@ -79,6 +83,12 @@
 #define SPI_CS_RXR      (1 << 19)
 #define SPI_CS_RXF      (1 << 20)
 
+
+#define PTR_TO_U32(__ptr) ((uint32_t)(uint64_t)__ptr)
+#define DMA_ADDR(__ptr) (PTR_TO_U32(__ptr) | 0xc0000000)
+
+#define SPI_FIFO_7E       0x7e204004
+
 struct ili9341_gpio {
   int pin_blk;
   int pin_reset;
@@ -91,9 +101,26 @@ struct ili9341_gpio {
 struct ili9341 {
   struct ili9341_gpio gpio;
   struct spi_device spi;
+  int spi_dma_cb_tx_header;
+  int spi_dma_cb_tx_data;
+  int spi_dma_cb_rx_data;
+  bool spi_dma_tx_done;
+  bool spi_dma_rx_done;
 };
 
+uint64_t *spi_dma_header_tx;
+
 static struct ili9341 ili9341;
+
+static void ili9341_dma_irq_callback_spi_tx(void)
+{
+  ili9341.spi_dma_tx_done = true;
+}
+
+static void ili9341_dma_irq_callback_spi_rx(void)
+{
+  ili9341.spi_dma_rx_done = true;
+}
 
 #define SPI_DC_SET() \
   ioreg32_write((ioreg32_t)0x3f20001c, 1 << ili9341.gpio.pin_dc)
@@ -310,8 +337,51 @@ static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
     }
   }
   ili9341_set_region_coords(gpio_pin_dc, x0, y0, x1, y1);
+
+#if 0
+  uint64_t canvas_pa = 0;
+
+  BUG_IF(!mmu_get_pddr((uint64_t)ili9341_canvas, &canvas_pa), "Failed to get pa\n");
+  *(uint32_t *)ili9341_canvas = (320 * 3) << 16 | 8;
+  dcache_flush(ili9341_canvas, sizeof(ili9341_canvas));
+
+  struct bcm2835_dma_request_param req = { 0 };
+  req.src       = DMA_ADDR(canvas_pa);
+  req.dst       = SPI_FIFO_7E;
+  req.src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+  req.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+  req.len       = 320 * 3;
+  req.dreq      = DMA_DREQ_SPI_TX;
+  req.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+  req.enable_irq = false;
+
+  bcm2835_dma_program_cb(&req, ili9341.spi_dma_cb_tx_data);
+
+  req.src       = DMA_ADDR(canvas_pa);
+  req.dst       = SPI_FIFO_7E;
+  req.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+  req.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+  req.len       = 320 * 3;
+  req.dreq      = DMA_DREQ_SPI_RX;
+  req.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+  req.enable_irq = false;
+
+  bcm2835_dma_program_cb(&req, ili9341.spi_dma_cb_rx_data);
+
+  bcm2835_dma_set_cb(0, ili9341.spi_dma_cb_tx_data);
+  bcm2835_dma_set_cb(1, ili9341.spi_dma_cb_rx_data);
+#endif
+
   SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, ili9341_canvas,
     local_width * local_height * 3);
+#if 0
+  SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
+
+  *(int*)0x3f204000 = SPI_CS_CLEAR | SPI_CS_DMAEN | SPI_CS_ADCS;
+
+  bcm2835_dma_activate(0);
+  bcm2835_dma_activate(1);
+#endif
 }
 
 static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
@@ -319,11 +389,103 @@ static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
   ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 240, 0, 255);
 }
 
+int line_y = 0;
+
+static void draw_line(int y, uint8_t *data)
+{
+  uint8_t *ptr = (uint8_t *)data;
+  ptr += 320 * 3 * y;
+  for (int i = 0; i < 320; ++i) {
+    ptr[i * 3] = 0xff;
+    ptr[i * 3 + 1] = 0xff;
+  }
+}
+
+volatile int ili9341_use_dma = 0;
+bool ili9341_first = false;
+
 void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
 {
+  struct bcm2835_dma_request_param rq[2] = { 0 };
+  const uint32_t max_task_size = (0xffffU - 64) & ~7U;
+
+  if (!ili9341_first) {
   ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-  SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, data,
-    data_sz);
+  if (ili9341_use_dma) {
+    SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, data, data_sz);
+    return;
+  }
+
+  SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
+  *(int*)0x3f204000 = SPI_CS_CLEAR|SPI_CS_DMAEN|SPI_CS_ADCS;
+  *(int*)0x3f007000 = 1<<31;
+  *(int*)0x3f007100 = 1<<31;
+    ili9341_first = true;
+  }
+
+  // dcache_flush(data, data_sz);
+
+  size_t bytes_left = data_sz;
+
+  draw_line(line_y, (uint8_t *)data);
+
+  line_y += 10;
+  if (line_y >= 240)
+    line_y = 0;
+
+  while(bytes_left) {
+    size_t transfer_size = MIN(bytes_left, max_task_size);
+#define DMA_SPI_TRANSFER_LEN_OFF 16
+    *spi_dma_header_tx = (transfer_size << DMA_SPI_TRANSFER_LEN_OFF) | SPI_CS_TA;
+
+    rq[0].dreq      = DMA_DREQ_SPI_TX;
+    rq[0].dst       = SPI_FIFO_7E;
+    rq[0].src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    rq[0].dreq_type = BCM2835_DMA_DREQ_TYPE_NONE;
+    rq[0].src       = DMA_ADDR(spi_dma_header_tx);
+    rq[0].dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    rq[0].len       = 4;
+    rq[0].enable_irq = false;
+  
+    rq[1].dreq      = DMA_DREQ_SPI_TX;
+    rq[1].dst       = SPI_FIFO_7E;
+    rq[1].src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    rq[1].dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+    rq[1].src       = DMA_ADDR(data + (data_sz - bytes_left));
+    rq[1].dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    rq[1].len       = transfer_size;
+    rq[1].enable_irq = true;
+  
+    bcm2835_dma_program_cb(&rq[0], ili9341.spi_dma_cb_tx_header);
+    bcm2835_dma_program_cb(&rq[1], ili9341.spi_dma_cb_tx_data);
+    bcm2835_dma_link_cbs(ili9341.spi_dma_cb_tx_header,
+      ili9341.spi_dma_cb_tx_data);
+  
+    rq[0].src       = SPI_FIFO_7E;
+    rq[0].dst       = DMA_ADDR(ili9341_canvas);
+    rq[0].src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    rq[0].dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    rq[0].len       = transfer_size;
+    rq[0].dreq      = DMA_DREQ_SPI_RX;
+    rq[0].dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
+    rq[0].enable_irq = true;
+
+    bcm2835_dma_program_cb(&rq[0], ili9341.spi_dma_cb_rx_data);
+
+    bcm2835_dma_set_cb(0, ili9341.spi_dma_cb_tx_header);
+    bcm2835_dma_set_cb(1, ili9341.spi_dma_cb_rx_data);
+    ili9341.spi_dma_tx_done = false;
+    ili9341.spi_dma_rx_done = false;
+    *(int*)0x3f204000 = SPI_CS_CLEAR|SPI_CS_DMAEN|SPI_CS_ADCS;
+    bcm2835_dma_activate(1);
+    bcm2835_dma_activate(0);
+
+    while(!ili9341.spi_dma_tx_done);// || !ili9341.spi_dma_rx_done);
+
+    bytes_left -= transfer_size;
+  }
+  *(int*)0x3f204000 |= SPI_CS_CLEAR;
+  *(int*)0x3f204000 |= SPI_CS_TA;
 }
 
 static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
@@ -400,5 +562,28 @@ void ili9341_init(void)
   os_wait_ms(120);
   SEND_CMD(ILI9341_CMD_DISPLAY_ON);
   os_wait_ms(120);
+
+  spi_dma_header_tx = dma_alloc(MAX(sizeof(*spi_dma_header_tx), 32));
+
+  bcm2835_dma_reset(0);
+  bcm2835_dma_reset(1);
+
+  ili9341.spi_dma_cb_tx_header = bcm2835_dma_reserve_cb();
+  ili9341.spi_dma_cb_tx_data = bcm2835_dma_reserve_cb();
+  ili9341.spi_dma_cb_rx_data = bcm2835_dma_reserve_cb();
+
+  BUG_IF(
+    ili9341.spi_dma_cb_tx_header == -1 ||
+    ili9341.spi_dma_cb_tx_data == -1 ||
+    ili9341.spi_dma_cb_rx_data == -1,
+    "Failed to reserve DMA cbs");
+
+  bcm2835_dma_enable(0);
+  bcm2835_dma_enable(1);
+  bcm2835_dma_set_irq_callback(0, ili9341_dma_irq_callback_spi_tx);
+  bcm2835_dma_set_irq_callback(1, ili9341_dma_irq_callback_spi_rx);
+  bcm2835_dma_irq_enable(0);
+  bcm2835_dma_irq_enable(1);
   ili9341_fill_screen(ili9341.gpio.pin_dc);
 }
+

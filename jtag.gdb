@@ -7,6 +7,12 @@ p $pc += 4
 tb mmu_init
 c
 fin
-b vchiq_start_thread
-b vchiq_parse_msg_openack
-# c
+# b kernel_run
+# b test_spi
+# b ili9341_init
+
+b ili9341_draw_bitmap
+# b vchiq_start_thread
+ ## b mmal_port_buffer_send_one
+ ## b mmal_buffer_print_meta
+c

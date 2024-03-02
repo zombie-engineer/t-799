@@ -136,6 +136,7 @@ static void kernel_start_task2(void)
 	}
 }
 
+#if 0
 static void test_dma(void)
 {
   uint64_t pa;
@@ -153,7 +154,6 @@ static void test_dma(void)
   success = mmu_get_pddr((uint64_t)src, &pa);
   printf("%p->%lx\n", src, pa);
   p.dreq = 0;
-  p.channel = 0;
   p.dreq_type = BCM2835_DMA_DREQ_TYPE_NONE;
   p.src = 0xc0000000 | (uint32_t)(uint64_t)src;
   p.dst = 0xc0000000 | (uint32_t)(uint64_t)dst;
@@ -163,6 +163,7 @@ static void test_dma(void)
 
   bcm2835_dma_requests(&p, 1);
 }
+#endif
 
 static void kernel_run(void)
 {
@@ -171,7 +172,7 @@ static void kernel_run(void)
 	mmu_print_va(0xffff000001ff0000, 1);
 	mmu_print_va(0xffff000001ff1000, 1);
 	mmu_print_va(0xffff00000201c000, 1);
-	test_dma();
+	// test_dma();
 
 	printf("Hello %d\n", myvar);
 	t = task_create(vchiq_main, "vchiq_main");

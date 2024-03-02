@@ -50,7 +50,6 @@ typedef enum {
 
 struct bcm2835_dma_request_param {
   int dreq;
-  int channel;
   bcm2835_dma_dreq_type_t dreq_type;
   uint32_t src;
   uint32_t dst;
