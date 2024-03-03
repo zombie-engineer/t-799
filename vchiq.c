@@ -1212,7 +1212,7 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_component *cam,
 {
   uint32_t frame_count = 1;
 
-  MMAL_INFO("capture_frames %d", num_capture_frames++);
+  // MMAL_INFO("capture_frames %d", num_capture_frames++);
   return vchiq_mmal_port_parameter_set(cam, capture_port,
     MMAL_PARAMETER_CAPTURE, &frame_count, sizeof(frame_count));
 }

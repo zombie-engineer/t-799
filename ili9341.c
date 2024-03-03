@@ -395,7 +395,7 @@ static void draw_line(int y, uint8_t *data)
 {
   uint8_t *ptr = (uint8_t *)data;
   ptr += 320 * 3 * y;
-  for (int i = 0; i < 320; ++i) {
+  for (int i = 32; i < 64; ++i) {
     ptr[i * 3] = 0xff;
     ptr[i * 3 + 1] = 0xff;
   }
