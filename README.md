@@ -78,3 +78,7 @@ Running openocd:
     "gdb-multiarch kernel8.img"
   then attach to openocd gdb port:
     "target remote :3333"
+
+Good related material to read:
+- Great explanation about Aarch64 exception model in good details
+  https://krinkinmu.github.io/2021/01/10/aarch64-interrupt-handling.html
