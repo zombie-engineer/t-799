@@ -75,8 +75,6 @@ static inline void wmb(void)
 #define VCHIQ_MSG_REMOTE_RELEASE    13  /* -                                 */
 #define VCHIQ_MSG_REMOTE_USE_ACTIVE 14  /* -                                 */
 
-#define VCHIQ_SLOT_SIZE 4096
-
 #define VCHIQ_MAKE_MSG(type, srcport, dstport) \
   ((type<<24) | (srcport<<12) | (dstport<<0))
 
@@ -89,7 +87,7 @@ static inline void wmb(void)
 #define VCHIQ_MSG_DSTPORT(msgid) \
   ((unsigned short)msgid & 0xfff)
 
-#define VCHIQ_MSGID_PADDING            VCHIQ_MAKE_MSG(VCHIQ_MSG_PADDING, 0, 0)
+#define VCHIQ_MSGID_PADDING VCHIQ_MAKE_MSG(VCHIQ_MSG_PADDING, 0, 0)
 
 #define VCHIQ_MAKE_FOURCC(x0, x1, x2, x3) \
   (((x0) << 24) | ((x1) << 16) | ((x2) << 8) | (x3))
@@ -97,22 +95,23 @@ static inline void wmb(void)
 #define VCHIQ_MAGIC VCHIQ_MAKE_FOURCC('V', 'C', 'H', 'I')
 
 /* The version of VCHIQ - change with any non-trivial change */
-#define VCHIQ_VERSION            8
+#define VCHIQ_VERSION 8
 
 /*
  * The minimum compatible version - update to match VCHIQ_VERSION with any
  * incompatible change
  */
-#define VCHIQ_VERSION_MIN        3
+#define VCHIQ_VERSION_MIN 3
 
-#define VCHIQ_MAX_SERVICES       4096
+#define VCHIQ_SLOT_SIZE 4096
+
 #define VCHIQ_MAX_SLOTS          128
 #define VCHIQ_MAX_SLOTS_PER_SIDE 64
 
-#define VCHIQ_NUM_CURRENT_BULKS        32
-#define VCHIQ_NUM_SERVICE_BULKS        4
+#define VCHIQ_NUM_CURRENT_BULKS 32
+#define VCHIQ_NUM_SERVICE_BULKS 4
 
-#define VCHIQ_ENABLE_DEBUG             1
+#define VCHIQ_ENABLE_DEBUG 1
 
 #define MAX_FRAGMENTS (VCHIQ_NUM_CURRENT_BULKS * 2)
 
@@ -1338,9 +1337,6 @@ static int mmal_service_data_callback(struct vchiq_service_common *s,
 
   return SUCCESS;
 }
-
-#define VCHIQ_MAKE_FOURCC(x0, x1, x2, x3) \
-  (((x0) << 24) | ((x1) << 16) | ((x2) << 8) | (x3))
 
 #define VC_MMAL_VER 15
 #define VC_MMAL_MIN_VER 10
