@@ -21,6 +21,7 @@
 #include "mmal-encodings.h"
 #include "vc_sm_defs.h"
 #include <ili9341.h>
+#include <bitmap.h>
 
 #define BELL0 ((ioreg32_t)(0x3f00b840))
 #define BELL2 ((ioreg32_t)(0x3f00b848))
@@ -133,6 +134,75 @@ struct vchiq_open_payload {
   short version;
   short version_min;
 } PACKED;
+
+struct vchiq_mmal_port_buffer {
+  /* number of buffers */
+  unsigned int num;
+  /* size of buffers */
+  uint32_t size;
+  /* alignment of buffers */
+  uint32_t alignment;
+};
+
+struct vchiq_mmal_port {
+  uint32_t enabled : 1;
+  uint32_t zero_copy : 1;
+  uint32_t handle;
+  /* port type, cached to use on port info set */
+  uint32_t type;
+  /* port index, cached to use on port info set */
+  uint32_t index;
+
+  /* component port belongs to, allows simple deref */
+  struct vchiq_mmal_component *component;
+
+  /* port conencted to */
+  struct vchiq_mmal_port *connected;
+
+  /* buffer info */
+  struct vchiq_mmal_port_buffer minimum_buffer;
+  struct vchiq_mmal_port_buffer recommended_buffer;
+  struct vchiq_mmal_port_buffer current_buffer;
+
+  /* stream format */
+  struct mmal_es_format_local format;
+
+  /* elementary stream format */
+  union mmal_es_specific_format es;
+
+  /* data buffers to fill */
+  struct list_head buffers;
+
+  /* callback context */
+  void *cb_ctx;
+};
+
+#define MAX_PORT_COUNT 4
+struct vchiq_mmal_component {
+  char name[32];
+  uint32_t in_use:1;
+  uint32_t enabled:1;
+  /* VideoCore handle for component */
+  uint32_t handle;
+  /* Number of input ports */
+  uint32_t inputs;
+  /* Number of output ports */
+  uint32_t outputs;
+  /* Number of clock ports */
+  uint32_t clocks;
+  /* control port */
+  struct vchiq_mmal_port control;
+  /* input ports */
+  struct vchiq_mmal_port input[MAX_PORT_COUNT];
+  /* output ports */
+  struct vchiq_mmal_port output[MAX_PORT_COUNT];
+  /* clock ports */
+  struct vchiq_mmal_port clock[MAX_PORT_COUNT];
+  /* Used to ref back to client struct */
+  uint32_t client_component;
+  struct vchiq_service_common *ms;
+};
+
 
 static int vc_trans_id = 0;
 
@@ -333,7 +403,25 @@ struct vchiq_state {
   int slot_queue_available;
 };
 
-static struct vchiq_state vchiq_state ALIGNED(64);
+struct mmal_io_work {
+  struct list_head list;
+  struct mmal_buffer_header *buffer_header;
+  struct vchiq_mmal_component *component;
+  struct vchiq_mmal_port *port;
+  mmal_io_fn fn;
+  int idx;
+};
+
+#define MAX_MMAL_WORKS 12
+
+struct mmal_state {
+  struct mmal_io_work work_array[MAX_MMAL_WORKS];
+  struct bitmap work_bitmap;
+  uint64_t work_bitmap_data[BITMAP_NUM_WORDS(MAX_MMAL_WORKS)];
+};
+
+static struct vchiq_state vchiq_state;
+static struct mmal_state mmal_state;
 
 #define VCHIQ_SLOT_MASK (VCHIQ_SLOT_SIZE - 1)
 #define VCHIQ_SLOT_QUEUE_MASK  (VCHIQ_MAX_SLOTS_PER_SIDE - 1)
@@ -467,14 +555,6 @@ static inline void vchiq_init_fragments(void *baseaddr, int num_fragments,
   f->next = NULL;
 }
 
-struct mmal_io_work {
-  struct list_head list;
-  struct mmal_buffer_header *b;
-  struct vchiq_mmal_component *c;
-  struct vchiq_mmal_port *p;
-  mmal_io_fn fn;
-};
-
 struct mmal_io_work *mmal_io_work_pop(void)
 {
   int irqflags;
@@ -488,6 +568,24 @@ struct mmal_io_work *mmal_io_work_pop(void)
   return w;
 }
 
+static struct mmal_io_work *mmal_io_work_alloc(void)
+{
+  struct mmal_io_work *w;
+
+  int idx = bitmap_set_next_free(&mmal_state.work_bitmap);
+  if (idx != -1) {
+    w = &mmal_state.work_array[idx];
+    w->idx = idx;
+  }
+
+  return w;
+}
+
+static void mmal_io_work_free(struct mmal_io_work *w)
+{
+  bitmap_clear_entry(&mmal_state.work_bitmap, w->idx);
+}
+
 static void vchiq_io_thread(void)
 {
   struct mmal_io_work *w;
@@ -495,9 +593,10 @@ static void vchiq_io_thread(void)
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
     w = mmal_io_work_pop();
-    if (w)
-      w->fn(w->c, w->p, w->b);
-    kfree(w);
+    if (w) {
+      w->fn(w->component, w->port, w->buffer_header);
+      mmal_io_work_free(w);
+    }
   }
 }
 
@@ -984,13 +1083,14 @@ static int mmal_io_work_push(struct vchiq_mmal_component *c,
 {
   int irqflags;
   struct mmal_io_work *w;
-  w = kzalloc(sizeof(*w));
+
+  w = mmal_io_work_alloc();
   if (!w)
     return ERR_GENERIC;
 
-  w->c = c;
-  w->p = p;
-  w->b = b;
+  w->component = c;
+  w->port = p;
+  w->buffer_header = b;
   w->fn = fn;
   wmb();
   list_add_tail(&w->list, &mmal_io_work_list);
@@ -1784,7 +1884,8 @@ out_err:
   return err;
 }
 
-static void vchiq_mmal_local_format_fill(struct mmal_es_format_local *f, int encoding, int encoding_variant, int width, int height)
+static void vchiq_mmal_local_format_fill(struct mmal_es_format_local *f,
+  int encoding, int encoding_variant, int width, int height)
 {
   f->encoding = encoding;
   f->encoding_variant = encoding_variant;
@@ -2075,16 +2176,7 @@ static int mmal_port_buffer_send_all(struct vchiq_mmal_port *p)
   return SUCCESS;
 }
 
-static int mmal_port_buffer_receive(struct vchiq_mmal_port *p)
-{
-  while(1) {
-    asm volatile ("wfe");
-    os_yield();
-  }
-  return SUCCESS;
-}
-
-static int vchiq_camera_run(struct vchiq_service_common *mmal_service,
+static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_service_common *mems_service,
   int frame_width, int frame_height)
 {
@@ -2158,10 +2250,6 @@ static int vchiq_camera_run(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to send buffer to port");
   mmal_camera_capture_frames(cam, still_port);
   CHECK_ERR("Failed to initiate frame capture");
-  while(1) {
-    err = mmal_port_buffer_receive(still_port);
-    CHECK_ERR("Failed to receive buffer from VC");
-  }
   return SUCCESS;
 
 out_err:
@@ -2205,7 +2293,7 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   struct vchiq_service_common *smem_service, *mmal_service;
 
   err = vchiq_start_thread(s);
-  CHECK_ERR("failed to start vchiq async primitives");
+  BUG_IF(err != SUCCESS, "failed to start vchiq async primitives");
   os_event_wait(&s->state_waitflag);
   os_event_clear(&s->state_waitflag);
   err = vchiq_handmade_connect(s);
@@ -2216,12 +2304,15 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   smem_service = vchiq_open_smem_service(s);
   BUG_IF(!smem_service, "failed at open smem service");
 
-  err = vchiq_camera_run(mmal_service, smem_service, 320, 240);
-  CHECK_ERR("failed to run camera");
+  err = vchiq_startup_camera(mmal_service, smem_service, 320, 240);
+  BUG_IF(err != SUCCESS, "failed to run camera");
+}
 
-out_err:
-  while(1)
-    asm volatile("wfe");
+static void mmal_init_state(void)
+{
+  mmal_state.work_bitmap.data = mmal_state.work_bitmap_data;
+  mmal_state.work_bitmap.num_entries = MAX_MMAL_WORKS;
+  bitmap_clear_all(&mmal_state.work_bitmap);
 }
 
 void vchiq_init(void)
@@ -2255,6 +2346,7 @@ void vchiq_init(void)
     return;
 
   vchiq_init_state(s, vchiq_slot_zero);
+  mmal_init_state();
 
   vchiq_slot_zero->platform_data[VCHIQ_PLATFORM_FRAGMENTS_OFFSET_IDX]
     = ((uint32_t)slot_phys) + slot_mem_size;

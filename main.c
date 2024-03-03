@@ -111,17 +111,7 @@ static void vchiq_main(void)
 	ili9341_init();
 	vchiq_init();
 	while(1) {
-#if 0
-		printf("task1\n");
-		os_wait_ms(1000);
-		os_yield();
-		atomic_cmp_and_swap(&test_atomic, 0, 1);
-		printf("waiting \n");
-		os_event_clear(&test_ev);
-		os_event_wait(&test_ev);
-		printf("wait complete\n");
-#endif
-    asm volatile ("wfe");
+		asm volatile("wfe");
 	}
 }
 
