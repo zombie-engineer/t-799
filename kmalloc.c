@@ -38,7 +38,7 @@ static void kfree_common(struct kmalloc_descriptor *d, void *addr)
 {
   int idx;
 
-  idx = ((char *)addr - (kernel_memory + d->offset)) << d->chunk_size_log;
+  idx = ((char *)addr - (kernel_memory + d->offset)) >> d->chunk_size_log;
 
   BUG_IF(!bitmap_bit_is_set(&d->bitmap, idx), "kfree: double free");
   bitmap_clear_entry(&d->bitmap, idx);
