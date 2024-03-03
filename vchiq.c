@@ -479,6 +479,7 @@ static void vchiq_io_thread(void)
     w = mmal_io_work_pop();
     if (w)
       w->fn(w->c, w->p, w->b);
+    kfree(w);
   }
 }
 
