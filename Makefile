@@ -88,6 +88,10 @@ dj:
 	@echo "Starting session to debug emulated Raspberry PI 3B+"
 	./debug_pi_jtag.sh
 
+dja:
+	@echo "Starting session to debug emulated Raspberry PI 3B+"
+	./debug_pi_jtag.sh --attach
+
 clean:
 	git clean -xfd
 
