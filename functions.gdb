@@ -1,3 +1,30 @@
+define dump_dma_cb
+  set $__cb_ti = *(int*)($arg0 + 0x00)
+  set $__cb_src = *(int*)($arg0 + 0x04)
+  set $__cb_dst = *(int*)($arg0 + 0x08)
+  set $__cb_len = *(int*)($arg0 + 0x0c)
+  set $__cb_next = *(int*)($arg0 + 0x14)
+  printf "cb:%08x,TI:%08x,%08x->%08x(%08x),next:%08x\n", $arg0, $__cb_ti, $__cb_src, $__cb_dst, $__cb_len, $__cb_next
+end
+
+define lsdmach
+  printf "dma ch %d:", $arg0
+  set $__dma_ch_base = 0x3f007000 + (int)$arg0 * 0x100
+  set $__dma_cs    = *(int *)($__dma_ch_base + 0x00)
+  set $__dma_cb    = *(int *)($__dma_ch_base + 0x04)
+  set $__dma_ti    = *(int *)($__dma_ch_base + 0x08)
+  set $__dma_src   = *(int *)($__dma_ch_base + 0x0c)
+  set $__dma_dst   = *(int *)($__dma_ch_base + 0x10)
+  set $__dma_len   = *(int *)($__dma_ch_base + 0x14)
+  set $__dma_next  = *(int *)($__dma_ch_base + 0x1c)
+  set $__dma_debug = *(int *)($__dma_ch_base + 0x20)
+  printf "CS:%08x,CB:%08x,TI:%08x,%08x->%08x(%08x),next:%08x,DBG:%08x\n", $__dma_cs, $__dma_cb, $__dma_ti, $__dma_src, $__dma_dst, $__dma_len, $__dma_next, $__dma_debug
+  if $__dma_cb
+    set $__cbaddr = $__dma_cb - 0xc0000000
+    dump_dma_cb $__cbaddr
+  end
+end
+
 define __print_irq_basic
   if $arg0 & (1<<0)
     printf "ARM_TIMER,"
