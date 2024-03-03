@@ -783,7 +783,6 @@ static void vchiq_recycle_thread(void)
   while (1) {
     vchiq_event_wait(&s->recycle_waitflag, &s->local->recycle);
     vchiq_process_free_queue(s);
-    os_yield();
   }
 }
 
