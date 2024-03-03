@@ -118,6 +118,15 @@ static inline void wmb(void)
 #define VCHIQ_PLATFORM_FRAGMENTS_OFFSET_IDX 0
 #define VCHIQ_PLATFORM_FRAGMENTS_COUNT_IDX  1
 
+enum {
+  CAM_PORT_PREVIEW = 0,
+  CAM_PORT_VIDEO,
+  CAM_PORT_CAPTURE,
+  CAM_PORT_COUNT
+};
+
+#define MAX_SUPPORTED_ENCODINGS 20
+
 struct vchiq_open_payload {
   int fourcc;
   int client_id;
@@ -127,7 +136,7 @@ struct vchiq_open_payload {
 
 static int vc_trans_id = 0;
 
-static struct vchiq_state vchiq_state ALIGNED(64);
+static struct vchiq_state vchiq_state;
 
 static struct list_head mmal_io_work_list;
 static struct event mmal_io_work_waitflag;
@@ -257,6 +266,17 @@ struct vchiq_header {
   char data[0];
 };
 
+/*
+ * Payload is aligned to header size, so that header would always start at
+ * granule of its size
+ */
+#define VCHIQ_MSG_HDR_SZ_MASK 7
+#define VCHIQ_MSG_HDR_SZ_INV_MASK 0xfffffff8
+
+#define VCHIQ_MSG_TOTAL_SIZE(__payload_sz) \
+  ((__payload_sz + sizeof(struct vchiq_header) + VCHIQ_MSG_HDR_SZ_MASK) \
+    & VCHIQ_MSG_HDR_SZ_INV_MASK)
+
 typedef void (*vchiq_userdata_term_t)(void *userdata);
 
 typedef uint32_t vchi_mem_handle_t;
@@ -297,7 +317,6 @@ struct vchiq_state {
   struct event sync_release_waitflag;
   struct event state_waitflag;
 
-  char *tx_data;
   char *rx_data;
 
   /* Indicates the byte position within the stream from where the next
@@ -556,12 +575,6 @@ static int vchiq_tx_header_to_slot_idx(struct vchiq_state *s)
   return s->remote->slot_queue[(s->rx_pos / VCHIQ_SLOT_SIZE) & VCHIQ_SLOT_QUEUE_MASK];
 }
 
-static int vchiq_calc_stride(int size)
-{
-  size += sizeof(struct vchiq_header);
-  return (size + sizeof(struct vchiq_header) - 1) & ~(sizeof(struct vchiq_header) - 1);
-}
-
 struct vchiq_header *vchiq_get_next_header_rx(struct vchiq_state *state)
 {
   struct vchiq_header *h;
@@ -573,7 +586,7 @@ next_header:
   state->rx_data = (char *)(state->slots + slot_index);
   rx_pos = state->rx_pos;
   h = (struct vchiq_header *)&state->rx_data[rx_pos & VCHIQ_SLOT_MASK];
-  state->rx_pos += vchiq_calc_stride(h->size);
+  state->rx_pos += VCHIQ_MSG_TOTAL_SIZE(h->size);
   if (h->msgid == VCHIQ_MSGID_PADDING)
     goto next_header;
 
@@ -706,7 +719,7 @@ static int vchiq_parse_rx(struct vchiq_state *s)
     int old_rx_pos = s->rx_pos;
     h = vchiq_get_next_header_rx(s);
     MMAL_DEBUG2("msg received: %p, rx_pos: %d, size: %d", h, old_rx_pos,
-      vchiq_calc_stride(h->size));
+      VCHIQ_MSG_TOTAL_SIZE(h->size));
     err = vchiq_parse_rx_dispatch(s, h);
     CHECK_ERR("failed to parse message from remote");
 
@@ -764,7 +777,7 @@ static void vchiq_process_free_queue(struct vchiq_state *s)
     while (pos < VCHIQ_SLOT_SIZE) {
       h = (struct vchiq_header *)(slots + pos);
 
-      pos += vchiq_calc_stride(h->size);
+      pos += VCHIQ_MSG_TOTAL_SIZE(h->size);
       BUG_IF(pos > VCHIQ_SLOT_SIZE, "some");
     }
 
@@ -829,16 +842,31 @@ out_err:
 }
 
 static struct vchiq_header *vchiq_prep_next_header_tx(struct vchiq_state *s,
-  int msg_size)
+  size_t msg_size)
 {
   int tx_pos, slot_queue_index, slot_index;
   struct vchiq_header *h;
-  int slot_space;
-  int stride;
+  size_t slot_space;
+  size_t msg_full_size;
 
-  /* Recall last position for tx */
-  tx_pos = s->local_tx_pos;
-  stride = vchiq_calc_stride(msg_size);
+  char *slot;
+
+  /*
+   * Recall last position for tx
+   * Answer to question why there is s->local_tx_pos and s->local->tx_pos and
+   * why we don't update s->local->tx_pos in this function:
+   * s->local->tx_pos is a shared field, that can be read by VideoCore firmware
+   * at any moment. When it detects 'tx_pos' incremented it is assumes message
+   * is ready.
+   * In this function message is not ready, before message, including header
+   * and payload are both fully written s->local->tx_pos should not be
+   * incremented.
+   * Because we already have calculated the value for the new tx_pos here,
+   * we cache in s->local_tx_pos, the caller of this function will fill the
+   * message and update tx_pos from this s->local_tx_pos
+   */
+  tx_pos = s->local->tx_pos;
+  msg_full_size = VCHIQ_MSG_TOTAL_SIZE(msg_size);
 
   /*
    * If message can not passed in one chunk within current slot,
@@ -856,28 +884,35 @@ static struct vchiq_header *vchiq_prep_next_header_tx(struct vchiq_state *s,
    * |         padding message added                                   |
    */
   slot_space = VCHIQ_SLOT_SIZE - (tx_pos & VCHIQ_SLOT_MASK);
-  if (slot_space < stride) {
-    slot_queue_index = ((int)((unsigned int)(tx_pos) / VCHIQ_SLOT_SIZE));
+  slot_queue_index = tx_pos / VCHIQ_SLOT_SIZE;
+  if (slot_space < msg_full_size) {
+    BUG_IF(slot_space < sizeof(*h),
+      "Trailing slot space less than header size");
+
     slot_index = s->local->slot_queue[slot_queue_index & VCHIQ_SLOT_QUEUE_MASK];
-
-    s->tx_data = (char*)&s->slots[slot_index];
-
-    h = (struct vchiq_header *)(s->tx_data + (tx_pos & VCHIQ_SLOT_MASK));
+    slot = (char *)&s->slots[slot_index];
+    h = (struct vchiq_header *)(slot + (tx_pos & VCHIQ_SLOT_MASK));
     h->msgid = VCHIQ_MSGID_PADDING;
     h->size = slot_space - sizeof(*h);
-    s->local_tx_pos += slot_space;
     tx_pos += slot_space;
+    slot_queue_index++;
   }
 
-  slot_queue_index = ((int)((unsigned int)(tx_pos) / VCHIQ_SLOT_SIZE));
   slot_index = s->local->slot_queue[slot_queue_index & VCHIQ_SLOT_QUEUE_MASK];
+  slot = (char *)&s->slots[slot_index];
 
-  s->tx_data = (char*)&s->slots[slot_index];
-  s->local_tx_pos += stride;
-  s->local->tx_pos = s->local_tx_pos;
+  /* just prepare the header, all the filling is done outside */
+  h = (struct vchiq_header *)(slot + (tx_pos & VCHIQ_SLOT_MASK));
 
-  h = (struct vchiq_header *)(s->tx_data + (tx_pos & VCHIQ_SLOT_MASK));
-  h->size = msg_size;
+  tx_pos += msg_full_size;
+
+  MMAL_DEBUG("prep_next_msg:%d(%d:%d)->%d(%d:%d)",
+    s->local->tx_pos,
+    s->local->slot_queue[(s->local->tx_pos / VCHIQ_SLOT_SIZE) & VCHIQ_SLOT_QUEUE_MASK],
+    s->local_tx_pos & VCHIQ_SLOT_MASK,
+    tx_pos, slot_index, tx_pos & VCHIQ_SLOT_MASK);
+
+  s->local_tx_pos = tx_pos;
   return h;
 }
 
@@ -888,13 +923,16 @@ static void vchiq_handmade_prep_msg(struct vchiq_state *s, int msgid,
   int old_tx_pos = s->local->tx_pos;
 
   h = vchiq_prep_next_header_tx(s, payload_sz);
-  MMAL_DEBUG2("msg sent: %p, tx_pos: %d, size: %d", h, old_tx_pos,
-    vchiq_calc_stride(h->size));
-
   h->msgid = VCHIQ_MAKE_MSG(msgid, srcport, dstport);
+  h->size = payload_sz;
   memcpy(h->data, payload, payload_sz);
+  wmb();
+  /* Make the new tx_pos visible to the peer. */
+  s->local->tx_pos = s->local_tx_pos;
+  wmb();
+  MMAL_DEBUG("msg sent: %p, tx_pos: %d, size: %d", h, old_tx_pos,
+    VCHIQ_MSG_TOTAL_SIZE(h->size));
 }
-
 
 static void vchiq_open_service(struct vchiq_state *state,
   struct vchiq_service_common *service, uint32_t fourcc, short version,
@@ -1404,26 +1442,6 @@ static inline struct vchiq_service_common *vchiq_open_smem_service(
   return vchiq_alloc_open_service(state, MAKE_FOURCC("SMEM"), VC_SM_VER,
     VC_SM_MIN_VER, mems_service_data_callback);
 }
-
-#define VCHI_VERSION(v_) { v_, v_ }
-#define VCHI_VERSION_EX(v_, m_) { v_, m_ }
-
-enum {
-  COMP_CAMERA = 0,
-  COMP_PREVIEW,
-  COMP_IMAGE_ENCODE,
-  COMP_VIDEO_ENCODE,
-  COMP_COUNT
-};
-
-enum {
-  CAM_PORT_PREVIEW = 0,
-  CAM_PORT_VIDEO,
-  CAM_PORT_CAPTURE,
-  CAM_PORT_COUNT
-};
-
-#define MAX_SUPPORTED_ENCODINGS 20
 
 static int vchiq_mmal_port_info_get(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p)
