@@ -110,9 +110,7 @@ static void vchiq_main(void)
 	int res;
 	ili9341_init();
 	vchiq_init();
-	while(1) {
-		asm volatile("wfe");
-	}
+	os_exit_current_task();
 }
 
 static void kernel_start_task2(void)

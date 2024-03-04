@@ -104,7 +104,11 @@ static inline void scheduler_drop_current(void)
 	if (t == sched.idle_task)
 		return;
 
-	if (t->scheduler_request == TASK_SCHED_RQ_BLOCK_ON_TIMER)
+	if (t->scheduler_request == TASK_SCHED_RQ_EXIT) {
+		task_delete_isr(t);
+		return;
+	}
+	else if (t->scheduler_request == TASK_SCHED_RQ_BLOCK_ON_TIMER)
 		scheduler_insert_to_blocked_on_timer(t);
 	else if (t->scheduler_request == TASK_SCHED_RQ_BLOCK_ON_EVENT)
 		list_add_tail(&t->scheduler_list, &sched.blocked_on_event);
@@ -185,6 +189,26 @@ void NORETURN scheduler_start(void)
 	while(1)
 		asm volatile("wfe");
 }
+
+bool sched_exit_current_task_isr(void)
+{
+	struct task *t = sched.current;
+	t->scheduler_request = TASK_SCHED_RQ_EXIT;
+	__schedule();
+}
+
+bool sched_exit_task_isr(struct task *t)
+{
+	if (t == sched.current) {
+		t->scheduler_request = TASK_SCHED_RQ_EXIT;
+		__schedule();
+	}
+	else {
+		list_del(&t->scheduler_list);
+		task_delete_isr(t);
+	}
+}
+
 
 void sched_delay_current_ms_isr(uint64_t ms)
 {

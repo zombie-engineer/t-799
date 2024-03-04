@@ -8,6 +8,8 @@
 #define SVC_YIELD 1
 #define SVC_WAIT_EVENT 2
 #define SVC_SCHEDULE_TASK 3
+#define SVC_EXIT_TASK 4
+#define SVC_EXIT_CURRENT_TASK 5
 
 void os_wait_ms(uint32_t ms)
 {
@@ -34,6 +36,17 @@ void os_schedule_task(struct task *t)
 {
   asm inline volatile("mov x0, %0\r\nsvc %1"
     :: "r"(t), "i"(SVC_SCHEDULE_TASK));
+}
+
+void os_exit_task(struct task *t)
+{
+  asm inline volatile("mov x0, %0\r\nsvc %1"
+    :: "r"(t), "i"(SVC_EXIT_TASK));
+}
+
+void os_exit_current_task(void)
+{
+  asm inline volatile("svc %0" :: "i"(SVC_EXIT_CURRENT_TASK));
 }
 
 void os_event_wait(struct event *ev)
@@ -73,6 +86,12 @@ void svc_handler(uint32_t imm)
     break;
   case SVC_SCHEDULE_TASK:
     sched_run_task_isr((struct task *)arg0);
+    break;
+  case SVC_EXIT_TASK:
+    sched_exit_task_isr((struct task *)arg0);
+    break;
+  case SVC_EXIT_CURRENT_TASK:
+    sched_exit_current_task_isr();
     break;
   default:
     panic();

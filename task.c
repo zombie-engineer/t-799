@@ -56,8 +56,17 @@ static struct stack *stack_alloc(void)
 
 static void stack_release(struct stack *s)
 {
-  int stack_idx = s - &stacks_array[0];
-  stacks_busymask &= ~(1<<stack_idx);
+  int idx;
+
+  BUG_IF(s < stacks_array || s > stacks_array + ARRAY_SIZE(stacks_array),
+    "Trying to free invalid stack");
+
+  idx = s - &stacks_array[0];
+
+  BUG_IF(!(stacks_busymask & (1<<idx)),
+    "Trying to free unallocated stack");
+
+  stacks_busymask &= ~(1<<idx);
 }
 
 static void cpuctx_release(struct cpuctx *ctx)
@@ -77,6 +86,12 @@ static struct task *task_alloc(void)
     }
   }
   return NULL;
+}
+
+static void task_release(struct task *t)
+{
+  int idx = t - &tasks_array[0];
+  tasks_busymask &= ~(1<<idx);
 }
 
 static void task_return_to_nowhere(void)
@@ -126,12 +141,20 @@ struct task *task_create(task_fn fn, const char *task_name)
   }
 
   stack_base = (uint64_t)&s->data[NUM_STACK_WORDS - 2];
+  t->stack = s;
   t->scheduler_request = 0;
   t->cpuctx = ctx;
   task_init_cpuctx(t, fn, stack_base);
   memset(t->name, 0, sizeof(t->name));
   strncpy(t->name, task_name, sizeof(t->name));
   return t;
+}
+
+void task_delete_isr(struct task *t)
+{
+  stack_release(t->stack);
+  cpuctx_release(t->cpuctx);
+  task_release(t);
 }
 
 void mem_allocator_init(void)
