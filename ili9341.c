@@ -407,7 +407,7 @@ bool ili9341_first = false;
 void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
 {
   struct bcm2835_dma_request_param rq[2] = { 0 };
-  const uint32_t max_task_size = (0xffffU - 64) & ~7U;
+  const uint32_t max_task_size = 0xffffU;
 
   if (!ili9341_first) {
   ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
