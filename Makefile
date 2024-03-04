@@ -48,7 +48,7 @@ OBJS := \
   gpio \
   self_test_context_switch \
   spi \
-  vchiq
+  vchiq/vchiq
 
 OBJS := $(addsuffix .o, $(OBJS))
 

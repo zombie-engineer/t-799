@@ -897,6 +897,17 @@ static void vchiq_recycle_thread(void)
   }
 }
 
+static void vchiq_sync_release_thread(void)
+{
+  struct vchiq_state *s;
+
+  s = &vchiq_state;
+  while (1) {
+    vchiq_event_wait(&s->sync_release_waitflag, &s->local->sync_release);
+    // vchiq_process_free_queue(s);
+  }
+}
+
 static void vchiq_loop_thread(void)
 {
   struct vchiq_state *s;
@@ -930,6 +941,10 @@ static int vchiq_start_thread(struct vchiq_state *s)
 
   t = task_create(vchiq_recycle_thread, "vchiq_recycle_thread");
   CHECK_ERR_PTR(t, "Failed to start vchiq_thread");
+  os_schedule_task(t);
+
+  t = task_create(vchiq_sync_release_thread, "vchiq_sync_release");
+  CHECK_ERR_PTR(t, "Failed to start vchiq_sync_release");
   os_schedule_task(t);
 
   return SUCCESS;
