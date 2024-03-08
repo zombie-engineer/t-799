@@ -64,12 +64,14 @@ void bcm2835_dma_enable(int channel);
 void bcm2835_dma_irq_enable(int channel);
 
 void bcm2835_dma_reset(int channel);
+int bcm2835_dma_request_channel(void);
 int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n);
-
 int bcm2835_dma_reserve_cb(void);
 
 bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   int cb_handle);
+
+bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src);
 
 bool bcm2835_dma_link_cbs(int cb_handle, int cb_handle_next);
 void bcm2835_dma_set_cb(int channel, int cb_handle);

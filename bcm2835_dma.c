@@ -36,6 +36,8 @@ struct bcm2835_dma {
   struct bcm2835_dma_cb *cbs;
   struct bitmap cb_bitmap;
   struct bcm2835_dma_per_chan_irq_cbs irq_cbs[BCM2835_DMA_NUM_CHANNELS];
+  struct bitmap channel_bitmap;
+  uint64_t channel_bitmap_data;
 
   int num_dma_irqs[BCM2835_DMA_NUM_CHANNELS];
   int num_read_errors[BCM2835_DMA_NUM_CHANNELS];
@@ -191,6 +193,18 @@ bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   return true;
 }
 
+bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src)
+{
+  struct bcm2835_dma_cb *cb;
+
+  if (cb_handle == -1 || cb_handle >= BCM2835_DMA_NUM_SCBS)
+    return false;
+
+  cb = &bcm2835_dma.cbs[cb_handle];
+  cb->source_addr = src;
+  return true;
+}
+
 static void bcm2835_dma_request(const struct bcm2835_dma_request_param *p,
   struct bcm2835_dma_cb **next_cb)
 {
@@ -224,6 +238,11 @@ int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n)
   *DMA_CONBLK_AD(p->channel) = RAM_PHY_TO_BUS_UNCACHED(next_cb);
 }
 #endif
+
+int bcm2835_dma_request_channel(void)
+{
+  return bitmap_set_next_free(&bcm2835_dma.channel_bitmap);
+}
 
 void bcm2835_dma_enable(int channel)
 {
@@ -299,6 +318,10 @@ void bcm2835_dma_init(void)
   bcm2835_dma.cb_bitmap.data = bcm2835_dma_cb_bitmap;
   bcm2835_dma.cb_bitmap.num_entries = BCM2835_DMA_NUM_SCBS;
   bitmap_clear_all(&bcm2835_dma.cb_bitmap);
+
+  bcm2835_dma.channel_bitmap.data = &bcm2835_dma.channel_bitmap_data;
+  bcm2835_dma.channel_bitmap.num_entries = BCM2835_DMA_NUM_CHANNELS;
+  bitmap_clear_all(&bcm2835_dma.channel_bitmap);
 
   irq_set(BCM2835_IRQNR_DMA_0, bcm2835_dma_irq_handler_ch_0);
   irq_set(BCM2835_IRQNR_DMA_1, bcm2835_dma_irq_handler_ch_1);
