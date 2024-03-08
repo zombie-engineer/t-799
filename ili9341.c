@@ -150,10 +150,7 @@ static void ili9341_dma_irq_callback_spi_rx(void)
   }
 
   ili9341.last_transfer_idx++;
-  // *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
-  *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
-  // bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
-  // bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+  *(int *)0x3f204000 |= SPI_CS_CLEAR;
 
   bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx,
     ili9341.header_cbs[ili9341.last_transfer_idx]);
@@ -524,7 +521,7 @@ static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
   r.src       = 0;
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.len       = transfer_size;
-  r.enable_irq = true;
+  r.enable_irq = false;
   bcm2835_dma_program_cb(&r, ili9341.tx_cbs[transfer_idx]);
 
   r.dreq      = DMA_DREQ_SPI_RX;
@@ -632,4 +629,3 @@ void ili9341_init(void)
 
   ili9341_fill_screen(ili9341.gpio.pin_dc);
 }
-
