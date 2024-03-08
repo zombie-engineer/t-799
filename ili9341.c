@@ -406,58 +406,51 @@ void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
     SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
     ili9341_first = true;
   }
-  *(int*)0x3f204000 = SPI_CS_CLEAR|SPI_CS_DMAEN|SPI_CS_ADCS;
-  *(int*)0x3f007000 = 1<<31;
-  *(int*)0x3f007100 = 1<<31;
 
-  // dcache_flush(data, data_sz);
-
-
+#if 0
   draw_line(line_y, (uint8_t *)data);
 
   line_y += 10;
   if (line_y >= 240)
     line_y = 0;
+#endif
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     bcm2835_dma_update_cb_src(ili9341.tx_cbs[i],
       DMA_ADDR(data + i * MAX_BYTES_PER_TRANSFER));
   }
 
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx, ili9341.header_cbs[0]);
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx, ili9341.rx_cbs[0]);
+  for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
+    *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
+    bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
+    bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+    /*
+    *(int *)0x3f007000 = 1<<31;
+    *(int *)0x3f007100 = 1<<31;
+    */
 
-  /*
-   * Observations:
-   * - We only write to display, so naively we would only use one channel for
-   *   TX DMA
-   * - But RX fifo will be full rather quick and stall transmission
-   * - That is why it is required to have second DMA channel to serve SPI RX
-   * - If SPI RX TI has DST_IGNORE flag set - this will lead no LEN register
-   *   not being decremented, and control block for RX will not be switched
-   * - Activation of RX and TX channels is not done atomically, but RX will
-   *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
-   */
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
+    bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx, ili9341.header_cbs[i]);
+    bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx, ili9341.rx_cbs[i]);
 
-  while(!ili9341.spi_dma_tx_done);// || !ili9341.spi_dma_rx_done);
-  ili9341.spi_dma_tx_done = false;
-  *(int*)0x3f204000 &= ~SPI_CS_DMAEN;
-  *(int*)0x3f204000 |= SPI_CS_CLEAR;
-  *(int*)0x3f007000 = 1<<31;
-  *(int*)0x3f007100 = 1<<31;
+    /*
+     * Observations:
+     * - We only write to display, so naively we would only use one channel for
+     *   TX DMA
+     * - But RX fifo will be full rather quick and stall transmission
+     * - That is why it is required to have second DMA channel to serve SPI RX
+     * - If SPI RX TI has DST_IGNORE flag set - this will lead no LEN register
+     *   not being decremented, and control block for RX will not be switched
+     * - Activation of RX and TX channels is not done atomically, but RX will
+     *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
+     */
+    bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
+    bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
 
-#if 0
-  while(bytes_left) {
-    size_t transfer_size = MIN(bytes_left, max_task_size);
-    ili9341.spi_dma_rx_done = false;
-
-    while(!ili9341.spi_dma_tx_done);// || !ili9341.spi_dma_rx_done);
-
-    bytes_left -= transfer_size;
+    while(!ili9341.spi_dma_tx_done);
+    ili9341.spi_dma_tx_done = false;
   }
-#endif
+  *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
+  *(int *)0x3f204000 |= SPI_CS_CLEAR;
 //  *(int*)0x3f204000 |= SPI_CS_CLEAR;
 //  *(int*)0x3f204000 |= SPI_CS_TA;
 }
@@ -490,7 +483,6 @@ static inline void ili9341_init_transport(void)
   ili9341_init_gpio(19, 13, 6);
   *SPI_CS = SPI_CS_CLEAR_TX | SPI_CS_CLEAR_RX;
   *SPI_CLK = 8;
-  // *SPI_DLEN = 2;
 }
 
 static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
@@ -521,19 +513,8 @@ static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
   r.src       = 0;
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.len       = transfer_size;
-  r.enable_irq = is_last;
-
+  r.enable_irq = true;
   bcm2835_dma_program_cb(&r, ili9341.tx_cbs[transfer_idx]);
-
-  r.dreq      = DMA_DREQ_NONE;
-  r.dreq_type = BCM2835_DMA_DREQ_TYPE_NONE;
-  r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.src       = SPI_CS_7E;
-  r.dst       = DMA_ADDR(&ili9341.spi_dma_tx_headers[NUM_DMA_TRANSFERS]);
-  r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.len       = 0x200;
-  r.enable_irq = is_last;
-  bcm2835_dma_program_cb(&r, ili9341.dummy_cbs[transfer_idx]);
 
   r.dreq      = DMA_DREQ_SPI_RX;
   r.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
@@ -541,9 +522,12 @@ static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
   r.dst       = DMA_ADDR(ili9341_canvas);
   r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.len       = transfer_size;
+  r.len       = transfer_size - 64;
   r.enable_irq = false;
   bcm2835_dma_program_cb(&r, ili9341.rx_cbs[transfer_idx]);
+
+  bcm2835_dma_link_cbs(ili9341.header_cbs[transfer_idx],
+    ili9341.tx_cbs[transfer_idx]);
 }
 
 static void ili9341_setup_dma_control_blocks(void)
@@ -574,25 +558,6 @@ static void ili9341_setup_dma_control_blocks(void)
 
   for (int i = 0; i < NUM_DMA_TRANSFERS; ++i)
     ili9341_setup_spi_dma_transfer(i, i == NUM_DMA_TRANSFERS - 1);
-
-  bcm2835_dma_link_cbs(ili9341.header_cbs[0], ili9341.tx_cbs    [0]);
-  bcm2835_dma_link_cbs(ili9341.tx_cbs    [0], ili9341.dummy_cbs [0]);
-  bcm2835_dma_link_cbs(ili9341.dummy_cbs [0], ili9341.header_cbs[1]);
-
-  bcm2835_dma_link_cbs(ili9341.header_cbs[1], ili9341.tx_cbs    [1]);
-  bcm2835_dma_link_cbs(ili9341.tx_cbs    [1], ili9341.dummy_cbs [1]);
-  bcm2835_dma_link_cbs(ili9341.dummy_cbs [1], ili9341.header_cbs[2]);
-
-  bcm2835_dma_link_cbs(ili9341.header_cbs[2], ili9341.tx_cbs    [2]);
-  bcm2835_dma_link_cbs(ili9341.tx_cbs    [2], ili9341.dummy_cbs [2]);
-  bcm2835_dma_link_cbs(ili9341.dummy_cbs [2], ili9341.header_cbs[3]);
-
-  bcm2835_dma_link_cbs(ili9341.header_cbs[3], ili9341.tx_cbs    [3]);
-  bcm2835_dma_link_cbs(ili9341.tx_cbs    [3], ili9341.dummy_cbs [3]);
-
-  bcm2835_dma_link_cbs(ili9341.rx_cbs[0], ili9341.rx_cbs[1]);
-  bcm2835_dma_link_cbs(ili9341.rx_cbs[1], ili9341.rx_cbs[2]);
-  bcm2835_dma_link_cbs(ili9341.rx_cbs[2], ili9341.rx_cbs[3]);
 
   bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
   bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
