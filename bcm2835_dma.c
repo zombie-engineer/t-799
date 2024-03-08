@@ -92,7 +92,6 @@ BCM2835_DMA_IRQ_HANDLER(8);
 BCM2835_DMA_IRQ_HANDLER(9);
 BCM2835_DMA_IRQ_HANDLER(10);
 BCM2835_DMA_IRQ_HANDLER(11);
-BCM2835_DMA_IRQ_HANDLER(12);
 
 static inline struct bcm2835_dma_cb *bcm2835_dma_cb_alloc(void)
 {
@@ -325,4 +324,14 @@ void bcm2835_dma_init(void)
 
   irq_set(BCM2835_IRQNR_DMA_0, bcm2835_dma_irq_handler_ch_0);
   irq_set(BCM2835_IRQNR_DMA_1, bcm2835_dma_irq_handler_ch_1);
+  irq_set(BCM2835_IRQNR_DMA_2, bcm2835_dma_irq_handler_ch_2);
+  irq_set(BCM2835_IRQNR_DMA_3, bcm2835_dma_irq_handler_ch_3);
+  irq_set(BCM2835_IRQNR_DMA_4, bcm2835_dma_irq_handler_ch_4);
+  irq_set(BCM2835_IRQNR_DMA_5, bcm2835_dma_irq_handler_ch_5);
+  irq_set(BCM2835_IRQNR_DMA_6, bcm2835_dma_irq_handler_ch_6);
+  irq_set(BCM2835_IRQNR_DMA_7, bcm2835_dma_irq_handler_ch_7);
+  irq_set(BCM2835_IRQNR_DMA_8, bcm2835_dma_irq_handler_ch_8);
+  irq_set(BCM2835_IRQNR_DMA_9, bcm2835_dma_irq_handler_ch_9);
+  irq_set(BCM2835_IRQNR_DMA_10, bcm2835_dma_irq_handler_ch_10);
+  irq_set(BCM2835_IRQNR_DMA_11, bcm2835_dma_irq_handler_ch_11);
 }
