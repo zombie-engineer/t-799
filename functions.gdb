@@ -1,10 +1,180 @@
+set $spi_cs   = (int *)(0x3f204000)
+set $spi_fifo = (int *)(0x3f204004)
+set $spi_clk  = (int *)(0x3f204008)
+set $spi_dlen = (int *)(0x3f20400c)
+set $spi_ltoh = (int *)(0x3f204010)
+set $spi_dc   = (int *)(0x3f204014)
+
+define lspi
+  printf "SPI_CS:%08x", *$spi_cs
+  printf ",CHIPSELECT:%d", *$spi_cs & 3
+  if *$spi_cs & (1<<2)
+    printf ",CPHA"
+  end
+  if *$spi_cs & (1<<3)
+    printf ",CPOL"
+  end
+  if *$spi_cs & (1<<6)
+    printf ",CSPOL"
+  end
+  if *$spi_cs & (1<<7)
+    printf ",TA"
+  end
+  if *$spi_cs & (1<<8)
+    printf ",DMAEN"
+  end
+  if *$spi_cs & (1<<9)
+    printf ",INTD"
+  end
+  if *$spi_cs & (1<<10)
+    printf ",INTR"
+  end
+  if *$spi_cs & (1<<11)
+    printf ",ADCS"
+  end
+  if *$spi_cs & (1<<12)
+    printf ",REN"
+  end
+  if *$spi_cs & (1<<13)
+    printf ",LEN"
+  end
+  if *$spi_cs & (1<<16)
+    printf ",DONE"
+  end
+  if *$spi_cs & (1<<17)
+    printf ",RXD"
+  end
+  if *$spi_cs & (1<<18)
+    printf ",TXD"
+  end
+  if *$spi_cs & (1<<19)
+    printf ",RXR"
+  end
+  if *$spi_cs & (1<<20)
+    printf ",RXF"
+  end
+  if *$spi_cs & (1<<21)
+    printf ",CSPOL0"
+  end
+  if *$spi_cs & (1<<22)
+    printf ",CSPOL1"
+  end
+  if *$spi_cs & (1<<23)
+    printf ",CSPOL2"
+  end
+  if *$spi_cs & (1<<24)
+    printf ",DMA_LEN"
+  end
+  if *$spi_cs & (1<<25)
+    printf ",LEN_LONG"
+  end
+  printf "\n"
+
+  if *$spi_cs & (1<<7)
+    printf ",transfer active"
+  end
+  if *$spi_cs & (1<<8)
+    printf ",DMA enabled"
+  end
+  if *$spi_cs & (1<<11)
+    printf ",auto de-assert CS"
+  end
+  if *$spi_cs & (1<<17)
+    printf ",RXFIFO not empty"
+  end
+  if *$spi_cs & (1<<18)
+    printf ",TXFIFO not full"
+  end
+  if *$spi_cs & (1<<19)
+    printf ",RXFIFO 3/4 FULL"
+  end
+  if *$spi_cs & (1<<20)
+    printf ",RXFIFO FULL,STALLED"
+  end
+  printf "\n"
+
+  printf "CLK:%d\n", *$spi_clk
+  printf "DLEN:%d\n", *$spi_dlen
+end
+
+define spi_fifo_wr_8
+  p *(char *)($spi_fifo) = $arg0
+  lspi
+end
+
+define spi_fifo_wr_32
+  p *(int *)$spi_fifo = $arg0
+  lspi
+end
+
 define dump_dma_cb
-  set $__cb_ti = *(int*)($arg0 + 0x00)
-  set $__cb_src = *(int*)($arg0 + 0x04)
-  set $__cb_dst = *(int*)($arg0 + 0x08)
-  set $__cb_len = *(int*)($arg0 + 0x0c)
-  set $__cb_next = *(int*)($arg0 + 0x14)
-  printf "cb:%08x,TI:%08x,%08x->%08x(%08x),next:%08x\n", $arg0, $__cb_ti, $__cb_src, $__cb_dst, $__cb_len, $__cb_next
+  set $__cb_baseaddr = (uint64_t)($arg0) & 0x3fffffff
+  set $__cb_ti = *(int*)($__cb_baseaddr + 0x00)
+  set $__cb_src = *(int*)($__cb_baseaddr + 0x04)
+  set $__cb_dst = *(int*)($__cb_baseaddr + 0x08)
+  set $__cb_len = *(int*)($__cb_baseaddr + 0x0c)
+  set $__cb_next = *(int*)($__cb_baseaddr + 0x14)
+  printf "cb:%08x,TI:%08x,%08x->%08x(%08x),next:%08x,", $arg0, $__cb_ti, $__cb_src, $__cb_dst, $__cb_len, $__cb_next
+  if $__cb_ti & (1<<0)
+    printf "I"
+  else
+    printf "-" 
+  end
+  if $__cb_ti & (1<<3)
+    printf "WA"
+  else
+    printf "--"
+  end
+  printf "d:"
+  if $__cb_ti & (1<<4)
+    printf "++"
+  else
+    printf "  "
+  end
+  if $__cb_ti & (1<<5)
+    printf "128"
+  else
+    printf " 32"
+  end
+  if $__cb_ti & (1<<6)
+    printf "rq"
+  else
+    printf "--"
+  end
+  if $__cb_ti & (1<<7)
+    printf "noW"
+  else
+    printf "---"
+  end
+
+  printf "s:"
+  if $__cb_ti & (1<<8)
+    printf "++"
+  else
+    printf "  "
+  end
+  if $__cb_ti & (1<<9)
+    printf "128"
+  else
+    printf " 32"
+  end
+  if $__cb_ti & (1<<10)
+    printf "rq"
+  else
+    printf "  "
+  end
+  if $__cb_ti & (1<<11)
+    printf "noRD,"
+  end
+  # Burst
+  printf "B%d,", ($__cb_ti >> 12) & 0xf
+  printf "P%d,", ($__cb_ti >> 16) & 0x1f
+  printf "W%d\n", ($__cb_ti >> 21) & 0x1f
+
+  if $__cb_next
+    set $__next_addr = $__cb_next - 0xc0000000
+    dump_dma_cb $__next_addr
+  end
 end
 
 define lsdmach
@@ -19,6 +189,38 @@ define lsdmach
   set $__dma_next  = *(int *)($__dma_ch_base + 0x1c)
   set $__dma_debug = *(int *)($__dma_ch_base + 0x20)
   printf "CS:%08x,CB:%08x,TI:%08x,%08x->%08x(%08x),next:%08x,DBG:%08x\n", $__dma_cs, $__dma_cb, $__dma_ti, $__dma_src, $__dma_dst, $__dma_len, $__dma_next, $__dma_debug
+  if $__dma_cs & (1<<0)
+    printf ",ACTIVE"
+  end
+  if $__dma_cs & (1<<1)
+    printf ",END"
+  end
+  if $__dma_cs & (1<<2)
+    printf ",INT(interrupt fired)"
+  end
+  if $__dma_cs & (1<<3)
+    printf ",DREQ active"
+  end
+  if $__dma_cs & (1<<4)
+    printf ",PAUSED"
+  end
+  if $__dma_cs & (1<<5)
+    printf ",PAUSED BY DREQ"
+  end
+  if $__dma_cs & (1<<6)
+    printf ",WAIT FOR OUTWRITE"
+  end
+  if $__dma_cs & (1<<8)
+    printf ",ERROR"
+  end
+  if $__dma_cs & (1<<28)
+    printf ",NEED WAIT FOR OUT WRITE"
+  end
+  if $__dma_cs & (1<<29)
+    printf ",DISDEBUG"
+  end
+  printf "\n"
+
   if $__dma_cb
     set $__cbaddr = $__dma_cb - 0xc0000000
     dump_dma_cb $__cbaddr
