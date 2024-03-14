@@ -19,6 +19,7 @@
 #include <sections.h>
 #include <vchiq.h>
 #include <ili9341.h>
+#include <linreg.h>
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -156,6 +157,7 @@ static void test_dma(void)
 static void kernel_run(void)
 {
 	struct task *t;
+	linear_regression_test();
 	mmu_print_va(0x0000000001ff1000, 1);
 	mmu_print_va(0xffff000001ff0000, 1);
 	mmu_print_va(0xffff000001ff1000, 1);

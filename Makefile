@@ -30,6 +30,7 @@ OBJS := \
   dma_memory \
   ili9341 \
   irq \
+  linreg \
   kmalloc \
   mbox/mbox_routines \
   mbox/mbox \
