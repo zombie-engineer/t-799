@@ -40,15 +40,15 @@ void print_mbox_props(void)
 	unsigned clock_rate;
 	char buf[6];
 	mbox_get_firmware_rev(&val);
-	printf("firmware rev:		%08x\n", val);
+	printf("firmware rev:		%08x\r\n", val);
 	mbox_get_board_model(&val);
-	printf("board model:		 %08x\n", val);
+	printf("board model:		 %08x\r\n", val);
 	mbox_get_board_rev(&val);
-	printf("board rev:			 %08x\n", val);
+	printf("board rev:			 %08x\r\n", val);
 	mbox_get_board_serial(&val64);
-	printf("board serial:		%08x\n", val64);
+	printf("board serial:		%08x\r\n", val64);
 	mbox_get_mac_addr(&buf[0], &buf[7]);
-	printf("mac address:		 %02x:%02x:%02x:%02x:%02x:%02x\n",
+	printf("mac address:		 %02x:%02x:%02x:%02x:%02x:%02x\r\n",
 		(int)(buf[0]),
 		(int)(buf[1]),
 		(int)(buf[2]),
@@ -58,16 +58,16 @@ void print_mbox_props(void)
 		(int)(buf[6]));
 
 	mbox_get_arm_memory(&val, &val2);
-	printf("arm memory base: %08x\n", val);
-	printf("arm memory size: %08x\n", val2);
+	printf("arm memory base: %08x\r\n", val);
+	printf("arm memory size: %08x\r\n", val2);
 
 	mbox_get_vc_memory(&val, &val2);
-	printf("vc memory base:	%08x\n", val);
-	printf("vc memory size:	%08x\n", val2);
+	printf("vc memory base:	%08x\r\n", val);
+	printf("vc memory size:	%08x\r\n", val2);
 	for (i = 0; i < 8; ++i) {
 		mbox_get_clock_rate(i, &clock_rate);
 		// 	printf("failed to get clock rate for clock_id %d\n", i);
-		printf("clock %d rate: %08x (%d KHz)\n", i, clock_rate, clock_rate / 1000);
+		printf("clock %d rate: %08x (%d KHz)\r\n", i, clock_rate, clock_rate / 1000);
 	}
 
 #define GET_DEVICE_POWER_STATE(x)\
@@ -116,7 +116,7 @@ static void vchiq_main(void)
 static void kernel_start_task2(void)
 {
 	while(1) {
-		printf("task2");
+		printf("task2\r\n");
 		os_wait_ms(5000);
 		// atomic_cmp_and_swap(&test_atomic, 1, 0);
 		os_yield();
@@ -162,7 +162,7 @@ static void kernel_run(void)
 	mmu_print_va(0xffff00000201c000, 1);
 	// test_dma();
 
-	printf("Hello %d\n", myvar);
+	printf("Hello %d\r\n", myvar);
 	t = task_create(vchiq_main, "vchiq_main");
 	sched_run_task_isr(t);
 	t = task_create(kernel_start_task2, "t2");
