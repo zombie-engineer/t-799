@@ -2,6 +2,7 @@
 #include <cpu.h>
 #include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
+#include <bcm2835/bcm2835_emmc.h>
 #include <bcm2835_dma.h>
 #include <common.h>
 #include <debug_led.h>
@@ -85,6 +86,8 @@ void print_mbox_props(void)
 	GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
+char sdcard_buf[2048] = { 0 };
+
 static void kernel_init(void)
 {
 	uart_pl011_init(115200);
@@ -99,6 +102,8 @@ static void kernel_init(void)
 	scheduler_init();
 	debug_led_init();
 	bcm2835_dma_init();
+	bcm2835_emmc_init();
+	bcm2835_emmc_read(0, 1, sdcard_buf, sizeof(sdcard_buf));
 }
 
 atomic_t test_atomic;

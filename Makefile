@@ -23,6 +23,10 @@ OBJS := \
   armv8_exception_vector \
   atomic \
   bcm2835_systimer \
+  bcm2835_emmc/bcm2835_emmc_initialize \
+  bcm2835_emmc/bcm2835_emmc_utils \
+  bcm2835_emmc/bcm2835_emmc \
+  bcm2835_emmc/bcm2835_emmc_cmd \
   bcm2835_dma \
   bcm2835_ic \
   debug_led \
