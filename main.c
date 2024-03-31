@@ -1,5 +1,6 @@
 #include <gpio.h>
 #include <cpu.h>
+#include <block_device.h>
 #include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include <bcm2835/bcm2835_emmc.h>
@@ -20,6 +21,11 @@
 #include <sections.h>
 #include <vchiq.h>
 #include <ili9341.h>
+#include <errcode.h>
+#include <fs/fs.h>
+#include <fs/fat32.h>
+
+static struct block_device *fs_blockdev;
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -103,7 +109,6 @@ static void kernel_init(void)
 	debug_led_init();
 	bcm2835_dma_init();
 	bcm2835_emmc_init();
-	bcm2835_emmc_read(0, 1, sdcard_buf, sizeof(sdcard_buf));
 }
 
 atomic_t test_atomic;
@@ -112,9 +117,22 @@ struct event test_ev;
 
 static void vchiq_main(void)
 {
-	int res;
+	int err;
+	struct fat32_fs fat32fs;
+	err = fs_init(&fs_blockdev);
+	if (err != SUCCESS) {
+		printf("Failed to init fs block device, err: %d\r\n", err);
+		goto out;
+	}
+	err = fat32_fs_open(fs_blockdev, &fat32fs);
+	if (err != SUCCESS)
+		goto out;
+	fat32_ls(&fat32fs, "/");
+	err = fat32_create(&fat32fs, "/test", true, false);
+
 	ili9341_init();
 	vchiq_init();
+out:
 	os_exit_current_task();
 }
 

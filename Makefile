@@ -23,10 +23,11 @@ OBJS := \
   armv8_exception_vector \
   atomic \
   bcm2835_systimer \
-  bcm2835_emmc/bcm2835_emmc_initialize \
-  bcm2835_emmc/bcm2835_emmc_utils \
   bcm2835_emmc/bcm2835_emmc \
   bcm2835_emmc/bcm2835_emmc_cmd \
+  bcm2835_emmc/bcm2835_emmc_dev \
+  bcm2835_emmc/bcm2835_emmc_initialize \
+  bcm2835_emmc/bcm2835_emmc_utils \
   bcm2835_dma \
   bcm2835_ic \
   debug_led \
@@ -34,12 +35,16 @@ OBJS := \
   dma_memory \
   ili9341 \
   irq \
+  fs/fs \
+  fs/fat32 \
   kmalloc \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \
   os_api \
   panic \
+  partition \
+  partition_table \
   printf \
   sched \
   semaphore \

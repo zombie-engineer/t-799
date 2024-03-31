@@ -44,3 +44,6 @@
     B_CLEAR32(__v, __pos, __width);\
     B_ORR32(__v, __set, __pos); \
   } while(0)
+
+#define BYTE_EXTRACT64(__v, __pos) BITS_EXTRACT64(__v, (__pos * 8), 8)
+#define BYTE_EXTRACT32(__v, __pos) BITS_EXTRACT32(__v, (__pos * 8), 8)

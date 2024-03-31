@@ -15,4 +15,8 @@ static inline const char * _printf(const char* fmt, ...)
   return res;
 }
 
+static inline void puts(const char *string)
+{
+  uart_pl011_send(string, 0);
+}
 #define printf _printf

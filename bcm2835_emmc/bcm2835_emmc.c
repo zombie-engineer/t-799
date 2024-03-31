@@ -113,8 +113,8 @@ void bcm2835_emmc_report(void)
   vendor = BCM2835_EMMC_SLOTISR_VER_GET_VENDOR(ver);
   sdver = BCM2835_EMMC_SLOTISR_VER_GET_SDVERSION(ver);
 
-  BCM2835_EMMC_LOG("version %08x, VENDOR: %04x, SD: %04x, clock: %d", ver, vendor,
-    sdver, clock_rate);
+  BCM2835_EMMC_LOG("version %08x, VENDOR: %04x, SD: %04x, clock: %d", ver,
+    vendor, sdver, clock_rate);
 }
 
 typedef enum {
@@ -123,10 +123,7 @@ typedef enum {
 } bcm2835_emmc_io_type_t;
 
 static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
-  char *buf,
-  uint64_t bufsz,
-  uint32_t first_block_idx,
-  uint32_t num_blocks)
+  char *buf, size_t first_block_idx, size_t num_blocks)
 {
   int cmd_err;
   if (io_type == BCM2835_EMMC_IO_READ) {
@@ -149,17 +146,16 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   return 0;
 }
 
-int bcm2835_emmc_read(int first_block_idx, int num_blocks, char *buf,
-  int bufsz)
+int bcm2835_emmc_read(size_t first_block_idx, size_t num_blocks, char *buf)
 {
-  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, bufsz, first_block_idx,
+  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, first_block_idx,
     num_blocks);
 }
 
-int bcm2835_emmc_write(int first_block_idx, int num_blocks, const char *buf,
-  int bufsz)
+int bcm2835_emmc_write(size_t first_block_idx, size_t num_blocks,
+  const char *buf)
 {
-  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_WRITE, (char *)buf, bufsz,
+  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_WRITE, (char *)buf,
     first_block_idx, num_blocks);
 }
 

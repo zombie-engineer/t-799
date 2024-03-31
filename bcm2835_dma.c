@@ -1,6 +1,5 @@
 #include <bcm2835_dma.h>
 #include <bitmap.h>
-#include <memory.h>
 #include <errcode.h>
 #include <common.h>
 #include <kmalloc.h>
