@@ -65,7 +65,7 @@ kernel8.bin: kernel8.elf
 	$(OBJCOPY) -O binary $< $@
 
 kernel8.elf: $(OBJS) link.ld
-	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map
+	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map -print-memory-usage
 
 %.o: %.S
 	$(CC) -g -c $? -o $@
@@ -101,11 +101,17 @@ dja:
 	@echo "Starting session to debug emulated Raspberry PI 3B+"
 	./debug_pi_jtag.sh --attach
 
-clean:
+gitclean:
 	git clean -xfd
+
+clean:
+	@rm -v $(OBJS) 2>/dev/null || true
 
 help:
 	@echo j  - run OpenOCD to attach Raspberry PI via JTAG and wait for GDB connection
 	@echo dj - start GDB to debug Raspberry PI over JTAG
 	@echo e: - run QEMU and wait for GDB connection
 	@echo de - start GDB to debug Raspberry PI in QEMU
+	@echo db - Disassemble raw binary file
+	@echo dbe - Disassemble elf file
+	@echo clean - cleans project from *.o files
