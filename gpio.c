@@ -39,77 +39,77 @@
 
 static inline int gpio_function_to_bits(gpio_function_t f)
 {
-	const char map[] = {
-		[GPIO_FUNCTION_INPUT]  = 0b000,
-		[GPIO_FUNCTION_OUTPUT] = 0b001,
-		[GPIO_FUNCTION_ALT_0]  = 0b100,
-		[GPIO_FUNCTION_ALT_1]  = 0b101,
-		[GPIO_FUNCTION_ALT_2]  = 0b110,
-		[GPIO_FUNCTION_ALT_3]  = 0b111,
-		[GPIO_FUNCTION_ALT_4]  = 0b011,
-		[GPIO_FUNCTION_ALT_5]  = 0b010
-	};
+  const char map[] = {
+    [GPIO_FUNCTION_INPUT]  = 0b000,
+    [GPIO_FUNCTION_OUTPUT] = 0b001,
+    [GPIO_FUNCTION_ALT_0]  = 0b100,
+    [GPIO_FUNCTION_ALT_1]  = 0b101,
+    [GPIO_FUNCTION_ALT_2]  = 0b110,
+    [GPIO_FUNCTION_ALT_3]  = 0b111,
+    [GPIO_FUNCTION_ALT_4]  = 0b011,
+    [GPIO_FUNCTION_ALT_5]  = 0b010
+  };
 
-	ASSERT(f < ARRAY_SIZE(map));
-	return map[f];
+  ASSERT(f < ARRAY_SIZE(map));
+  return map[f];
 }
 
 void gpio_set_pin_function(int pin, gpio_function_t function)
 {
-	ASSERT(pin <= GPIO_MAX_PIN);
+  ASSERT(pin <= GPIO_MAX_PIN);
 
-	ioreg32_t r = GPIO_REG_GPFSEL0 + (pin / 10);
-	int offset = (pin % 10) * 3;
-	uint32_t mask = ~(7<<offset);
-	uint32_t v = ioreg32_read(r) & mask;
-	v |= gpio_function_to_bits(function) << offset;
-	ioreg32_write(r, v);
+  ioreg32_t r = GPIO_REG_GPFSEL0 + (pin / 10);
+  int offset = (pin % 10) * 3;
+  uint32_t mask = ~(7<<offset);
+  uint32_t v = ioreg32_read(r) & mask;
+  v |= gpio_function_to_bits(function) << offset;
+  ioreg32_write(r, v);
 }
 
 static inline int gpio_pullupdown_mode_to_bits(gpio_pullupdown_mode_t mode)
 {
-	if (mode == GPIO_PULLUPDOWN_MODE_UP)
-		return 0b10;
-	if (mode == GPIO_PULLUPDOWN_MODE_DOWN)
-		return 0b01;
-	return 0;
+  if (mode == GPIO_PULLUPDOWN_MODE_UP)
+    return 0b10;
+  if (mode == GPIO_PULLUPDOWN_MODE_DOWN)
+    return 0b01;
+  return 0;
 }
 
 static inline void gpio_set_gppudclk(int pin)
 {
-	/* TODO: provide race protection to gpio resource */
-	ioreg32_t r = GPIO_REG_GPPUDCLK0 + pin / 32;
-	int offset = pin % 32;
+  /* TODO: provide race protection to gpio resource */
+  ioreg32_t r = GPIO_REG_GPPUDCLK0 + pin / 32;
+  int offset = pin % 32;
 
-	ioreg32_write(r, 1 << offset);
+  ioreg32_write(r, 1 << offset);
 }
 
 void gpio_set_pin_pullupdown_mode(int pin, gpio_pullupdown_mode_t mode)
 {
-	/*
-	 * According to datasheet BCM2835 ARM Peripherals, page 101
-	 * 1. Write to GPPUD to set the required control signal (i.e. 
-	 * Pull-up or Pull-Down or neither
-	 * to remove the current Pull-up/down)
-	 * 2. Wait 150 cycles – this provides the required set-up time 
-	 * for the control signal
-	 * 3. Write to GPPUDCLK0/1 to clock the control signal into the GPIO pads you wish to
-	 * modify – NOTE only the pads which receive a clock will be modified, all others will
-	 * retain their previous state.
-	 * 4. Wait 150 cycles – this provides the required hold time for the control signal
-	 * 5. Write to GPPUD to remove the control signal
-	 * 6. Write to GPPUDCLK0/1 to remove the clock
-	 *
-	 */
-	volatile int i;
-	ASSERT(pin <= GPIO_MAX_PIN);
-	ioreg32_write(GPIO_REG_GPPUD, gpio_pullupdown_mode_to_bits(mode));
-	for (i = 0; i < 150; ++i)
-		asm volatile("nop");
+  /*
+   * According to datasheet BCM2835 ARM Peripherals, page 101
+   * 1. Write to GPPUD to set the required control signal (i.e.
+   * Pull-up or Pull-Down or neither
+   * to remove the current Pull-up/down)
+   * 2. Wait 150 cycles – this provides the required set-up time
+   * for the control signal
+   * 3. Write to GPPUDCLK0/1 to clock the control signal into the GPIO pads you wish to
+   * modify – NOTE only the pads which receive a clock will be modified, all others will
+   * retain their previous state.
+   * 4. Wait 150 cycles – this provides the required hold time for the control signal
+   * 5. Write to GPPUD to remove the control signal
+   * 6. Write to GPPUDCLK0/1 to remove the clock
+   *
+   */
+  volatile int i;
+  ASSERT(pin <= GPIO_MAX_PIN);
+  ioreg32_write(GPIO_REG_GPPUD, gpio_pullupdown_mode_to_bits(mode));
+  for (i = 0; i < 150; ++i)
+    asm volatile("nop");
 
   gpio_set_gppudclk(pin);
-	for (i = 0; i < 150; ++i)
-		asm volatile("nop");
+  for (i = 0; i < 150; ++i)
+    asm volatile("nop");
 
   ioreg32_write(GPIO_REG_GPPUD, 0);
   ioreg32_write(GPIO_REG_GPPUDCLK0, 0);
@@ -118,25 +118,25 @@ void gpio_set_pin_pullupdown_mode(int pin, gpio_pullupdown_mode_t mode)
 
 bool gpio_pin_is_set(int pin)
 {
-	ioreg32_t r;
+  ioreg32_t r;
 
-	ASSERT(pin <= GPIO_MAX_PIN);
+  ASSERT(pin <= GPIO_MAX_PIN);
 
-	r = GPIO_REG_GPLEV0 + pin / 32;
+  r = GPIO_REG_GPLEV0 + pin / 32;
 
-	return (ioreg32_read(r) >> (pin % 32)) & 1;
+  return (ioreg32_read(r) >> (pin % 32)) & 1;
 }
 
 void gpio_set_pin_output(int pin, bool is_set)
 {
-	ioreg32_t r;
+  ioreg32_t r;
 
-	ASSERT(pin <= GPIO_MAX_PIN);
+  ASSERT(pin <= GPIO_MAX_PIN);
 
-	r = is_set ? GPIO_REG_GPSET0 : GPIO_REG_GPCLR0;
-	r += pin / 32;
+  r = is_set ? GPIO_REG_GPSET0 : GPIO_REG_GPCLR0;
+  r += pin / 32;
 
-	ioreg32_write(r, 1 << (pin % 32));
+  ioreg32_write(r, 1 << (pin % 32));
 }
 
 void gpio_toggle_pin_output(int pin)

@@ -42,73 +42,73 @@ EXCEPTION void serror_handler(void)
 
 void print_mbox_props(void)
 {
-	uint64_t val64;
-	uint32_t val, val2, i;
-	unsigned clock_rate;
-	char buf[6];
-	mbox_get_firmware_rev(&val);
-	printf("firmware rev:		%08x\r\n", val);
-	mbox_get_board_model(&val);
-	printf("board model:		 %08x\r\n", val);
-	mbox_get_board_rev(&val);
-	printf("board rev:			 %08x\r\n", val);
-	mbox_get_board_serial(&val64);
-	printf("board serial:		%08x\r\n", val64);
-	mbox_get_mac_addr(&buf[0], &buf[7]);
-	printf("mac address:		 %02x:%02x:%02x:%02x:%02x:%02x\r\n",
-		(int)(buf[0]),
-		(int)(buf[1]),
-		(int)(buf[2]),
-		(int)(buf[3]),
-		(int)(buf[4]),
-		(int)(buf[5]),
-		(int)(buf[6]));
+  uint64_t val64;
+  uint32_t val, val2, i;
+  unsigned clock_rate;
+  char buf[6];
+  mbox_get_firmware_rev(&val);
+  printf("firmware rev:    %08x\r\n", val);
+  mbox_get_board_model(&val);
+  printf("board model:     %08x\r\n", val);
+  mbox_get_board_rev(&val);
+  printf("board rev:       %08x\r\n", val);
+  mbox_get_board_serial(&val64);
+  printf("board serial:    %08x\r\n", val64);
+  mbox_get_mac_addr(&buf[0], &buf[7]);
+  printf("mac address:     %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+    (int)(buf[0]),
+    (int)(buf[1]),
+    (int)(buf[2]),
+    (int)(buf[3]),
+    (int)(buf[4]),
+    (int)(buf[5]),
+    (int)(buf[6]));
 
-	mbox_get_arm_memory(&val, &val2);
-	printf("arm memory base: %08x\r\n", val);
-	printf("arm memory size: %08x\r\n", val2);
+  mbox_get_arm_memory(&val, &val2);
+  printf("arm memory base: %08x\r\n", val);
+  printf("arm memory size: %08x\r\n", val2);
 
-	mbox_get_vc_memory(&val, &val2);
-	printf("vc memory base:	%08x\r\n", val);
-	printf("vc memory size:	%08x\r\n", val2);
-	for (i = 0; i < 8; ++i) {
-		mbox_get_clock_rate(i, &clock_rate);
-		// 	printf("failed to get clock rate for clock_id %d\n", i);
-		printf("clock %d rate: %08x (%d KHz)\r\n", i, clock_rate, clock_rate / 1000);
-	}
+  mbox_get_vc_memory(&val, &val2);
+  printf("vc memory base:  %08x\r\n", val);
+  printf("vc memory size:  %08x\r\n", val2);
+  for (i = 0; i < 8; ++i) {
+    mbox_get_clock_rate(i, &clock_rate);
+    //   printf("failed to get clock rate for clock_id %d\n", i);
+    printf("clock %d rate: %08x (%d KHz)\r\n", i, clock_rate, clock_rate / 1000);
+  }
 
 #define GET_DEVICE_POWER_STATE(x)\
-	mbox_get_power_state(MBOX_DEVICE_ID_ ## x, (uint32_t*)&val, (uint32_t*)&val2);;\
-	printf("power_state: " #x ": on:%d,exists:%d\r\n", val, val2);
+  mbox_get_power_state(MBOX_DEVICE_ID_ ## x, (uint32_t*)&val, (uint32_t*)&val2);;\
+  printf("power_state: " #x ": on:%d,exists:%d\r\n", val, val2);
 
-	GET_DEVICE_POWER_STATE(SD);
-	GET_DEVICE_POWER_STATE(UART0);
-	GET_DEVICE_POWER_STATE(UART1);
-	GET_DEVICE_POWER_STATE(USB);
-	GET_DEVICE_POWER_STATE(I2C0);
-	GET_DEVICE_POWER_STATE(I2C1 );
-	GET_DEVICE_POWER_STATE(I2C2);
-	GET_DEVICE_POWER_STATE(SPI);
-	GET_DEVICE_POWER_STATE(CCP2TX);
+  GET_DEVICE_POWER_STATE(SD);
+  GET_DEVICE_POWER_STATE(UART0);
+  GET_DEVICE_POWER_STATE(UART1);
+  GET_DEVICE_POWER_STATE(USB);
+  GET_DEVICE_POWER_STATE(I2C0);
+  GET_DEVICE_POWER_STATE(I2C1 );
+  GET_DEVICE_POWER_STATE(I2C2);
+  GET_DEVICE_POWER_STATE(SPI);
+  GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
 char sdcard_buf[2048] = { 0 };
 
 static void kernel_init(void)
 {
-	uart_pl011_init(115200);
-	clear_reboot_request();
-	kmalloc_init();
-	dma_memory_init();
-	print_mbox_props();
-	irq_init();
-	bcm2835_systimer_init();
-	irq_disable();
-	mem_allocator_init();
-	scheduler_init();
-	debug_led_init();
-	bcm2835_dma_init();
-	bcm2835_emmc_init();
+  uart_pl011_init(115200);
+  clear_reboot_request();
+  kmalloc_init();
+  dma_memory_init();
+  print_mbox_props();
+  irq_init();
+  bcm2835_systimer_init();
+  irq_disable();
+  mem_allocator_init();
+  scheduler_init();
+  debug_led_init();
+  bcm2835_dma_init();
+  bcm2835_emmc_init();
 }
 
 atomic_t test_atomic;
@@ -117,34 +117,34 @@ struct event test_ev;
 
 static void vchiq_main(void)
 {
-	int err;
-	struct fat32_fs fat32fs;
-	err = fs_init(&fs_blockdev);
-	if (err != SUCCESS) {
-		printf("Failed to init fs block device, err: %d\r\n", err);
-		goto out;
-	}
-	err = fat32_fs_open(fs_blockdev, &fat32fs);
-	if (err != SUCCESS)
-		goto out;
-	fat32_ls(&fat32fs, "/");
-	err = fat32_create(&fat32fs, "/test", true, false);
+  int err;
+  struct fat32_fs fat32fs;
+  err = fs_init(&fs_blockdev);
+  if (err != SUCCESS) {
+    printf("Failed to init fs block device, err: %d\r\n", err);
+    goto out;
+  }
+  err = fat32_fs_open(fs_blockdev, &fat32fs);
+  if (err != SUCCESS)
+    goto out;
+  fat32_ls(&fat32fs, "/");
+  err = fat32_create(&fat32fs, "/test", true, false);
 
-	ili9341_init();
-	vchiq_init();
+  ili9341_init();
+  vchiq_init();
 out:
-	os_exit_current_task();
+  os_exit_current_task();
 }
 
 static void kernel_start_task2(void)
 {
-	while(1) {
-		printf("task2\r\n");
-		os_wait_ms(5000);
-		// atomic_cmp_and_swap(&test_atomic, 1, 0);
-		os_yield();
-		os_event_notify(&test_ev);
-	}
+  while(1) {
+    printf("task2\r\n");
+    os_wait_ms(5000);
+    // atomic_cmp_and_swap(&test_atomic, 1, 0);
+    os_yield();
+    os_event_notify(&test_ev);
+  }
 }
 
 #if 0
@@ -178,24 +178,24 @@ static void test_dma(void)
 
 static void kernel_run(void)
 {
-	struct task *t;
-	mmu_print_va(0x0000000001ff1000, 1);
-	mmu_print_va(0xffff000001ff0000, 1);
-	mmu_print_va(0xffff000001ff1000, 1);
-	mmu_print_va(0xffff00000201c000, 1);
-	// test_dma();
+  struct task *t;
+  mmu_print_va(0x0000000001ff1000, 1);
+  mmu_print_va(0xffff000001ff0000, 1);
+  mmu_print_va(0xffff000001ff1000, 1);
+  mmu_print_va(0xffff00000201c000, 1);
+  // test_dma();
 
-	printf("Hello %d\r\n", myvar);
-	t = task_create(vchiq_main, "vchiq_main");
-	sched_run_task_isr(t);
-	t = task_create(kernel_start_task2, "t2");
-	sched_run_task_isr(t);
-	scheduler_start();
-	panic();
+  printf("Hello %d\r\n", myvar);
+  t = task_create(vchiq_main, "vchiq_main");
+  sched_run_task_isr(t);
+  t = task_create(kernel_start_task2, "t2");
+  sched_run_task_isr(t);
+  scheduler_start();
+  panic();
 }
 
 void main(void)
 {
-	kernel_init();
-	kernel_run();
+  kernel_init();
+  kernel_run();
 }

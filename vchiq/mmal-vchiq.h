@@ -6,7 +6,7 @@
  *
  * Authors: Vincent Sanders @ Collabora
  *          Dave Stevenson @ Broadcom
- *		(now dave.stevenson@raspberrypi.org)
+ *    (now dave.stevenson@raspberrypi.org)
  *          Simon Mellor @ Broadcom
  *          Luke Diamand @ Broadcom
  *
@@ -26,9 +26,9 @@
 #define MMAL_FORMAT_EXTRADATA_MAX_SIZE 128
 
 enum vchiq_mmal_es_type {
-	MMAL_ES_TYPE_UNKNOWN,     /**< Unknown elementary stream type */
-	MMAL_ES_TYPE_CONTROL,     /**< Elementary stream of control commands */
-	MMAL_ES_TYPE_AUDIO,       /**< Audio elementary stream */
-	MMAL_ES_TYPE_VIDEO,       /**< Video elementary stream */
-	MMAL_ES_TYPE_SUBPICTURE   /**< Sub-picture elementary stream */
+  MMAL_ES_TYPE_UNKNOWN,     /**< Unknown elementary stream type */
+  MMAL_ES_TYPE_CONTROL,     /**< Elementary stream of control commands */
+  MMAL_ES_TYPE_AUDIO,       /**< Audio elementary stream */
+  MMAL_ES_TYPE_VIDEO,       /**< Video elementary stream */
+  MMAL_ES_TYPE_SUBPICTURE   /**< Sub-picture elementary stream */
 };

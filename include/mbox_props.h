@@ -17,16 +17,16 @@ bool mbox_get_vc_memory(int *base_addr, int *byte_size);
 bool mbox_get_mac_addr(char *mac_start, char *mac_end);
 
 bool mbox_set_power_state(uint32_t device_id, uint32_t *powered_on,
-	uint32_t wait, uint32_t *exists);
+  uint32_t wait, uint32_t *exists);
 
 bool mbox_get_power_state(uint32_t device_id, uint32_t *powered_on,
-	uint32_t *exists);
+  uint32_t *exists);
 
 bool mbox_get_clock_state(uint32_t clock_id, uint32_t* enabled,
-	uint32_t *exists);
+  uint32_t *exists);
 
 bool mbox_set_clock_state(uint32_t clock_id, uint32_t* enabled,
-	uint32_t *exists);
+  uint32_t *exists);
 
 bool mbox_get_clock_rate(uint32_t clock_id, uint32_t *clock_rate);
 
@@ -35,7 +35,7 @@ bool mbox_get_min_clock_rate(uint32_t clock_id, uint32_t *clock_rate);
 bool mbox_get_max_clock_rate(uint32_t clock_id, uint32_t *clock_rate);
 
 bool mbox_set_clock_rate(uint32_t clock_id, uint32_t *clock_rate,
-	uint32_t skip_turbo);
+  uint32_t skip_turbo);
 
 bool mbox_get_virt_wh(uint32_t *out_width, uint32_t *out_height);
 
