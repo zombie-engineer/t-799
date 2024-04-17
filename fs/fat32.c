@@ -1900,7 +1900,7 @@ struct fat_file {
 
 struct fat_file_pos_advance_ctx {
   int err;
-  size_t target_offset;
+  size_t target_pos;
   struct fat_file_pos *pos;
 };
 
@@ -1908,35 +1908,45 @@ static bool fat_file_pos_next_cluster(const struct fat32_fs *fs,
   size_t cluster_idx, void *arg)
 {
   struct fat_file_pos_advance_ctx *ctx = arg;
-  size_t byte_offset;
+  size_t in_cluster_offset;
+  const size_t bytes_per_cluster = fat32_bytes_per_cluster(fs);
+  const size_t num_clusters = ctx->pos->pos / bytes_per_cluster;
 
   ctx->pos->cluster_idx = cluster_idx;
 
-  if (ctx->target_offset < ctx->pos->pos) {
-    ctx->pos->pos += fat32_bytes_per_cluster(fs);
+  if (ctx->target_pos >= (num_clusters + 1) * bytes_per_cluster) {
+    ctx->pos->pos = (num_clusters + 1) * bytes_per_cluster;
     return true;
   }
 
-  byte_offset = ctx->target_offset - ctx->pos->pos;
-
   const size_t sector_size = fat32_sector_size(fs);
+
   ctx->err = SUCCESS;
-  ctx->pos->sector_idx = byte_offset / sector_size;
-  ctx->pos->sector_offset = byte_offset % sector_size;
+  ctx->pos->pos = ctx->target_pos;
+  in_cluster_offset = ctx->pos->pos - num_clusters * bytes_per_cluster;
+
+  ctx->pos->sector_idx = in_cluster_offset / sector_size;
+  ctx->pos->sector_offset = in_cluster_offset % sector_size;
   return false;
 }
 
 static int fat_file_pos_advance(struct fat_file *f, size_t offset)
 {
   int err;
+  size_t start_cluster_idx;
 
   struct fat_file_pos_advance_ctx ctx = {
     .err = ERR_OUT_OF_RANGE,
-    .target_offset = offset,
+    .target_pos = f->pos.pos + offset,
     .pos = &f->pos
   };
 
-  err = fat_foreach_cluster(f->fs, fat32_dentry_get_cluster(&f->d),
+  if (!f->pos.cluster_idx)
+    start_cluster_idx = fat32_dentry_get_cluster(&f->d);
+  else
+    start_cluster_idx = f->pos.cluster_idx;
+
+  err = fat_foreach_cluster(f->fs, start_cluster_idx,
     fat_file_pos_next_cluster, &ctx);
 
   if (err == SUCCESS && ctx.err != SUCCESS)
@@ -1958,6 +1968,7 @@ static int fat32_write_one_sect(const struct fat32_fs *fs,
     pos->sector_idx;
 
   const size_t io_sz = MIN(sect_sz - pos->sector_offset, max_io_size);
+  *io_size = io_sz;
   if (io_sz == sect_sz) {
     /*
      * Simle case - just write complete sector full of new data, nothing to
@@ -2050,14 +2061,22 @@ int fat32_write(const struct fat32_fs *fs, const char *filepath, size_t offset,
     }
   }
 
-  err = fat32_write_one_sect(fs, &f.pos, src, size_left, &io_size);
-  if (err != SUCCESS)
-    return err;
+  while(size_left) {
+    err = fat32_write_one_sect(fs, &f.pos, src, size_left, &io_size);
+    if (err != SUCCESS)
+      return err;
 
-  err = fat_file_pos_advance(&f, io_size);
-  if (err != SUCCESS && err != ERR_OUT_OF_RANGE) {
-    printf("fat32_write: seek failed %d\r\n", err);
-    return err;
+    src += io_size;
+    if (io_size < size_left)
+      size_left -= io_size;
+    else
+      size_left = 0;
+
+    err = fat_file_pos_advance(&f, io_size);
+    if (err != SUCCESS && err != ERR_OUT_OF_RANGE) {
+      printf("fat32_write: seek failed %d\r\n", err);
+      return err;
+    }
   }
 
   return err;
