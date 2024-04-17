@@ -125,6 +125,7 @@ static int raw_disk_open(const char *disk_dev, int *out_fd)
   *out_fd = fd;
   return 0;
 }
+char lbuf[230400];
 
 int main()
 {
@@ -134,7 +135,7 @@ int main()
   struct fat_dentry d;
   int fd;
 
-  sdcard_fd = open("/dev/sda2", O_RDWR);
+  sdcard_fd = open("/dev/sdb2", O_RDWR);
   if (sdcard_fd == -1) {
     perror("Failed to open sdcard device");
     return -1;
@@ -150,11 +151,32 @@ int main()
 
   fat32_fs_open(&my_block_device, &fs);
   err = fat32_create(&fs, "/test", true, true);
+  int fdr = open("../a.img", O_RDONLY);
+  read(fdr, lbuf, sizeof(lbuf));
+
   if (err != SUCCESS && err != ERR_EXISTS) {
     printf("create failed\n");
     return -1;
   }
-  fat32_ls(&fs, "/");
+  err = fat32_create(&fs, "/test/img_0000.img", false, false);
+  if (err != SUCCESS) {
+    printf("create failed\n");
+    return -1;
+  }
+
+  err = fat32_resize(&fs, "/test/img_0000.img", sizeof(lbuf));
+  if (err != SUCCESS) {
+    printf("resize failed\n");
+    return -1;
+  }
+
+  err = fat32_write(&fs, "/test/img_0000.img", 0, sizeof(lbuf), lbuf);
+  if (err != SUCCESS) {
+    printf("Failed to write file\r\n");
+    return -1;
+  }
+
+  fat32_ls(&fs, "/test");
   return 0;
   // fat32_dump_file_cluster_chain(&fs, "/test/data");
 #if 1

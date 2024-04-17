@@ -22,6 +22,7 @@
 #include "vc_sm_defs.h"
 #include <ili9341.h>
 #include <bitmap.h>
+#include <fs/fat32.h>
 
 #define BELL0 ((ioreg32_t)(0x3f00b840))
 #define BELL2 ((ioreg32_t)(0x3f00b848))
@@ -205,6 +206,12 @@ struct vchiq_mmal_component {
 
 
 static int vc_trans_id = 0;
+static int frame_num = 0;
+static struct fat32_fs *fat32_fs = NULL;
+void vchiq_set_fs(struct fat32_fs *fs)
+{
+  fat32_fs = fs;
+}
 
 static struct vchiq_state vchiq_state;
 
@@ -1384,8 +1391,24 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
    * Buffer payload
    */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
+    int err;
+    char namebuf[64];
+    snprintf(namebuf, sizeof(namebuf), "/test/img_%04d.img", frame_num);
+    frame_num++;
     MMAL_DEBUG2("Received non-EOS, pushing to display");
     ili9341_draw_bitmap(b->buffer, h->length);
+    err = fat32_create(fat32_fs, namebuf, false, false);
+    if (err != SUCCESS) {
+      printf("Failed to create next file\r\n");
+    }
+    err = fat32_resize(fat32_fs, namebuf, h->length);
+    if (err != SUCCESS) {
+      printf("Failed to resize file\r\n");
+    }
+    err = fat32_write(fat32_fs, namebuf, 0, h->length, b->buffer);
+    if (err != SUCCESS) {
+      printf("Failed to write file\r\n");
+    }
   }
 
   err = mmal_port_buffer_send_one(p, b);
@@ -2341,6 +2364,7 @@ void vchiq_init(void)
   uint32_t fragment_size;
   struct vchiq_state *s = &vchiq_state;
   char *fragments_baseaddr;
+  frame_num = 0;
 
   /* fragment size granulariry is cache line size */
   fragment_size = 2 * 64;

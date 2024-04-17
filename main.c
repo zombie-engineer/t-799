@@ -128,7 +128,8 @@ static void vchiq_main(void)
   if (err != SUCCESS)
     goto out;
   fat32_ls(&fat32fs, "/");
-  err = fat32_create(&fat32fs, "/test", true, false);
+  // err = fat32_create(&fat32fs, "/test", true, false);
+  vchiq_set_fs(&fat32fs);
 
   ili9341_init();
   vchiq_init();
