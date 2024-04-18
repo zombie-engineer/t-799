@@ -218,6 +218,13 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
     powered_on, exists);
 
   powered_on = 1;
+  uint32_t clock_rate = 1;
+  uint32_t min_clock_rate = 1;
+  uint32_t max_clock_rate = 1;
+  mbox_get_clock_rate(MBOX_CLOCK_ID_EMMC, &clock_rate);
+  mbox_get_min_clock_rate(MBOX_CLOCK_ID_EMMC, &min_clock_rate);
+  mbox_get_max_clock_rate(MBOX_CLOCK_ID_EMMC, &max_clock_rate);
+  BCM2835_EMMC_LOG("clock rate: %d/%d/%d", clock_rate, min_clock_rate, max_clock_rate);
 
   /* Disable and re-set clock */
   /* 1. Reset circuit and disable clock */

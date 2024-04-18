@@ -246,17 +246,16 @@ static inline int OPTIMIZED bcm2835_emmc_cmd_process_data(
    * that we can know weather the command has been completed or the error has
    * happened.
    * After CMD_DONE shows up we know command has been processed successfully.
-   * If command also implies
-   * DATA, then we need a couple of other interrupt bits:
+   * If command also implies * DATA, then we need a couple of other interrupt
+   * bits:
    *
    * bit 4 - WRITE_RDY - we poll for this bit if we want to write to data port.
-   * When WRITE_RDY shows up we can start writing to data port. The bit is set
-   * for each new block
+   * At WRITE_RDY start writing to data port. The bit is set for each new block
    *
    * bit 5 - READ_RDY - we poll for this if we want to read some data from
    * data port.
-   * When READ_RDY shows up we can start fetching words from data port.
-   * The bit is set for each new block
+   * At READ_RDY start fetching words from data port. The bit is set for each
+   * new block
    *
    * bit 1 - DATA_DONE - controller sets this bit, when full amount of bytes,
    * ordered in BLOCKSIZELEN register, has been processed. Ex: block size = 8
@@ -411,7 +410,8 @@ static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
   return SUCCESS;
 }
 
-int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec, bool blocking)
+int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
+  bool blocking)
 {
   uint32_t intval;
   char intbuf[256];
@@ -456,8 +456,9 @@ int bcm2835_emmc_reset_cmd(bool blocking)
   BCM2835_EMMC_CONTROL1_CLR_SET_SRST_CMD(control1, 1);
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
 
-  if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_CONTROL1, BCM2835_EMMC_CONTROL1_MASK_SRST_CMD,
-    0, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking, NULL)) {
+  if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_CONTROL1,
+    BCM2835_EMMC_CONTROL1_MASK_SRST_CMD, 0, BCM2835_EMMC_WAIT_TIMEOUT_USEC,
+    blocking, NULL)) {
     BCM2835_EMMC_ERR("emmc_reset_cmd: timeout");
     return ERR_TIMEOUT;
   }
