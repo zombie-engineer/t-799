@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <common.h>
 #include <os_api.h>
+#include <printf.h>
 
 #define EXCEPTION_VECTOR __attribute__((section(".exception_vector")))
 
@@ -123,22 +124,30 @@ SYNC_HANDLER(granule_protect)
 
 SYNC_HANDLER(inst_abrt_lo_el)
 {
+  printf("instruction abort at lower level\r\n");
 }
 
 SYNC_HANDLER(inst_abrt_eq_el)
 {
+  printf("instruction abort same level\r\n");
 }
 
 SYNC_HANDLER(inst_alignment)
 {
+  printf("instruction alignment\r\n");
 }
 
 SYNC_HANDLER(data_abrt_lo_el)
 {
+  printf("--");
+  while(1) {
+  }
 }
 
 SYNC_HANDLER(data_abrt_eq_el)
 {
+  printf("--");
+  while(1);
 }
 
 SYNC_HANDLER(stack_aling_flt)
