@@ -5,6 +5,33 @@ set $spi_dlen = (int *)(0x3f20400c)
 set $spi_ltoh = (int *)(0x3f204010)
 set $spi_dc   = (int *)(0x3f204014)
 
+set $emmc_arg2       = (int *)(0x3f300000)
+set $emmc_blksizecnt = (int *)(0x3f300004)
+set $emmc_arg1       = (int *)(0x3f300008)
+set $emmc_cmdtm      = (int *)(0x3f30000c)
+set $emmc_resp0      = (int *)(0x3f300010)
+set $emmc_resp1      = (int *)(0x3f300014)
+set $emmc_resp2      = (int *)(0x3f300018)
+set $emmc_resp3      = (int *)(0x3f30001c)
+set $emmc_data       = (int *)(0x3f300020)
+set $emmc_status     = (int *)(0x3f300024)
+set $emmc_control0   = (int *)(0x3f300028)
+set $emmc_control1   = (int *)(0x3f30002c)
+set $emmc_interrupt  = (int *)(0x3f300030)
+set $emmc_irpt_mask  = (int *)(0x3f300034)
+set $emmc_irpt_en    = (int *)(0x3f300038)
+set $emmc_control2   = (int *)(0x3f30003c)
+set $emmc_force_irpt = (int *)(0x3f300050)
+set $emmc_boot_tmout = (int *)(0x3f300070)
+set $emmc_dbg_sel    = (int *)(0x3f300074)
+set $emmc_exrd_fifo_cfg = (int *)(0x3f300080)
+set $emmc_exrd_fifo_en  = (int *)(0x3f300084)
+set $emmc_tune_step = (int *)(0x3f300088)
+set $emmc_tune_steps_std = (int *)(0x3f30008c)
+set $emmc_tune_steps_ddr = (int *)(0x3f300090)
+set $emmc_spi_int_spt = (int *)(0x3f3000f0)
+set $emmc_slotisr_ver = (int *)(0x3f3000fc)
+
 define lspi
   printf "SPI_CS:%08x", *$spi_cs
   printf ",CHIPSELECT:%d", *$spi_cs & 3
@@ -254,96 +281,100 @@ define __print_irq_basic
   end
 end
 
-define __print_irq_1
-  if $arg0 & (1<<0)
+define __print_irq
+  set $__irq = (((uint64_t)$arg1) << 32) + $arg0
+  if (($__irq >> 0) & 1)
     printf "SYSTIMER_0,"
   end
-  if $arg0 & (1<<1)
+  if (($__irq >> 1) & 1)
     printf "SYSTIMER_1,"
   end
-  if $arg0 & (1<<2)
+  if (($__irq >> 2) & 1)
     printf "SYSTIMER_2,"
   end
-  if $arg0 & (1<<3)
+  if (($__irq >> 3) & 1)
     printf "SYSTIMER_3,"
   end
-  if $arg0 & (1<<16)
+  if (($__irq >> 16) & 1)
     printf "DMA_CH_0,"
   end
-  if $arg0 & (1<<17)
+  if (($__irq >> 17) & 1)
     printf "DMA_CH_1,"
   end
-  if $arg0 & (1<<18)
+  if (($__irq >> 18) & 1)
     printf "DMA_CH_2,"
   end
-  if $arg0 & (1<<19)
+  if (($__irq >> 19) & 1)
     printf "DMA_CH_3,"
   end
-  if $arg0 & (1<<20)
+  if (($__irq >> 20) & 1)
     printf "DMA_CH_4,"
   end
-  if $arg0 & (1<<21)
+  if (($__irq >> 21) & 1)
     printf "DMA_CH_5,"
   end
-  if $arg0 & (1<<22)
+  if (($__irq >> 22) & 1)
     printf "DMA_CH_6,"
   end
-  if $arg0 & (1<<23)
+  if (($__irq >> 23) & 1)
     printf "DMA_CH_7,"
   end
-  if $arg0 & (1<<24)
+  if (($__irq >> 24) & 1)
     printf "DMA_CH_8,"
   end
-  if $arg0 & (1<<25)
+  if (($__irq >> 25) & 1)
     printf "DMA_CH_9,"
   end
-  if $arg0 & (1<<26)
+  if (($__irq >> 26) & 1)
     printf "DMA_CH_10,"
   end
-  if $arg0 & (1<<27)
+  if (($__irq >> 27) & 1)
     printf "DMA_CH_11,"
   end
-  if $arg0 & (1<<28)
+  if (($__irq >> 28) & 1)
     printf "DMA_CH_12,"
   end
-  if $arg0 & (1<<29)
+  if (($__irq >> 29) & 1)
     printf "AUX_INT,"
   end
-  if $arg0 & (1<<43)
+  if (($__irq >> 43) & 1)
     printf "I2C_SPI_SLV_INT,"
   end
-  if $arg0 & (1<<45)
+  if (($__irq >> 45) & 1)
     printf "PWA0,"
   end
-  if $arg0 & (1<<46)
+  if (($__irq >> 46) & 1)
     printf "PWA0,"
   end
-  if $arg0 & (1<<48)
+  if (($__irq >> 48) & 1)
     printf "SMI,"
   end
-  if $arg0 & (1<<49)
+  if (($__irq >> 49) & 1)
     printf "GPIO0,"
   end
-  if $arg0 & (1<<50)
+  if (($__irq >> 50) & 1)
     printf "GPIO1,"
   end
-  if $arg0 & (1<<51)
+  if (($__irq >> 51) & 1)
     printf "GPIO2,"
   end
-  if $arg0 & (1<<52)
+  if (($__irq >> 52) & 1)
     printf "GPIO3,"
   end
-  if $arg0 & (1<<53)
+  if (($__irq >> 53) & 1)
     printf "I2C,"
   end
-  if $arg0 & (1<<54)
+  if (($__irq >> 54) & 1)
     printf "SPI,"
   end
-  if $arg0 & (1<<55)
+  if (($__irq >> 55) & 1)
     printf "PCM,"
   end
-  if $arg0 & (1<<57)
+  if (($__irq >> 57) & 1)
     printf "UART,"
+  end
+  if (($__irq >> 62) & 1)
+    printf "ARASAN_SDIO,"
   end
 end
 
@@ -351,22 +382,22 @@ end
 define lsirq
   printf "bcm2835 interrupt controller IRQ info:\n"
   set $__basic_pending = *(int*)0x3f00b200
-  set $__irq_pending_1 = *(int*)0x3f00b204
-  set $__irq_pending_2 = *(int*)0x3f00b208
+  set $__irq_pending_1 = (uint64_t)(*(int*)0x3f00b204)
+  set $__irq_pending_2 = (uint64_t)(*(int*)0x3f00b208)
 
   set $__basic_enable = *(int*)0x3f00b218
   set $__irq_enable_1 = *(int*)0x3f00b210
   set $__irq_enable_2 = *(int*)0x3f00b214
   printf "ENABLED: bas:%08x,irq1:%08x,irq2:%08x\n", $__basic_enable, $__irq_enable_1, $__irq_enable_2
   __print_irq_basic $__basic_enable
-  __print_irq_1 ((uint64_t)$__irq_enable_1) | (((uint64_t)$__irq_enable_2) << 32)
+  __print_irq $__irq_enable_1 $__irq_enable_2
   if $__basic_enable || $__irq_enable_1 || $__irq_enable_2
     printf "\n"
   end
 
   printf "PENDING: bas:%08x,irq1:%08x,irq2:%08x\n", $__basic_pending, $__irq_pending_1, $__irq_pending_2
   __print_irq_basic $__basic_pending
-  __print_irq_1 ((uint64_t)$__irq_pending_1) | (((uint64_t)$__irq_pending_2) << 32)
+  __print_irq $__irq_pending_1 $__irq_pending_2
   if $__basic_pending || $__irq_pending_1 || $__irq_pending_2
     printf "\n"
   end
@@ -418,4 +449,33 @@ define reboot_cpu
   p *(uint32_t *)0x3f100024 = (0x5a << 24) | 1
   p *(uint32_t *)0x3f10001c = (0x5a << 24) | 0x20
   monitor reset init
+end
+
+define lemmc
+  printf "EMMC_ARG2: %08x\n", *(int *)$emmc_arg2
+  printf "EMMC_BLKSIZECNT: %08x\n", *(int *)$emmc_blksizecnt
+  printf "EMMC_ARG1: %08x\n", *(int *)$emmc_arg1
+  printf "EMMC_CMDTM: %08x\n", *(int *)$emmc_cmdtm
+  printf "EMMC_RESP0: %08x\n", *(int *)$emmc_resp0
+  printf "EMMC_RESP1: %08x\n", *(int *)$emmc_resp1
+  printf "EMMC_RESP2: %08x\n", *(int *)$emmc_resp2
+  printf "EMMC_RESP3: %08x\n", *(int *)$emmc_resp3
+  printf "EMMC_DATA: %08x\n", *(int *)$emmc_data
+  printf "EMMC_STATUS: %08x\n", *(int *)$emmc_status
+  printf "EMMC_CONTROL0: %08x\n", *(int *)$emmc_control0
+  printf "EMMC_CONTROL1: %08x\n", *(int *)$emmc_control1
+  printf "EMMC_INTERRUPT: %08x\n", *(int *)$emmc_interrupt
+  printf "EMMC_IRPT_MASK: %08x\n", *(int *)$emmc_irpt_mask
+  printf "EMMC_IRPT_EN: %08x\n", *(int *)$emmc_irpt_en
+  printf "EMMC_CONTROL2: %08x\n", *(int *)$emmc_control2
+  printf "EMMC_FORCE_IRPT: %08x\n", *(int *)$emmc_force_irpt
+  printf "EMMC_BOOT_TMOUT: %08x\n", *(int *)$emmc_boot_tmout
+  printf "EMMC_DBG_SEL: %08x\n", *(int *)$emmc_dbg_sel
+  printf "EMMC_EXRD_FIFO_CFG: %08x\n", *(int *)$emmc_exrd_fifo_cfg
+  printf "EMMC_EXRD_FIFO_EN: %08x\n", *(int *)$emmc_exrd_fifo_en
+  printf "EMMC_TUNE_STEP: %08x\n", *(int *)$emmc_tune_step
+  printf "EMMC_TUNE_STEPS_STD: %08x\n", *(int *)$emmc_tune_steps_std
+  printf "EMMC_TUNE_STEPS_DDR: %08x\n", *(int *)$emmc_tune_steps_ddr
+  printf "EMMC_SPI_INT_SPT: %08x\n", *(int *)$emmc_spi_int_spt
+  printf "EMMC_SLOTISR_VER: %08x\n", *(int *)$emmc_slotisr_ver
 end
