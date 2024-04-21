@@ -37,6 +37,7 @@ SECTIONS
   .exception_vector PHY_ADDR : AT(PHY_ADDR) {
     *.o(.exception_vector)
   } > RAM
+  PHY_ADDR += SIZEOF(.exception_vector);
 
 PAGE_TABLE_SIZE_L3 = 0x40000000 / 4096 * 8;
 PAGE_TABLE_SIZE_L2 = MAX(PAGE_TABLE_SIZE_L3 / 4096 * 8, 1);
