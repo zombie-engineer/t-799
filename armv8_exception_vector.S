@@ -13,33 +13,18 @@
  * Macros get_irqrn_preamble and get_irqnr_and_base are
  * copied from BCM2835 ARM Peripherals datasheet, page 111
  *
- * The concept behind those is as following:
- * IRQ_BASIC_PENDING register, given at address 0x7E00B200
- * or 0x3F00B200 or BCM2835_INTERRUPT_CONTROLLER_BASE + 0x200
- * This register is optimized for fast querying of which
- * interrupts are pending.
- * Here is a problematics slow path scenario of handling IRQ:
- *    - CPU Core recieved an IRQ interrupt, it starts executing
- *      code under IRQ interrupt address. It does not know yet,
- *      what peripheral or event has triggered the interrupt.
- *    - In total it has to read 3 registers to get all penging
- *      bits: IRQ_BASIC_PENDING, IRQ_GPU0_PENDING, IRQ_GPU1_PENDING,
- *      where IRQ_BASIC_PENDING  has 8 bits, both GPU registers have
- *      32 bits each, summing up to 32+32+8 = 72 bits to check,
- *      3 device memory accesses and a for loop with 72 bits
- *      iterations.
- *
- * Optimization is in utilizing free bits of IRQ_BASIC_PENDING
- * register, remember that only 8bits are used to describe which
- * IRQ is pending. Bits 8 and 9 show if there is something of interest
- * in IRQ_GPU0_PENDING and IRQ_GPU1_PENDING registers.
- * Even more, bits 10 ... to... 20 are mapped to the most frequent
- * IRQs from GPU0/GPU1 pending registers. Check with the datasheet
- * for an exact mapping. NOTE: if bits 10...20 are set in BASIC
- * pending register, that means these IRQs won't set bits 8 or 9
- * for corresponding GPU pending reg. This is also an optimization,
- * so that we didn't have to check the whole 32bit GPU0 bit-space
- * if only IRQ 7 is set and signalled to us via bit 10 of BASIC_PENDING
+ * Concept:
+ * Register IRQ_BASIC_PENDING (0x7e00b200 or 0x3f00b200) is an optimization to
+ * know summary of all pending interrupts by only reading one register.
+ * Interrupts are arranged into 3 groups - ARM, GPU and VC irqs, each presented
+ * by own register. BASIC PENDING holds info about ARM  group but also has
+ * summary of 2 others. Optimization is in utilizing free bits of
+ * IRQ_BASIC_PENDING register, while only 8 bits are assigned to ARM irqs, the
+ * rest is utilized to show other group irqs.
+ * Bit 8 shows IRQ_GPU0_PENDING is non zero.
+ * Bit 9 shows same for IRQ_GPU1_PENDING.
+ * Bits 10 to 20 are mapped to the most frequent IRQs from GPU0/GPU1 pending
+ * registers.If they are set, bits 8 and 9 will not be set to represent them.
  *
  * 'get_irqrn_preamble' is initialization macro-API that inits base register
  * address.
