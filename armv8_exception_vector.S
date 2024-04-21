@@ -39,9 +39,10 @@
   movk  \base, (BCM2835_IC_BASE & 0xffff)
 .endm
 
-.macro get_irqnr_and_base irqnr, irqstat, base, tmp, tmp2
+.macro get_irqnr_and_base irqnr, irqstat, base, tmp, tmp2, addr_reg64
   /* get masked status */
   ldr   \irqstat, [\base, #BASIC_PENDING]
+  mov   \tmp2, #(1<<31)
 
   mov   \irqnr, #(ARM_BASIC_BASE + 31)
   /* save bits 8, 9 of basic pending register */
@@ -91,7 +92,32 @@ get_irqnr_and_base_set_irqnr_\@:
   sub   \tmp, \irqstat, #1
   eor   \irqstat, \irqstat, \tmp
   clz   \tmp, \irqstat
+  tbnz  \tmp2, #31, get_irqnr_on_basic_nonzero_\@
   subs  \irqnr, \irqnr, \tmp
+  b get_irqnr_and_base_end_\@
+get_irqnr_on_basic_nonzero_\@:
+  subs  \irqnr, \irqnr, \tmp
+  subs  \irqnr, \irqnr, #(10 + ARM_BASIC_BASE)
+  ldr   \addr_reg64, =get_irqnr_basic_map_\@
+  add   \addr_reg64, \addr_reg64, \irqnr, uxtw
+  ldrb  \irqnr, [\addr_reg64]
+  b get_irqnr_and_base_end_\@
+
+get_irqnr_basic_map_\@:
+# Mapping of "basic pending register" described in "BCM2835 ARM Peripherals"
+# interrupts section
+.byte 7
+.byte 9
+.byte 10
+.byte 18
+.byte 19
+.byte 53
+.byte 54
+.byte 55
+.byte 56
+.byte 57
+.byte 62
+.byte 0xff
 
 get_irqnr_and_base_end_\@:
 .endm
@@ -188,10 +214,11 @@ irqnr_reg .req w0
  */
 tmp_1_reg .req w4
 tmp_2_reg .req w5
+tmp_3_reg .req x6
 
   get_irqrn_preamble base_reg
 1:
-  get_irqnr_and_base irqnr_reg, irqstat_reg, base_reg, tmp_1_reg, tmp_2_reg
+  get_irqnr_and_base irqnr_reg, irqstat_reg, base_reg, tmp_1_reg, tmp_2_reg, tmp_3_reg
   beq  1f
   bl   __handle_irq
   b    1b
