@@ -92,6 +92,7 @@ BCM2835_DMA_IRQ_HANDLER(9);
 BCM2835_DMA_IRQ_HANDLER(10);
 BCM2835_DMA_IRQ_HANDLER(11);
 
+#if 0
 static inline struct bcm2835_dma_cb *bcm2835_dma_cb_alloc(void)
 {
   int bitmap_idx;
@@ -115,6 +116,8 @@ static inline void bcm2835_dma_cb_free(struct bcm2835_dma_cb *cb)
   bitmap_idx = cb - cb_first;
   bitmap_clear_entry(&bcm2835_dma.cb_bitmap, bitmap_idx);
 }
+
+#endif
 
 static inline uint32_t bcmd2835_dma_gen_ti(
   int dreq,
@@ -203,6 +206,7 @@ bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src)
   return true;
 }
 
+#if 0
 static void bcm2835_dma_request(const struct bcm2835_dma_request_param *p,
   struct bcm2835_dma_cb **next_cb)
 {
@@ -224,7 +228,6 @@ static void bcm2835_dma_request(const struct bcm2835_dma_request_param *p,
   *next_cb = cb;
 }
 
-#if 0
 int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n)
 {
   size_t i;
