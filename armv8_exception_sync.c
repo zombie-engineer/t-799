@@ -1,8 +1,11 @@
 #include <compiler.h>
 #include <stdint.h>
 #include <common.h>
+#include <sched.h>
+#include <task.h>
 #include <os_api.h>
 #include <printf.h>
+#include "armv8_cpuctx.h"
 
 #define EXCEPTION_VECTOR __attribute__((section(".exception_vector")))
 
@@ -134,7 +137,17 @@ SYNC_HANDLER(inst_abrt_eq_el)
 
 SYNC_HANDLER(inst_alignment)
 {
-  printf("instruction alignment\r\n");
+  uint64_t pc = 0x1;
+
+  struct task *t = sched_get_current_task();
+  const struct armv8_cpuctx *c;
+
+  if (t) {
+    c = t->cpuctx;
+    pc = c->pc;
+  }
+
+  printf("instruction alignment at pc %08lx\r\n", pc);
 }
 
 SYNC_HANDLER(data_abrt_lo_el)
