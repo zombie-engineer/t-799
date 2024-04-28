@@ -118,18 +118,20 @@ struct event test_ev;
 static void vchiq_main(void)
 {
   int err;
-  struct fat32_fs fat32fs;
-  err = fs_init(&fs_blockdev);
+  struct block_device *bd;
+  err = fs_init(&bd);
   if (err != SUCCESS) {
     printf("Failed to init fs block device, err: %d\r\n", err);
     goto out;
   }
+#if 0
   err = fat32_fs_open(fs_blockdev, &fat32fs);
   if (err != SUCCESS)
     goto out;
   fat32_ls(&fat32fs, "/");
+#endif
   // err = fat32_create(&fat32fs, "/test", true, false);
-  vchiq_set_fs(&fat32fs);
+  vchiq_set_blockdev(bd);
 
   ili9341_init();
   vchiq_init();
@@ -191,6 +193,7 @@ static void kernel_run(void)
   sched_run_task_isr(t);
   t = task_create(kernel_start_task2, "t2");
   sched_run_task_isr(t);
+  bcm2835_emmc_set_interrupt_mode();
   scheduler_start();
   panic();
 }

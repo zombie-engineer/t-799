@@ -23,10 +23,14 @@
 #define BCM2835_EMMC_CMD13                0x0000000d
 /* READ_SINGLE_BLOCK */
 #define BCM2835_EMMC_CMD17                0x00000011
-/* READ_MULTIPLE_BLOCK */
+/* READ_MULTIPLE_BLOCKS */
 #define BCM2835_EMMC_CMD18                0x00000012
+/* SET_BLOCK_COUNT */
+#define BCM2835_EMMC_CMD23                0x00000017
 /* WRITE_BLOCK */
 #define BCM2835_EMMC_CMD24                0x00000018
+/* WRITE_MULTIPLE_BLOCKS */
+#define BCM2835_EMMC_CMD25                0x00000019
 /* APP_CMD */
 #define BCM2835_EMMC_CMD55                0x00000037
 
@@ -113,6 +117,32 @@ static inline int bcm2835_emmc_cmd17(uint32_t block_idx, char *dstbuf,
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
+/* READ_MULTIPLE_BLOCK */
+static inline int bcm2835_emmc_cmd18(uint32_t block_idx, size_t num_blocks,
+  char *dstbuf, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD18, block_idx);
+  c.databuf = dstbuf;
+  c.num_blocks = num_blocks;
+  c.block_size = 512;
+
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+static inline int bcm2835_emmc_cmd23(size_t num_blocks, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD23, num_blocks);
+  c.databuf = NULL;
+  c.num_blocks = 0;
+  c.block_size = 0;
+
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
 /* WRITE_BLOCK */
 static inline int bcm2835_emmc_cmd24(uint32_t block_idx, char *srcbuf,
   bool blocking)
@@ -126,3 +156,20 @@ static inline int bcm2835_emmc_cmd24(uint32_t block_idx, char *srcbuf,
 
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
+
+static inline int bcm2835_emmc_cmd25(uint32_t block_idx, size_t num_blocks,
+  char *srcbuf, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD25, block_idx);
+  c.databuf = srcbuf;
+  c.num_blocks = num_blocks;
+  c.block_size = 512;
+
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+void bcm2835_emmc_irq_handler(void);
+
+void bcm2835_emmc_dma_irq_callback(void);

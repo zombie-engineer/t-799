@@ -1,6 +1,6 @@
 #pragma once
 
-struct fat32_fs;
+struct block_device;
 
 void vchiq_init(void);
-void vchiq_set_fs(struct fat32_fs *fs);
+void vchiq_set_blockdev(struct block_device *bd);

@@ -7,14 +7,7 @@ p $pc += 4
 tb mmu_init
 c
 fin
-b kernel_init
-b test_spi
-# b ili9341_setup_dma_control_blocks
-b ili9341_init
 
-b ili9341_draw_bitmap
-b bcm2835_emmc_initialize.c:254
-# b vchiq_start_thread
- ## b mmal_port_buffer_send_one
- ## b mmal_buffer_print_meta
+b bcm2835_emmc_write
+b bcm2835_emmc_issue_cmd_polling
 c

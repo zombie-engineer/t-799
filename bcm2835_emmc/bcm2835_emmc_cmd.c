@@ -1,10 +1,14 @@
 #include <bitops.h>
 #include <stringlib.h>
 #include <bcm2835/bcm2835_emmc.h>
+#include "bcm2835_emmc_priv.h"
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
 #include "bcm2835_emmc_regs_bits.h"
 #include "bcm2835_emmc_regs.h"
+#include <bcm2835_dma.h>
+#include <memory_map.h>
+#include <os_api.h>
 
 /* P1 Physical Layer Simplified Specification.  * 4.9 Responces */
 
@@ -38,147 +42,227 @@
 /* Transfer type card to host */
 #define BCM2835_EMMC_TRANS_TYPE_DATA_CARD_TO_HOST 1
 
-#define CMDTM_GEN(__idx, __resp_type, __crc_enable, __trans_type, __is_data)\
-  ((__idx << BCM2835_EMMC_CMDTM_SHIFT_CMD_INDEX) |\
-  (RESP_TYPE_ ## __resp_type << BCM2835_EMMC_CMDTM_SHIFT_CMD_RSPNS_TYPE) |\
-  (__crc_enable << BCM2835_EMMC_CMDTM_SHIFT_CMD_CRCCHK_EN) |\
-  (BCM2835_EMMC_TRANS_TYPE_DATA_ ## __trans_type << BCM2835_EMMC_CMDTM_SHIFT_TM_DAT_DIR) |\
-  (__is_data << BCM2835_EMMC_CMDTM_SHIFT_CMD_ISDATA))
-
+#define CMDTM_GEN(__n, __resp, __crc, __trans, __is_data, __multiblock)\
+  ((__n << BCM2835_EMMC_CMDTM_SHIFT_CMD_INDEX) |\
+  (RESP_TYPE_ ## __resp << BCM2835_EMMC_CMDTM_SHIFT_CMD_RSPNS_TYPE) |\
+  (__crc << BCM2835_EMMC_CMDTM_SHIFT_CMD_CRCCHK_EN) |\
+  (BCM2835_EMMC_TRANS_TYPE_DATA_ ## __trans << BCM2835_EMMC_CMDTM_SHIFT_TM_DAT_DIR) |\
+  (__is_data << BCM2835_EMMC_CMDTM_SHIFT_CMD_ISDATA)|\
+  (__multiblock << BCM2835_EMMC_CMDTM_SHIFT_TM_MULTI_BLOCK))
 
 static uint32_t sd_commands[] = {
-  CMDTM_GEN(0,  NA,      0, NA, 0),
-  CMDTM_GEN(1,  NA,      0, NA, 0),
-  CMDTM_GEN(2,  R2,      1, NA, 0),
-  CMDTM_GEN(3,  R6,      1, NA, 0),
-  CMDTM_GEN(4,  NA,      0, NA, 0),
-  CMDTM_GEN(5,  R1b,     0, NA, 0),
-  CMDTM_GEN(6,  NA,      0, NA, 0),
-  CMDTM_GEN(7,  R1b,     1, NA, 0),
-  CMDTM_GEN(8,  R7,      1, NA, 0),
-  CMDTM_GEN(9,  R2,      0, NA, 0),
-  CMDTM_GEN(10, R2,      0, NA, 0),
-  CMDTM_GEN(11, R1,      1, NA, 0),
-  CMDTM_GEN(12, R1b,     1, NA, 0),
-  CMDTM_GEN(13, R1,      1, NA, 0),
-  CMDTM_GEN(14, NA,      0, NA, 0),
-  CMDTM_GEN(15, NA,      0, NA, 0),
-  CMDTM_GEN(16, R1,      1, NA, 0),
-  CMDTM_GEN(17, R1,      1, CARD_TO_HOST, 1),
-  CMDTM_GEN(18, R1,      1, NA, 0),
-  CMDTM_GEN(19, R1,      1, NA, 0),
-  CMDTM_GEN(20, R1b,     1, NA, 0),
-  CMDTM_GEN(21, R1,      1, NA, 0),
-  CMDTM_GEN(22, R1,      1, NA, 0),
-  CMDTM_GEN(23, R1,      1, NA, 0),
-  CMDTM_GEN(24, R1,      1, HOST_TO_CARD, 1),
-  CMDTM_GEN(25, R1,      1, NA, 0),
-  CMDTM_GEN(26, NA,      0, NA, 0),
-  CMDTM_GEN(27, R1,      1, NA, 0),
-  CMDTM_GEN(28, R1b,     1, NA, 0),
-  CMDTM_GEN(29, R1b,     1, NA, 0),
-  CMDTM_GEN(30, R1,      1, NA, 0),
-  CMDTM_GEN(31, NA,      0, NA, 0),
-  CMDTM_GEN(32, R1,      1, NA, 0),
-  CMDTM_GEN(33, R1,      1, NA, 0),
-  CMDTM_GEN(34, NA,      0, NA, 0),
-  CMDTM_GEN(35, NA,      0, NA, 0),
-  CMDTM_GEN(36, NA,      0, NA, 0),
-  CMDTM_GEN(37, NA,      0, NA, 0),
-  CMDTM_GEN(38, R1b,     1, NA, 0),
-  CMDTM_GEN(39, NA,      0, NA, 0),
-  CMDTM_GEN(40, R1,      1, NA, 0),
-  CMDTM_GEN(41, NA,      0, NA, 0),
-  CMDTM_GEN(42, R1,      1, NA, 0),
-  CMDTM_GEN(43, NA,    0, NA, 0),
-  CMDTM_GEN(44, NA,    0, NA, 0),
-  CMDTM_GEN(45, NA,    0, NA, 0),
-  CMDTM_GEN(46, NA,    0, NA, 0),
-  CMDTM_GEN(47, NA,    0, NA, 0),
-  CMDTM_GEN(48, NA,    0, NA, 0),
-  CMDTM_GEN(49, NA,    0, NA, 0),
-  CMDTM_GEN(50, NA,    0, NA, 0),
-  CMDTM_GEN(51, NA,    0, NA, 0),
-  CMDTM_GEN(52, NA,    0, NA, 0),
-  CMDTM_GEN(53, NA,    0, NA, 0),
-  CMDTM_GEN(54, NA,    0, NA, 0),
-  CMDTM_GEN(55, R1,      1, NA, 0),
-  CMDTM_GEN(56, R1,      1, NA, 0),
-  CMDTM_GEN(57, NA,    0, NA, 0),
-  CMDTM_GEN(58, NA,    0, NA, 0),
-  CMDTM_GEN(59, NA,    0, NA, 0)
+  CMDTM_GEN(0,  NA,      0, NA, 0, 0),
+  CMDTM_GEN(1,  NA,      0, NA, 0, 0),
+  CMDTM_GEN(2,  R2,      1, NA, 0, 0),
+  CMDTM_GEN(3,  R6,      1, NA, 0, 0),
+  CMDTM_GEN(4,  NA,      0, NA, 0, 0),
+  CMDTM_GEN(5,  R1b,     0, NA, 0, 0),
+  CMDTM_GEN(6,  NA,      0, NA, 0, 0),
+  CMDTM_GEN(7,  R1b,     1, NA, 0, 0),
+  CMDTM_GEN(8,  R7,      1, NA, 0, 0),
+  CMDTM_GEN(9,  R2,      0, NA, 0, 0),
+  CMDTM_GEN(10, R2,      0, NA, 0, 0),
+  CMDTM_GEN(11, R1,      1, NA, 0, 0),
+  CMDTM_GEN(12, R1b,     1, NA, 0, 0),
+  CMDTM_GEN(13, R1,      1, NA, 0, 0),
+  CMDTM_GEN(14, NA,      0, NA, 0, 0),
+  CMDTM_GEN(15, NA,      0, NA, 0, 0),
+  CMDTM_GEN(16, R1,      1, NA, 0, 0),
+  CMDTM_GEN(17, R1,      1, CARD_TO_HOST, 1, 0),
+  CMDTM_GEN(18, R1,      1, CARD_TO_HOST, 1, 1),
+  CMDTM_GEN(19, R1,      1, NA, 0, 0),
+  CMDTM_GEN(20, R1b,     1, NA, 0, 0),
+  CMDTM_GEN(21, R1,      1, NA, 0, 0),
+  CMDTM_GEN(22, R1,      1, NA, 0, 0),
+  CMDTM_GEN(23, R1,      1, NA, 0, 0),
+  CMDTM_GEN(24, R1,      1, HOST_TO_CARD, 1, 0),
+  CMDTM_GEN(25, R1,      1, HOST_TO_CARD, 1, 1),
+  CMDTM_GEN(26, NA,      0, NA, 0, 0),
+  CMDTM_GEN(27, R1,      1, NA, 0, 0),
+  CMDTM_GEN(28, R1b,     1, NA, 0, 0),
+  CMDTM_GEN(29, R1b,     1, NA, 0, 0),
+  CMDTM_GEN(30, R1,      1, NA, 0, 0),
+  CMDTM_GEN(31, NA,      0, NA, 0, 0),
+  CMDTM_GEN(32, R1,      1, NA, 0, 0),
+  CMDTM_GEN(33, R1,      1, NA, 0, 0),
+  CMDTM_GEN(34, NA,      0, NA, 0, 0),
+  CMDTM_GEN(35, NA,      0, NA, 0, 0),
+  CMDTM_GEN(36, NA,      0, NA, 0, 0),
+  CMDTM_GEN(37, NA,      0, NA, 0, 0),
+  CMDTM_GEN(38, R1b,     1, NA, 0, 0),
+  CMDTM_GEN(39, NA,      0, NA, 0, 0),
+  CMDTM_GEN(40, R1,      1, NA, 0, 0),
+  CMDTM_GEN(41, NA,      0, NA, 0, 0),
+  CMDTM_GEN(42, R1,      1, NA, 0, 0),
+  CMDTM_GEN(43, NA,    0, NA, 0, 0),
+  CMDTM_GEN(44, NA,    0, NA, 0, 0),
+  CMDTM_GEN(45, NA,    0, NA, 0, 0),
+  CMDTM_GEN(46, NA,    0, NA, 0, 0),
+  CMDTM_GEN(47, NA,    0, NA, 0, 0),
+  CMDTM_GEN(48, NA,    0, NA, 0, 0),
+  CMDTM_GEN(49, NA,    0, NA, 0, 0),
+  CMDTM_GEN(50, NA,    0, NA, 0, 0),
+  CMDTM_GEN(51, NA,    0, NA, 0, 0),
+  CMDTM_GEN(52, NA,    0, NA, 0, 0),
+  CMDTM_GEN(53, NA,    0, NA, 0, 0),
+  CMDTM_GEN(54, NA,    0, NA, 0, 0),
+  CMDTM_GEN(55, R1,      1, NA, 0, 0),
+  CMDTM_GEN(56, R1,      1, NA, 0, 0),
+  CMDTM_GEN(57, NA,    0, NA, 0, 0),
+  CMDTM_GEN(58, NA,    0, NA, 0, 0),
+  CMDTM_GEN(59, NA,    0, NA, 0, 0)
 };
 
 static uint32_t sd_acommands[] = {
-  CMDTM_GEN(0, NA,    0, NA, 0),
-  CMDTM_GEN(1, NA,    0, NA, 0),
-  CMDTM_GEN(2, NA,    0, NA, 0),
-  CMDTM_GEN(3, NA,    0, NA, 0),
-  CMDTM_GEN(4, NA,    0, NA, 0),
-  CMDTM_GEN(5, NA,    0, NA, 0),
-  CMDTM_GEN(6, R1,    1, NA, 0),
-  CMDTM_GEN(7, NA,    0, NA, 0),
-  CMDTM_GEN(8, NA,    0, NA, 0),
-  CMDTM_GEN(9, NA,    0, NA, 0),
-  CMDTM_GEN(10, NA,    0, NA, 0),
-  CMDTM_GEN(11, NA,    0, NA, 0),
-  CMDTM_GEN(12, NA,    0, NA, 0),
-  CMDTM_GEN(13, NA,    0, NA, 0),
-  CMDTM_GEN(14, NA,    0, NA, 0),
-  CMDTM_GEN(15, NA,    0, NA, 0),
-  CMDTM_GEN(16, NA,    0, NA, 0),
-  CMDTM_GEN(17, NA,    0, NA, 0),
-  CMDTM_GEN(18, NA,    0, NA, 0),
-  CMDTM_GEN(19, NA,    0, NA, 0),
-  CMDTM_GEN(20, NA,    0, NA, 0),
-  CMDTM_GEN(21, NA,    0, NA, 0),
-  CMDTM_GEN(22, NA,    0, NA, 0),
-  CMDTM_GEN(23, NA,    0, NA, 0),
-  CMDTM_GEN(24, NA,    0, NA, 0),
-  CMDTM_GEN(25, NA,    0, NA, 0),
-  CMDTM_GEN(26, NA,    0, NA, 0),
-  CMDTM_GEN(27, NA,    0, NA, 0),
-  CMDTM_GEN(28, NA,    0, NA, 0),
-  CMDTM_GEN(29, NA,    0, NA, 0),
-  CMDTM_GEN(30, NA,    0, NA, 0),
-  CMDTM_GEN(31, NA,    0, NA, 0),
-  CMDTM_GEN(32, NA,    0, NA, 0),
-  CMDTM_GEN(33, NA,    0, NA, 0),
-  CMDTM_GEN(34, NA,    0, NA, 0),
-  CMDTM_GEN(35, NA,    0, NA, 0),
-  CMDTM_GEN(36, NA,    0, NA, 0),
-  CMDTM_GEN(37, NA,    0, NA, 0),
-  CMDTM_GEN(38, NA,    0, NA, 0),
-  CMDTM_GEN(39, NA,    0, NA, 0),
-  CMDTM_GEN(40, NA,    0, NA, 0),
-  CMDTM_GEN(41, R3,    0, NA, 0),
-  CMDTM_GEN(42, NA,    0, NA, 0),
-  CMDTM_GEN(43, NA,    0, NA, 0),
-  CMDTM_GEN(44, NA,    0, NA, 0),
-  CMDTM_GEN(45, NA,    0, NA, 0),
-  CMDTM_GEN(46, NA,    0, NA, 0),
-  CMDTM_GEN(47, NA,    0, NA, 0),
-  CMDTM_GEN(48, NA,    0, NA, 0),
-  CMDTM_GEN(49, NA,    0, NA, 0),
-  CMDTM_GEN(50, R1,    1, NA, 0),
-  CMDTM_GEN(51, R1,    1, CARD_TO_HOST, 1),
-  CMDTM_GEN(52, NA,    0, NA, 0),
-  CMDTM_GEN(53, NA,    0, NA, 0),
-  CMDTM_GEN(54, NA,    0, NA, 0),
-  CMDTM_GEN(55, NA,    0, NA, 0),
-  CMDTM_GEN(56, NA,    0, NA, 0),
-  CMDTM_GEN(57, NA,    0, NA, 0),
-  CMDTM_GEN(58, NA,    0, NA, 0),
-  CMDTM_GEN(59, NA,    0, NA, 0)
+  CMDTM_GEN(0, NA,    0, NA, 0, 0),
+  CMDTM_GEN(1, NA,    0, NA, 0, 0),
+  CMDTM_GEN(2, NA,    0, NA, 0, 0),
+  CMDTM_GEN(3, NA,    0, NA, 0, 0),
+  CMDTM_GEN(4, NA,    0, NA, 0, 0),
+  CMDTM_GEN(5, NA,    0, NA, 0, 0),
+  CMDTM_GEN(6, R1,    1, NA, 0, 0),
+  CMDTM_GEN(7, NA,    0, NA, 0, 0),
+  CMDTM_GEN(8, NA,    0, NA, 0, 0),
+  CMDTM_GEN(9, NA,    0, NA, 0, 0),
+  CMDTM_GEN(10, NA,    0, NA, 0, 0),
+  CMDTM_GEN(11, NA,    0, NA, 0, 0),
+  CMDTM_GEN(12, NA,    0, NA, 0, 0),
+  CMDTM_GEN(13, NA,    0, NA, 0, 0),
+  CMDTM_GEN(14, NA,    0, NA, 0, 0),
+  CMDTM_GEN(15, NA,    0, NA, 0, 0),
+  CMDTM_GEN(16, NA,    0, NA, 0, 0),
+  CMDTM_GEN(17, NA,    0, NA, 0, 0),
+  CMDTM_GEN(18, NA,    0, NA, 0, 0),
+  CMDTM_GEN(19, NA,    0, NA, 0, 0),
+  CMDTM_GEN(20, NA,    0, NA, 0, 0),
+  CMDTM_GEN(21, NA,    0, NA, 0, 0),
+  CMDTM_GEN(22, NA,    0, NA, 0, 0),
+  CMDTM_GEN(23, NA,    0, NA, 0, 0),
+  CMDTM_GEN(24, NA,    0, NA, 0, 0),
+  CMDTM_GEN(25, NA,    0, NA, 0, 0),
+  CMDTM_GEN(26, NA,    0, NA, 0, 0),
+  CMDTM_GEN(27, NA,    0, NA, 0, 0),
+  CMDTM_GEN(28, NA,    0, NA, 0, 0),
+  CMDTM_GEN(29, NA,    0, NA, 0, 0),
+  CMDTM_GEN(30, NA,    0, NA, 0, 0),
+  CMDTM_GEN(31, NA,    0, NA, 0, 0),
+  CMDTM_GEN(32, NA,    0, NA, 0, 0),
+  CMDTM_GEN(33, NA,    0, NA, 0, 0),
+  CMDTM_GEN(34, NA,    0, NA, 0, 0),
+  CMDTM_GEN(35, NA,    0, NA, 0, 0),
+  CMDTM_GEN(36, NA,    0, NA, 0, 0),
+  CMDTM_GEN(37, NA,    0, NA, 0, 0),
+  CMDTM_GEN(38, NA,    0, NA, 0, 0),
+  CMDTM_GEN(39, NA,    0, NA, 0, 0),
+  CMDTM_GEN(40, NA,    0, NA, 0, 0),
+  CMDTM_GEN(41, R3,    0, NA, 0, 0),
+  CMDTM_GEN(42, NA,    0, NA, 0, 0),
+  CMDTM_GEN(43, NA,    0, NA, 0, 0),
+  CMDTM_GEN(44, NA,    0, NA, 0, 0),
+  CMDTM_GEN(45, NA,    0, NA, 0, 0),
+  CMDTM_GEN(46, NA,    0, NA, 0, 0),
+  CMDTM_GEN(47, NA,    0, NA, 0, 0),
+  CMDTM_GEN(48, NA,    0, NA, 0, 0),
+  CMDTM_GEN(49, NA,    0, NA, 0, 0),
+  CMDTM_GEN(50, R1,    1, NA, 0, 0),
+  CMDTM_GEN(51, R1,    1, CARD_TO_HOST, 1, 0),
+  CMDTM_GEN(52, NA,    0, NA, 0, 0),
+  CMDTM_GEN(53, NA,    0, NA, 0, 0),
+  CMDTM_GEN(54, NA,    0, NA, 0, 0),
+  CMDTM_GEN(55, NA,    0, NA, 0, 0),
+  CMDTM_GEN(56, NA,    0, NA, 0, 0),
+  CMDTM_GEN(57, NA,    0, NA, 0, 0),
+  CMDTM_GEN(58, NA,    0, NA, 0, 0),
+  CMDTM_GEN(59, NA,    0, NA, 0, 0)
 };
 
-static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(
-  char *buf,
-  int size,
-  int is_write,
-  uint32_t intbits,
-  uint64_t timeout_usec,
-  bool blocking)
+static struct event bcm2835_emmc_event;
+
+extern struct bcm2835_emmc bcm2835_emmc;
+
+void bcm2835_emmc_dma_irq_callback(void)
+{
+  os_event_notify(&bcm2835_emmc_event);
+}
+
+static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
+  void *mem_addr, size_t block_size, size_t num_blocks, bool is_write)
+{
+  struct bcm2835_dma_request_param r = { 0 };
+  uint32_t data_reg = PERIPH_ADDR_TO_DMA(BCM2835_EMMC_DATA);
+
+  r.dreq       = DMA_DREQ_EMMC;
+  r.len        = block_size * num_blocks;
+  r.enable_irq = true;
+  if (is_write) {
+    r.dreq_type  = BCM2835_DMA_DREQ_TYPE_DST;
+    r.dst_type   = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    r.dst        = data_reg;
+    r.src_type   = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    r.src        = RAM_PHY_TO_BUS_UNCACHED(mem_addr);
+  }
+  else {
+    r.dreq_type  = BCM2835_DMA_DREQ_TYPE_SRC;
+    r.dst_type   = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    r.dst        = RAM_PHY_TO_BUS_UNCACHED(mem_addr);
+    r.src_type   = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    r.src        = data_reg;
+  }
+  bcm2835_dma_program_cb(&r, control_block);
+}
+
+static void bcm2835_emmc_on_cmd_done(struct bcm2835_emmc_io *io, uint32_t intr)
+{
+  io->err = SUCCESS;
+  bool is_data = BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(bcm2835_emmc.io.cmdreg);
+  bool is_write;
+  bool run_dma = false;
+
+  os_event_notify(&bcm2835_emmc_event);
+#if 0
+  if (!is_data) {
+    /* DONE */
+
+    return;
+  }
+
+  is_write = BCM2835_EMMC_CMDTM_GET_TM_DAT_DIR(bcm2835_emmc.io.cmdreg) ==
+    BCM2835_EMMC_TRANS_TYPE_DATA_HOST_TO_CARD;
+
+  if (is_write)
+    run_dma = BCM2835_EMMC_INTERRUPT_GET_WRITE_RDY(intr);
+  else
+    run_dma = BCM2835_EMMC_INTERRUPT_GET_READ_RDY(intr);
+
+  if (!run_dma) {
+    /* Postpone DMA io */
+    return;
+  }
+
+  bcm2835_dma_activate(bcm2835_emmc.io.dma_channel);
+#endif
+}
+
+static void bcm2835_emmc_on_error(struct bcm2835_emmc_io *io, int interrupt)
+{
+  io->err = ERR_GENERIC;
+  os_event_notify(&bcm2835_emmc_event);
+}
+
+void bcm2835_emmc_irq_handler(void)
+{
+  uint32_t r;
+
+  r = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, r);
+  if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR)
+    bcm2835_emmc_on_error(&bcm2835_emmc.io, r);
+  if (r & BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE)
+    bcm2835_emmc_on_cmd_done(&bcm2835_emmc.io, r);
+}
+
+static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
+  int size, int is_write)
 {
   uint32_t *ptr, *end;
 
@@ -205,12 +289,11 @@ static inline int bcm2835_emmc_report_interrupt_error(const char *tag,
 
 static inline int bcm2835_emmc_wait_process_interrupts(const char *tag,
   uint32_t intbits,
-  uint64_t timeout_usec,
-  bool blocking)
+  uint64_t timeout_usec)
 {
   uint32_t intval;
-  if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_INTERRUPT, 0, intbits, timeout_usec, blocking,
-    &intval))
+  if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_INTERRUPT, 0, intbits,
+    timeout_usec, &intval))
     return ERR_TIMEOUT;
 
   /* clear received interrupts */
@@ -223,11 +306,10 @@ static inline int bcm2835_emmc_wait_process_interrupts(const char *tag,
   return SUCCESS;
 }
 
-static inline int OPTIMIZED bcm2835_emmc_cmd_process_data(
+static inline int OPTIMIZED bcm2835_emmc_polling_data_io(
   struct bcm2835_emmc_cmd *c,
   uint32_t cmdreg,
-  uint64_t timeout_usec,
-  bool blocking)
+  uint64_t timeout_usec)
 {
   int status;
   int block;
@@ -236,17 +318,16 @@ static inline int OPTIMIZED bcm2835_emmc_cmd_process_data(
   char *buf;
 
   /*
-   * BCM2835_EMMC_INTERRUPT register works as follows:
+   * How to work with BCM2835_EMMC_INTERRUPT reg:
    * 0xffff0000 - is a bitmask to error interrupt bits.
    * bit 15 - is ERR bit - means some error has happened.
    * bits through 16-24 - details of error, hence 0xffff0000 - is a mask to
    * all error types.
-   * bit 0 - CMD_DONE. To check that command has been received by SD card, we
-   * poll for CMD_DONE bit AND we also poll fro ERR bit at the same time. So,
-   * that we can know weather the command has been completed or the error has
-   * happened.
-   * After CMD_DONE shows up we know command has been processed successfully.
-   * If command also implies * DATA, then we need a couple of other interrupt
+   * bit 0 - CMD_DONE. To check that command has been received by SD card,
+   * CMD_DONE and ERR bits must be polled simultaniously to distinguish between
+   * 2 possible results - command succeeded or failed
+   * If CMD_DONE is set - command has been processed successfully.
+   * If command also implies DATA, then we need a couple of other interrupt
    * bits:
    *
    * bit 4 - WRITE_RDY - we poll for this bit if we want to write to data port.
@@ -284,14 +365,14 @@ static inline int OPTIMIZED bcm2835_emmc_cmd_process_data(
 
   for (block = 0; block < c->num_blocks; ++block) {
     status = bcm2835_emmc_wait_process_interrupts("emmc_cmd_process_data.block",
-      intbits, timeout_usec, blocking);
+      intbits, timeout_usec);
     if (status != SUCCESS) {
       BCM2835_EMMC_ERR("error status during data ready wait: %d", status);
       return status;
     }
 
     buf = c->databuf + block * c->block_size;
-    bcm2835_emmc_cmd_process_single_block(buf, c->block_size, is_write, intbits, timeout_usec, blocking);
+    bcm2835_emmc_cmd_process_single_block(buf, c->block_size, is_write);
   }
 
   intbits = 0;
@@ -299,70 +380,43 @@ static inline int OPTIMIZED bcm2835_emmc_cmd_process_data(
   BCM2835_EMMC_INTERRUPT_CLR_SET_DATA_DONE(intbits, 1);
   /* 0x8002 */
   return bcm2835_emmc_wait_process_interrupts("emmc_cmd_process_data.final",
-    intbits, timeout_usec, blocking);
+    intbits, timeout_usec);
 }
 
-static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
-  uint32_t cmdreg, uint64_t timeout_usec, bool blocking)
+static inline int bcm2835_emmc_issue_cmd_dma(struct bcm2835_emmc_cmd *c,
+  uint32_t cmdreg, uint64_t timeout_usec)
 {
-  int data_status;
-  int err;
-  uint32_t blksizecnt;
-  uint32_t intval, intval_cmp;
-  int response_type;
-  char intbuf[256];
+  bool is_data = BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg);
+  bool is_write;
+  
+  if (is_data) {
+    is_write = BCM2835_EMMC_CMDTM_GET_TM_DAT_DIR(cmdreg) ==
+      BCM2835_EMMC_TRANS_TYPE_DATA_HOST_TO_CARD;
+    bcm2835_emmc_setup_dma_transfer(bcm2835_emmc.io.dma_channel,
+      bcm2835_emmc.io.dma_control_block_idx,
+      bcm2835_emmc.io.c->databuf,
+      bcm2835_emmc.io.c->block_size,
+      bcm2835_emmc.io.c->num_blocks, is_write);
 
-#ifdef BCM2835_EMMC_DEBUG
-  BCM2835_EMMC_DEBUG("emmc_issue_cmd: cmd_idx:%08x, arg:%08x, blocks:%d",
-    c->cmd_idx, c->arg, c->num_blocks);
-#endif
-
-  if (bcm2835_emmc_wait_cmd_inhibit()) {
-    BCM2835_EMMC_ERR("emmc_issue_cmd: bcm2835_emmc_wait_cmd_inhibit failed");
-    return -1;
-  }
-  if (bcm2835_emmc_wait_dat_inhibit()) {
-    BCM2835_EMMC_ERR("emmc_issue_cmd: bcm2835_emmc_wait_dat_inhibit failed");
-    return -1;
+    bcm2835_dma_set_cb(bcm2835_emmc.io.dma_channel,
+      bcm2835_emmc.io.dma_control_block_idx);
   }
 
-  blksizecnt = 0;
-  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKSIZE(blksizecnt, c->block_size);
-  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKCNT(blksizecnt, c->num_blocks);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_BLKSIZECNT, blksizecnt);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_ARG1, c->arg);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
+  ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
 
-  err = bcm2835_emmc_interrupt_wait_done_or_err(timeout_usec, 1, 0, blocking,
-    &intval);
+  if (is_data)
+    bcm2835_dma_activate(bcm2835_emmc.io.dma_channel);
 
-  if (err) {
-    BCM2835_EMMC_ERR(
-      "emmc_issue_cmd: emmc_interrupt_wait_done_or_err, err: %d", err);
-    return ERR_TIMEOUT;
-  }
+  os_event_wait(&bcm2835_emmc_event);
+  os_event_clear(&bcm2835_emmc_event);
 
-  if (BCM2835_EMMC_INTERRUPT_GET_ERR(intval)) {
-    bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intval);
-    if (BCM2835_EMMC_INTERRUPT_GET_CTO_ERR(intval)) {
-      intval_cmp = 0;
-      BCM2835_EMMC_INTERRUPT_CLR_SET_CTO_ERR(intval_cmp, 1);
-      BCM2835_EMMC_INTERRUPT_CLR_SET_ERR(intval_cmp, 1);
-      if (intval_cmp == intval) {
-        BCM2835_EMMC_ERR("emmc_issue_cmd: exit by timeout");
-        return ERR_TIMEOUT;
-      }
-    }
-    bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf), intval);
-    BCM2835_EMMC_ERR("emmc_issue_cmd: error in INTERRUPT register: %08x, %s", intval,
-      intbuf);
-    return ERR_GENERIC;
-  }
+  return bcm2835_emmc.io.err;
+}
 
-  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, 0xffff0001);
-  response_type = BCM2835_EMMC_CMDTM_GET_CMD_RSPNS_TYPE(cmdreg);
-
-  switch(response_type) {
+static inline void bcm2835_emmc_read_response(struct bcm2835_emmc_cmd *c,
+  struct bcm2835_emmc_io *io)
+{
+  switch(BCM2835_EMMC_CMDTM_GET_CMD_RSPNS_TYPE(io->cmdreg)) {
     case BCM2835_EMMC_RESPONSE_TYPE_NONE:
       break;
     case BCM2835_EMMC_RESPONSE_TYPE_136_BITS:
@@ -378,10 +432,63 @@ static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
       c->resp0 = bcm2835_emmc_read_reg(BCM2835_EMMC_RESP0);
     break;
   }
+}
+
+static inline int bcm2835_emmc_issue_cmd_polling(struct bcm2835_emmc_cmd *c,
+  uint32_t cmdreg, uint64_t timeout_usec)
+{
+  int data_status;
+  int err;
+  uint32_t intval, intval_cmp;
+  char intbuf[256];
+
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
+
+  uint32_t r = 0;
+  uint64_t time_left_us = timeout_usec;
+  const uint64_t delay_time_us = 100;
+  uint32_t mask = BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE
+    | BCM2835_EMMC_INTERRUPT_MASK_ERR;
+
+  if (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg))
+    mask |= BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE;
+
+  while(time_left_us) {
+    r = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
+    if (r & mask)
+      break;
+
+    delay_us(delay_time_us);
+    time_left_us = (time_left_us > delay_time_us) ?
+      time_left_us - delay_time_us : 0;
+  }
+
+  if (!time_left_us)
+    return ERR_TIMEOUT;
+
+  bcm2835_emmc.io.err = r & BCM2835_EMMC_INTERRUPT_MASK_ERR ?
+    ERR_GENERIC : SUCCESS;
+
+  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, r);
+  bcm2835_emmc.io.interrupt = r;
+
+  if (bcm2835_emmc.io.err != SUCCESS) {
+    if (bcm2835_emmc.io.interrupt
+      & BCM2835_EMMC_INTERRUPT_MASK_CTO_ERR) {
+      BCM2835_EMMC_ERR("emmc_issue_cmd: exit by timeout");
+      return ERR_TIMEOUT;
+    }
+    bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf),
+      bcm2835_emmc.io.interrupt);
+    BCM2835_EMMC_ERR("emmc_issue_cmd: error in INTERRUPT register: %08x, %s",
+      bcm2835_emmc.io.interrupt, intbuf);
+    return ERR_GENERIC;
+  }
+
+  bcm2835_emmc_read_response(c, &bcm2835_emmc.io);
 
   if (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg)) {
-    data_status = bcm2835_emmc_cmd_process_data(c, cmdreg, timeout_usec,
-      blocking);
+    data_status = bcm2835_emmc_polling_data_io(c, cmdreg, timeout_usec);
 
     if (data_status != SUCCESS) {
       BCM2835_EMMC_ERR("emmc_issue_cmd: data_status: %d", data_status);
@@ -389,66 +496,99 @@ static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
     }
   }
 
-  if (response_type == BCM2835_EMMC_RESPONSE_TYPE_48_BITS_BUSY) {
-    ioreg32_read(BCM2835_EMMC_INTERRUPT);
-    err = bcm2835_emmc_interrupt_wait_done_or_err(timeout_usec, 0, 1,
-      blocking, &intval);
+  if (BCM2835_EMMC_CMDTM_GET_CMD_RSPNS_TYPE(cmdreg) ==
+    BCM2835_EMMC_RESPONSE_TYPE_48_BITS_BUSY) {
+    if (!(r & BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE)) {
+      err = bcm2835_emmc_interrupt_wait_done_or_err(timeout_usec, 0, 1,
+        &intval);
 
-    if (err)
-      return ERR_TIMEOUT;
+      if (err)
+        return ERR_TIMEOUT;
+    }
 
     bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, 0xffff0002);
   }
-#ifdef BCM2835_EMMC_DEBUG
-  BCM2835_EMMC_DEBUG("emmc_issue_cmd result: %d, resp: [%08x][%08x][%08x][%08x]",
-    c->status,
-    c->resp0,
-    c->resp1,
-    c->resp2,
-    c->resp3);
-#endif
   return SUCCESS;
 }
 
+static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
+  uint32_t cmdreg, uint64_t timeout_usec, bool polling)
+{
+  uint32_t blksizecnt;
+
+  int i;
+
+  const uint32_t mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
+    BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
+
+  while(ioreg32_read(BCM2835_EMMC_STATUS) & mask) {
+    bcm2835_emmc.num_inhibit_waits++;
+    delay_us(10);
+  }
+
+  bcm2835_emmc.io.c = c;
+  blksizecnt = 0;
+  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKSIZE(blksizecnt, c->block_size);
+  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKCNT(blksizecnt, c->num_blocks);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_BLKSIZECNT, blksizecnt);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_ARG1, c->arg);
+  if (c->num_blocks > 1)
+    BCM2835_EMMC_CMDTM_CLR_SET_TM_BLKCNT_EN(cmdreg, 1);
+
+  bcm2835_emmc.io.cmdreg = cmdreg;
+
+  if (polling)
+    return bcm2835_emmc_issue_cmd_polling(c, cmdreg, timeout_usec);
+
+  return bcm2835_emmc_issue_cmd_dma(c, cmdreg, timeout_usec);
+}
+
+static int bcm2835_emmc_issue_acmd(struct bcm2835_emmc_cmd *c,
+  uint64_t timeout_usec, bool mode_polling)
+{
+  int acmd_idx;
+  int status;
+  struct bcm2835_emmc_cmd acmd;
+
+  bcm2835_emmc_cmd_init(&acmd, BCM2835_EMMC_CMD55, c->rca << 16);
+
+  acmd.num_blocks = c->num_blocks;
+  acmd.block_size = c->block_size;
+
+  status = bcm2835_emmc_issue_cmd(&acmd, sd_commands[BCM2835_EMMC_CMD55],
+    timeout_usec, mode_polling);
+
+  if (status != SUCCESS)
+    return status;
+
+  acmd_idx = BCM2835_EMMC_ACMD_RAW_IDX(c->cmd_idx);
+  return bcm2835_emmc_issue_cmd(c, sd_acommands[acmd_idx], timeout_usec,
+    mode_polling);
+}
+
 int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
-  bool blocking)
+  bool mode_polling)
 {
   uint32_t intval;
   char intbuf[256];
-  int tmp_status;
-  int acmd_idx;
-  struct bcm2835_emmc_cmd tmp_cmd;
 
+#if 1
   intval = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
   if (intval) {
     bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf), intval);
     BCM2835_EMMC_WARN("interrupts detected: %08x, %s", intval, intbuf);
     bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intval);
   }
+#endif
 
-  if (BCM2835_EMMC_CMD_IS_ACMD(c->cmd_idx)) {
-    bcm2835_emmc_cmd_init(&tmp_cmd, BCM2835_EMMC_CMD55 /* APP_CMD */,
-      c->rca << 16);
-
-    tmp_cmd.num_blocks = c->num_blocks;
-    tmp_cmd.block_size = c->block_size;
-
-    tmp_status = bcm2835_emmc_issue_cmd(&tmp_cmd,
-      sd_commands[BCM2835_EMMC_CMD55], timeout_usec, blocking);
-
-    if (tmp_status != SUCCESS)
-      return tmp_status;
-
-    acmd_idx = BCM2835_EMMC_ACMD_RAW_IDX(c->cmd_idx);
-    return bcm2835_emmc_issue_cmd(c, sd_acommands[acmd_idx], timeout_usec,
-      blocking);
-  }
+  if (BCM2835_EMMC_CMD_IS_ACMD(c->cmd_idx))
+    return bcm2835_emmc_issue_acmd(c, timeout_usec, mode_polling);
 
   return bcm2835_emmc_issue_cmd(c, sd_commands[c->cmd_idx], timeout_usec,
-    blocking);
+    mode_polling);
 }
 
-int bcm2835_emmc_reset_cmd(bool blocking)
+int bcm2835_emmc_reset_cmd(bool mode_polling)
 {
   uint32_t control1;
 
@@ -458,7 +598,7 @@ int bcm2835_emmc_reset_cmd(bool blocking)
 
   if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_CONTROL1,
     BCM2835_EMMC_CONTROL1_MASK_SRST_CMD, 0, BCM2835_EMMC_WAIT_TIMEOUT_USEC,
-    blocking, NULL)) {
+    NULL)) {
     BCM2835_EMMC_ERR("emmc_reset_cmd: timeout");
     return ERR_TIMEOUT;
   }

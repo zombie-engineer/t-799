@@ -11,6 +11,8 @@
 #include <bcm2835/bcm2835_emmc.h>
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
+#include <bcm2835/bcm2835_ic.h>
+#include <irq.h>
 
 #define BCM2835_EMMC_CHECK_ERR(__fmt, ...)\
   do {\
@@ -209,6 +211,8 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   uint32_t bcm2835_emmc_state;
   uint32_t scr[2];
 
+  irq_set(BCM2835_IRQNR_ARASAN_SDIO, bcm2835_emmc_irq_handler);
+  bcm2835_ic_enable_irq(BCM2835_IRQNR_ARASAN_SDIO);
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, 0);
 
   if (!mbox_get_power_state(MBOX_DEVICE_ID_SD, &powered_on, &exists))
@@ -252,7 +256,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL2, 0);
 
   /* Set low clock */
-  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_SETUP, blocking);
+  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_SETUP);
   if (err != SUCCESS) {
     BCM2835_EMMC_ERR("failed to set clock to %d Hz",
       BCM2835_EMMC_CLOCK_HZ_SETUP);
@@ -269,7 +273,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
   delay_us(2000);
 
-  bcm2835_emmc_write_reg(BCM2835_EMMC_IRPT_EN, 0);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_IRPT_EN, 0xffffffff);
   intmsk = 0xffffffff;
   bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intmsk);
   // BCM2835_EMMC_INTERRUPT_CLR_CARD(intmsk);
@@ -279,11 +283,11 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
 
   /* CMD0 - GO_IDLE_STATE - reset device to idle state, no response */
   err = bcm2835_emmc_cmd0(blocking);
-  BCM2835_EMMC_CHECK_ERR("failed at CMD0 step");
+  BCM2835_EMMC_CHECK_ERR("Failed at CMD0 (GO_TO_IDLE)");
 
   /* CMD8 - SEND_NEXT_CSD - Device sends all EXT_CSD  register */
   err = bcm2835_emmc_cmd8(blocking);
-  BCM2835_EMMC_CHECK_ERR("failed at CMD8 step");
+  BCM2835_EMMC_CHECK_ERR("Failed at CMD8 (SEND_CSD)");
 
   /* 
    * CMD5 is CHECK_SDIO command, it will timeout for non-SDIO devices
@@ -318,7 +322,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   /*
    * Set normal clock
    */
-  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_NORMAL, blocking);
+  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_NORMAL);
   BCM2835_EMMC_CHECK_ERR("failed to set clock to %d Hz",
     BCM2835_EMMC_CLOCK_HZ_NORMAL);
 

@@ -34,14 +34,11 @@ static inline uint32_t OPTIMIZED bcm2835_emmc_read_reg(ioreg32_t reg)
  * mask == any other : Wait until reg value equals (mask & value)
  */
 static inline int OPTIMIZED bcm2835_emmc_wait_reg_value(ioreg32_t regaddr,
-  uint32_t mask, uint32_t value, uint64_t timeout_usec, bool blocking,
-  uint32_t *val)
+  uint32_t mask, uint32_t value, uint64_t timeout_usec, uint32_t *val)
 {
   const uint64_t wait_step_usec = 100;
   uint64_t wait_left_usec = timeout_usec;
   uint32_t regval;
-
-  BUG_IF(blocking == false, "Nonblocking timed wait not supported");
 
   while(wait_left_usec >= wait_step_usec) {
     regval = bcm2835_emmc_read_reg(regaddr);
@@ -63,9 +60,9 @@ wait_good:
   return SUCCESS;
 }
 
+
 static inline int bcm2835_emmc_interrupt_wait_done_or_err(
-  uint64_t timeout_usec, bool waitcmd, bool waitdat, bool blocking,
-  uint32_t *intval)
+  uint64_t timeout_usec, bool waitcmd, bool waitdat, uint32_t *intval)
 {
   uint32_t intmask;
   intmask = BCM2835_EMMC_INTERRUPT_MASK_ERR;
@@ -73,7 +70,9 @@ static inline int bcm2835_emmc_interrupt_wait_done_or_err(
     intmask |= BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE;
   if (waitdat)
     intmask |= BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE;
-  return bcm2835_emmc_wait_reg_value(BCM2835_EMMC_INTERRUPT, 0, intmask, timeout_usec, blocking, intval);
+
+  return bcm2835_emmc_wait_reg_value(BCM2835_EMMC_INTERRUPT, 0, intmask,
+    timeout_usec, intval);
 }
 
 static inline int bcm2835_emmc_wait_cmd_dat_ready(void)
@@ -128,4 +127,4 @@ static inline int bcm2835_emmc_wait_dat_inhibit(void)
 #define BCM2835_EMMC_CLOCK_HZ_SETUP 400000
 #define BCM2835_EMMC_CLOCK_HZ_NORMAL 25000000
 
-int bcm2835_emmc_set_clock(int target_hz, bool blocking);
+int bcm2835_emmc_set_clock(int target_hz);

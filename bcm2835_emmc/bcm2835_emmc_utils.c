@@ -24,18 +24,17 @@ static inline uint32_t bcm2835_emmc_get_clock_div(uint32_t target_clock)
   return 0;
 }
 
-static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec,
-  bool blocking)
+static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
 {
   return bcm2835_emmc_wait_reg_value(
     BCM2835_EMMC_CONTROL1,
     BCM2835_EMMC_CONTROL1_MASK_CLK_STABLE,
     BCM2835_EMMC_CONTROL1_MASK_CLK_STABLE,
     timeout_usec,
-    blocking, NULL);
+    NULL);
 }
 
-int bcm2835_emmc_set_clock(int target_hz, bool blocking)
+int bcm2835_emmc_set_clock(int target_hz)
 {
   int err;
   uint32_t control1;
@@ -57,12 +56,12 @@ int bcm2835_emmc_set_clock(int target_hz, bool blocking)
   control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
   BCM2835_EMMC_CONTROL1_CLR_SET_DATA_TOUNIT(control1, 0xb);
   BCM2835_EMMC_CONTROL1_CLR_SET_CLK_INTLEN(control1, 1);
-  control1 |= div;
+  control1 |= div << 8;
   BCM2835_EMMC_LOG("emmc_set_clock: control1: %08x", control1);
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
   delay_us(6);
 
-  err = bcm2835_emmc_wait_clock_stabilized(1000, blocking);
+  err = bcm2835_emmc_wait_clock_stabilized(1000);
   if (err) {
     BCM2835_EMMC_LOG("emmc_set_clock: failed to stabilize clock, err: %d");
     return err;

@@ -23,6 +23,7 @@
 #include <ili9341.h>
 #include <bitmap.h>
 #include <fs/fat32.h>
+#include <block_device.h>
 
 #define BELL0 ((ioreg32_t)(0x3f00b840))
 #define BELL2 ((ioreg32_t)(0x3f00b848))
@@ -207,10 +208,11 @@ struct vchiq_mmal_component {
 
 static int vc_trans_id = 0;
 static int frame_num = 0;
-static struct fat32_fs *fat32_fs = NULL;
-void vchiq_set_fs(struct fat32_fs *fs)
+static size_t frame_offset = 0;
+static struct block_device *vchiq_block_dev = NULL;
+void vchiq_set_blockdev(struct block_device *bd)
 {
-  fat32_fs = fs;
+  vchiq_block_dev = bd;
 }
 
 static struct vchiq_state vchiq_state;
@@ -1392,25 +1394,22 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
    */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     int err;
-    char namebuf[64];
-    snprintf(namebuf, sizeof(namebuf), "/test/img_%04d.img", frame_num);
     frame_num++;
     MMAL_DEBUG2("Received non-EOS, pushing to display");
-    ili9341_draw_bitmap(b->buffer, h->length);
-    err = fat32_create(fat32_fs, namebuf, false, false);
-    if (err != SUCCESS) {
-      printf("Failed to create next file\r\n");
+    // ili9341_draw_bitmap(b->buffer, h->length);
+    size_t num_sectors = (h->length + 511) / 512;
+    for (size_t i = 0; i < num_sectors / 2; i++) {
+      size_t sector = frame_offset + i * 2;
+      const uint8_t *src = b->buffer + (i * 2) * 512;
+      err = vchiq_block_dev->ops.write(vchiq_block_dev, src, sector, 2);
+      if (err != SUCCESS)
+        printf("Failed to write to sector %d\r\n", sector);
     }
-    err = fat32_resize(fat32_fs, namebuf, h->length);
-    if (err != SUCCESS) {
-      printf("Failed to resize file\r\n");
-    }
-    err = fat32_write(fat32_fs, namebuf, 0, h->length, b->buffer);
-    if (err != SUCCESS) {
-      printf("Failed to write file\r\n");
-    }
+    frame_offset += num_sectors;
+    printf("frame: %d, sectors_written: %d\r\n", frame_num, frame_offset);
   }
 
+  // printf("New frame written %d\r\n", frame_num);
   err = mmal_port_buffer_send_one(p, b);
   CHECK_ERR("Failed to submit buffer");
 
@@ -1865,13 +1864,14 @@ static int mmal_set_camera_parameters(struct vchiq_mmal_component *c,
 {
   int ret;
   uint32_t config_size;
+    //.stills_capture_circular_buffer_height = 1,
   struct mmal_parameter_camera_config config = {
     .max_stills_w = cam_info->max_width,
     .max_stills_h = cam_info->max_height,
-    .stills_yuv422 = 1,
+    .stills_yuv422 = 0,
     .one_shot_stills = 1,
-    .max_preview_video_w = 320,
-    .max_preview_video_h = 240,
+    .max_preview_video_w = 1024,
+    .max_preview_video_h = 768,
     .num_preview_video_frames = 3,
     .stills_capture_circular_buffer_height = 0,
     .fast_preview_resume = 0,
@@ -2342,7 +2342,7 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   smem_service = vchiq_open_smem_service(s);
   BUG_IF(!smem_service, "failed at open smem service");
 
-  err = vchiq_startup_camera(mmal_service, smem_service, 320, 240);
+  err = vchiq_startup_camera(mmal_service, smem_service, 1024, 768);
   BUG_IF(err != SUCCESS, "failed to run camera");
 }
 

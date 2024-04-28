@@ -2,6 +2,7 @@
 #include <common.h>
 #include <ioreg.h>
 #include <stringlib.h>
+#include "bcm2835_emmc_priv.h"
 #include "bcm2835_emmc_regs.h"
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
@@ -10,13 +11,7 @@
 #include <mbox.h>
 #include <mbox_props.h>
 #include <gpio.h>
-
-struct bcm2835_emmc {
-  bool is_blocking_mode;
-  bool is_initialized;
-  uint32_t device_id[4];
-  uint32_t rca;
-};
+#include <bcm2835_dma.h>
 
 struct bcm2835_emmc bcm2835_emmc = { 0 };
 int bcm2835_emmc_log_level;
@@ -87,6 +82,13 @@ int bcm2835_emmc_init(void)
 
   bcm2835_emmc_log_level = LOG_LEVEL_DEBUG2;
   bcm2835_emmc.is_blocking_mode = true;
+  bcm2835_emmc.num_inhibit_waits = 0;
+  err = bcm2835_emmc_io_init(&bcm2835_emmc.io, bcm2835_emmc_dma_irq_callback);
+  if (err != SUCCESS) {
+    BCM2835_EMMC_ERR("bcm2835_emmc_init failed at io: %d", err);
+    return err;
+  }
+
   // bcm2835_emmc_init_gpio();
   err = bcm2835_emmc_reset(bcm2835_emmc.is_blocking_mode, &bcm2835_emmc.rca,
     bcm2835_emmc.device_id);
@@ -126,16 +128,30 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   char *buf, size_t first_block_idx, size_t num_blocks)
 {
   int cmd_err;
+
+  if (num_blocks > 1)
+    cmd_err = bcm2835_emmc_cmd23(num_blocks, bcm2835_emmc.is_blocking_mode);
+
   if (io_type == BCM2835_EMMC_IO_READ) {
     /* READ_SINGLE_BLOCK */
-    cmd_err = bcm2835_emmc_cmd17(first_block_idx, buf,
-      bcm2835_emmc.is_blocking_mode);
+    if (num_blocks > 1) {
+      cmd_err = bcm2835_emmc_cmd18(first_block_idx, num_blocks, buf,
+        bcm2835_emmc.is_blocking_mode);
+    } else {
+      cmd_err = bcm2835_emmc_cmd17(first_block_idx, buf,
+        bcm2835_emmc.is_blocking_mode);
+    }
     if (cmd_err)
       return -1;
   } else if (io_type == BCM2835_EMMC_IO_WRITE) {
     /* WRITE_BLOCK */
-    cmd_err = bcm2835_emmc_cmd24(first_block_idx, buf,
-      bcm2835_emmc.is_blocking_mode);
+    if (num_blocks > 1) {
+      cmd_err = bcm2835_emmc_cmd25(first_block_idx, num_blocks, buf,
+        bcm2835_emmc.is_blocking_mode);
+    } else {
+      cmd_err = bcm2835_emmc_cmd24(first_block_idx, buf,
+        bcm2835_emmc.is_blocking_mode);
+    }
     if (cmd_err)
       return -1;
   } else {
@@ -157,6 +173,11 @@ int bcm2835_emmc_write(size_t first_block_idx, size_t num_blocks,
 {
   return bcm2835_emmc_data_io(BCM2835_EMMC_IO_WRITE, (char *)buf,
     first_block_idx, num_blocks);
+}
+
+int bcm2835_emmc_set_interrupt_mode(void)
+{
+  bcm2835_emmc.is_blocking_mode = false;
 }
 
 #ifdef ENABLE_JTAG
