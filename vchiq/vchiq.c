@@ -1396,16 +1396,34 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     int err;
     frame_num++;
     MMAL_DEBUG2("Received non-EOS, pushing to display");
-    // ili9341_draw_bitmap(b->buffer, h->length);
-    size_t num_sectors = (h->length + 511) / 512;
-    for (size_t i = 0; i < num_sectors / 2; i++) {
-      size_t sector = frame_offset + i * 2;
-      const uint8_t *src = b->buffer + (i * 2) * 512;
-      err = vchiq_block_dev->ops.write(vchiq_block_dev, src, sector, 2);
+    ili9341_draw_bitmap(b->buffer, h->length);
+    size_t bytes_left = h->length;
+    const size_t sectors_per_io = 128;
+    const size_t bytes_per_sector = 512;
+    const size_t bytes_per_io = bytes_per_sector * sectors_per_io;
+    size_t io_idx = 0;
+
+    while(bytes_left) {
+      const uint8_t *src = b->buffer + io_idx * bytes_per_io;
+      size_t io_start_sector = frame_offset + io_idx * sectors_per_io;
+
+      err = vchiq_block_dev->ops.write(vchiq_block_dev, src, io_start_sector,
+        sectors_per_io);
+
       if (err != SUCCESS)
-        printf("Failed to write to sector %d\r\n", sector);
+        printf("Failed to write sectors %d-%d\r\n", io_start_sector,
+          io_start_sector + sectors_per_io);
+
+      io_idx++;
+      if (bytes_left < bytes_per_io) {
+        printf("bytes_left not granular to bytes per io: %d vs %d\r\n",
+            bytes_left, bytes_per_io);
+        bytes_left = 0;
+      }
+      else
+        bytes_left -= bytes_per_io;
     }
-    frame_offset += num_sectors;
+    frame_offset += io_idx * sectors_per_io;
     printf("frame: %d, sectors_written: %d\r\n", frame_num, frame_offset);
   }
 
