@@ -12,6 +12,7 @@
 #include <kmalloc.h>
 #include <common.h>
 #include <mmu.h>
+#include <memory_map.h>
 
 #define ILI9341_CMD_SOFT_RESET   0x01
 #define ILI9341_CMD_READ_ID      0x04
@@ -82,10 +83,6 @@
 #define SPI_CS_TXD      (1 << 18)
 #define SPI_CS_RXR      (1 << 19)
 #define SPI_CS_RXF      (1 << 20)
-
-
-#define PTR_TO_U32(__ptr) ((uint32_t)(uint64_t)__ptr)
-#define DMA_ADDR(__ptr) (PTR_TO_U32(__ptr) | 0xc0000000)
 
 #define SPI_CS_7E   0x7e204000
 #define SPI_FIFO_7E 0x7e204004
@@ -431,7 +428,7 @@ void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     bcm2835_dma_update_cb_src(ili9341.tx_cbs[i],
-      DMA_ADDR(data + i * MAX_BYTES_PER_TRANSFER));
+      RAM_PHY_TO_BUS_UNCACHED(data + i * MAX_BYTES_PER_TRANSFER));
   }
 
   *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
@@ -508,7 +505,8 @@ static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.dst       = SPI_FIFO_7E;
   r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
-  r.src       = DMA_ADDR(&ili9341.spi_dma_tx_headers[transfer_idx]);
+  r.src       = RAM_PHY_TO_BUS_UNCACHED(
+    &ili9341.spi_dma_tx_headers[transfer_idx]);
   r.len       = 4;
   r.enable_irq = false;
 
@@ -527,7 +525,7 @@ static void ili9341_setup_spi_dma_transfer(int transfer_idx, bool is_last)
   r.dreq      = DMA_DREQ_SPI_RX;
   r.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
   r.src       = SPI_FIFO_7E;
-  r.dst       = DMA_ADDR(ili9341_canvas);
+  r.dst       = RAM_PHY_TO_BUS_UNCACHED(ili9341_canvas);
   r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.len       = transfer_size;
