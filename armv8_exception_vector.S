@@ -5,24 +5,24 @@
 #define ARM_BASIC_BASE 64
 
 .equ IC_BASE, BCM2835_IC_BASE
-.equ BASIC_PENDING, 0x0
-.equ IC_PEND1_OFF, 0x4
-.equ IC_PEND2_OFF, 0x8
+.equ BASIC_PENDING_REG, 0x0
+.equ PENDING_REG_1, 0x4
+.equ PENDING_REG_2, 0x8
 
 /*
  * Macros get_irqrn_preamble and get_irqnr_and_base are
  * copied from BCM2835 ARM Peripherals datasheet, page 111
  *
  * Concept:
- * Register IRQ_BASIC_PENDING (0x7e00b200 or 0x3f00b200) is an optimization to
+ * Register BASIC_PENDING_REG (0x7e00b200 or 0x3f00b200) is an optimization to
  * know summary of all pending interrupts by only reading one register.
  * Interrupts are arranged into 3 groups - ARM, GPU and VC irqs, each presented
  * by own register. BASIC PENDING holds info about ARM  group but also has
  * summary of 2 others. Optimization is in utilizing free bits of
- * IRQ_BASIC_PENDING register, while only 8 bits are assigned to ARM irqs, the
+ * BASIC_PENDING_REG register, while only 8 bits are assigned to ARM irqs, the
  * rest is utilized to show other group irqs.
  * Bit 8 shows IRQ_GPU0_PENDING is non zero.
- * Bit 9 shows same for IRQ_GPU1_PENDING.
+ * Bit 9 shows same for PENDING_REG_1.
  * Bits 10 to 20 are mapped to the most frequent IRQs from GPU0/GPU1 pending
  * registers.If they are set, bits 8 and 9 will not be set to represent them.
  *
@@ -41,66 +41,92 @@
 
 .macro get_irqnr_and_base irqnr, irqstat, base, tmp, tmp2, addr_reg64
   /* get masked status */
-  ldr   \irqstat, [\base, #BASIC_PENDING]
-  mov   \tmp2, #(1<<31)
+  ldr   \irqstat, [\base, #BASIC_PENDING_REG]
+  cmp   \irqstat, #0
+  beq get_irqnr_and_base_end_\@
 
-  mov   \irqnr, #(ARM_BASIC_BASE + 31)
-  /* save bits 8, 9 of basic pending register */
-  and   \tmp, \irqstat, #((1<<8)|(1<<9))
   /*
-   * clear bits 8, 9 and test. If irqstat has anything
-   * aside of bits 8 or 9, then we are ready to set
-   * irqnr and exit
+   * We want to know the number of the rightmost set bit in a 32 bit word
+   * We apply clz to value of basic pending interrupt, CLZ - count leading
+   * zeroes. We then mast invert this by subtracting result from 31.
+   * 31 - CLZ(irqstat)
    */
-  bics  \irqstat, \irqstat, \tmp
-  bne   get_irqnr_and_base_set_irqnr_\@
+  clz   \irqstat, \irqstat
+  mov   \tmp, #31
+  sub   \irqnr, \tmp, \irqstat
+
+  /*
+   * Check if the rightmost set bit in the basic pending register is  above 9,
+   * then we want to convert bit index to actual interrupt number by a special
+   * mapping table at basic_reg_fast_irq_lookup_
+   */
+  cmp   \irqnr, #9
+  bgt   basic_reg_fast_irq_lookup_\@
+
+  /*
+   * We are here if the righmost set bit in the basic pending register is not
+   * above 9. We then check if it is actually 9. This bit means we have to
+   * check pending register 2, which is one of the GPU interrupts
+   */
+  beq get_irqnr_and_base_test_bit_9_\@
+
+  /*
+   * We are here if the righmost set bit in the basic pending register is
+   * below 9. We then check if it is actually 8. This bit means we have to
+   * check pending register 1, which is one of the GPU interrupts
+   */
+  cmp \irqnr, #8
+  beq get_irqnr_and_base_test_bit_8_\@
+
+  /*
+   * We are here if the righmost set bit in the basic pending register is
+   * below 8. This means it is one of the 8 ARM interrupts, their numbers
+   * correspond to actual bit indexes of the basic pending register. In that
+   * case irqnr points to the rightmost set bit index aka ARM interrupt number
+   * while zero-flag is not set, indicating there is an interrupt
+   */
+  add \irqnr, \irqnr, #64
+  b get_irqnr_and_base_end_\@
+
+basic_reg_fast_irq_lookup_\@:
+  ldr   \addr_reg64, =get_irqnr_basic_map_\@
+  sub   \irqnr, \irqnr, #10
+  add   \addr_reg64, \addr_reg64, \irqnr, uxtw
+  ldrb  \irqnr, [\addr_reg64]
+  cmp   \irqnr, #0
+  b get_irqnr_and_base_end_\@
 
 get_irqnr_and_base_test_bit_8_\@:
-  tbz   \tmp, #8, get_irqnr_and_base_test_bit_9_\@
-  ldr   \irqstat, [\base, #IC_PEND1_OFF]
-  mov   \irqnr, #(ARM_IRQ1_BASE + 31)
+  ldr   \irqstat, [\base, #PENDING_REG_1]
 
-  /*
-   * Bits 7,9,10,18,19 in IRQ_GPU1_PENDING register
-   * are bits 10,11,12,13,14 in IRQ_BASIC_PENDING,
-   * we already checked them above, that's why we mask
-   * them out here.
-   */
+  /* Mask bits, present in BASIC_PENDING_REG */
   mov   \tmp2, #((1<<7)|(1<<9)|(1<<10))
   orr   \tmp2, \tmp2, #((1<<18)|(1<<19))
   bic   \irqstat, \irqstat, \tmp2
-  b     get_irqnr_and_base_set_irqnr_\@
+
+  /* Get rightmost set bit index in PENDING_REG_1 */
+  clz   \irqstat, \irqstat
+  mov   \tmp, #31
+  subs  \irqnr, \tmp, \irqstat
+  b get_irqnr_and_base_end_\@
 
 get_irqnr_and_base_test_bit_9_\@:
-  tbz   \tmp, #9, get_irqnr_and_base_end_\@
-  ldr   \irqstat, [\base, #IC_PEND2_OFF]
-  mov   \irqnr, #(ARM_IRQ2_BASE + 31)
-  /*
-   * Bits 21,22,23,24,25,30 in IRQ_GPU2_PENDING register
-   * are bits 15,16,17,18,19,20 in IRQ_BASIC_PENDING,
-   * we already checked them above, that's why we mask
-   * them out here.
-   */
+  ldr   \irqstat, [\base, #PENDING_REG_2]
+
+  /* Mask bits, present in BASIC_PENDING_REG */
   mov   \tmp2, #((1<<21)|(1<<22)|(1<<23)|(1<<24)|(1<<25))
   orr   \tmp2, \tmp2, #(1<<30)
   bic   \irqstat, \irqstat, \tmp2
 
-get_irqnr_and_base_set_irqnr_\@:
-  /*
-   * LSB(x) = 31 - CLZ(x^(x-1))
-   */
-  sub   \tmp, \irqstat, #1
-  eor   \irqstat, \irqstat, \tmp
-  clz   \tmp, \irqstat
-  tbnz  \tmp2, #31, get_irqnr_on_basic_nonzero_\@
-  subs  \irqnr, \irqnr, \tmp
-  b get_irqnr_and_base_end_\@
-get_irqnr_on_basic_nonzero_\@:
-  subs  \irqnr, \irqnr, \tmp
-  subs  \irqnr, \irqnr, #(10 + ARM_BASIC_BASE)
-  ldr   \addr_reg64, =get_irqnr_basic_map_\@
-  add   \addr_reg64, \addr_reg64, \irqnr, uxtw
-  ldrb  \irqnr, [\addr_reg64]
+  /* Get rightmost set bit index in PENDING_REG_2 */
+  clz   \irqstat, \irqstat
+  mov   \tmp, #31
+  subs  \irqnr, \tmp, \irqstat
+  /* If no bits are set zero flag is set, irqnr is 0, so we exit */
+  beq get_irqnr_and_base_end_\@
+
+  /* If any bits are set, convert bit index to IRQ number for PENDING_IRQ2 */
+  add   \irqnr, \irqnr, #32
   b get_irqnr_and_base_end_\@
 
 get_irqnr_basic_map_\@:
