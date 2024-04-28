@@ -540,11 +540,11 @@ static void ili9341_setup_dma_control_blocks(void)
 {
   size_t i;
 
-  ili9341.dma_channel_idx_spi_rx = 0; // bcm2835_dma_request_channel();
+  ili9341.dma_channel_idx_spi_rx = bcm2835_dma_request_channel();
   BUG_IF(ili9341.dma_channel_idx_spi_rx == -1,
     "Failed to request DMA channel for SPI RX");
 
-  ili9341.dma_channel_idx_spi_tx = 5; // bcm2835_dma_request_channel();
+  ili9341.dma_channel_idx_spi_tx = bcm2835_dma_request_channel();
   BUG_IF(ili9341.dma_channel_idx_spi_tx == -1,
     "Failed to request DMA channel for SPI TX");
 

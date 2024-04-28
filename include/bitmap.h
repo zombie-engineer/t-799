@@ -58,6 +58,12 @@ static inline int bitmap_set_next_free(struct bitmap *b)
   return -1;
 }
 
+static inline void bitmap_mark_busy(struct bitmap *b, int idx)
+{
+  BUG_IF(idx >= b->num_entries, "bitmap: out of range");
+  b->data[idx >> BITS_PER_WORD64_LOG] |= (1ull << (idx % BITS_PER_WORD64));
+}
+
 static inline bool bitmap_bit_is_set(struct bitmap *b, int idx)
 {
   BUG_IF(idx >= b->num_entries, "bitmap: out of range");

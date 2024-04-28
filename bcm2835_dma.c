@@ -321,6 +321,11 @@ void bcm2835_dma_init(void)
   bcm2835_dma.channel_bitmap.num_entries = BCM2835_DMA_NUM_CHANNELS;
   bitmap_clear_all(&bcm2835_dma.channel_bitmap);
 
+  for (size_t i = 0; i < BCM2835_DMA_NUM_CHANNELS; ++i) {
+    if (*DMA_CS(i) & DMA_CS_DISDEBUG)
+      bitmap_mark_busy(&bcm2835_dma.channel_bitmap, i);
+  }
+
   irq_set(BCM2835_IRQNR_DMA_0, bcm2835_dma_irq_handler_ch_0);
   irq_set(BCM2835_IRQNR_DMA_1, bcm2835_dma_irq_handler_ch_1);
   irq_set(BCM2835_IRQNR_DMA_2, bcm2835_dma_irq_handler_ch_2);
