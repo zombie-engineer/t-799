@@ -1509,6 +1509,15 @@ out_err:
 
 static int mmal_event_to_host_cb(const struct mmal_msg *rmsg)
 {
+  const struct mmal_msg_event_to_host *m = &rmsg->u.event_to_host;
+  MMAL_INFO("event_to_host: comp:%d,port type:%05x,num:%d,cmd:%08x,length:%d",
+    m->client_component, m->port_type, m->port_num, m->cmd, m->length);
+  for (size_t i = 0; i < m->length; ++i) {
+    printf(" %02x", m->data[i]);
+    if (i & ((i % 8) == 0))
+      printf("\r\n");
+  }
+
   return SUCCESS;
 }
 
