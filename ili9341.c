@@ -390,13 +390,13 @@ static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
 
 int line_y = 0;
 
-static void draw_line(int y, uint8_t *data)
+static void draw_line(int y, uint8_t *data, uint8_t color)
 {
   uint8_t *ptr = (uint8_t *)data;
   ptr += 320 * 3 * y;
   for (int i = 32; i < 64; ++i) {
-    ptr[i * 3] = 0xff;
-    ptr[i * 3 + 1] = 0xff;
+    ptr[i * 3] = color;
+    ptr[i * 3 + 1] = color;
   }
 }
 
@@ -419,7 +419,7 @@ void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
   }
 
 #if 1
-  draw_line(line_y, (uint8_t *)data);
+  draw_line(line_y, (uint8_t *)data, 0xff);
 
   line_y += 10;
   if (line_y >= 240)
