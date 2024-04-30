@@ -53,54 +53,55 @@ union mmal_es_specific_format {
 
 /* Definition of an elementary stream format (MMAL_ES_FORMAT_T) */
 struct mmal_es_format_local {
-  uint32_t type;  /* enum mmal_es_type */
+  /* enum mmal_es_type */
+  uint32_t type;
+  /* FourCC specifying encoding of the elementary stream.  */
+  uint32_t encoding;
 
-  uint32_t encoding;  /* FourCC specifying encoding of the elementary
-       * stream.
-       */
-  uint32_t encoding_variant;  /* FourCC specifying the specific
-         * encoding variant of the elementary
-         * stream.
-         */
+  /*
+   * FourCC specifying the specific encoding variant of the elementary
+   * stream.
+   */
+  uint32_t encoding_variant;
 
-  union mmal_es_specific_format *es;  /* Type specific
-             * information for the
-             * elementary stream
-             */
+  /* Type specifiv information for the elementary stream */
+  union mmal_es_specific_format *es;
 
-  uint32_t bitrate;  /* Bitrate in bits per second */
-  uint32_t flags;  /* Flags describing properties of the elementary
-       * stream.
-       */
+  /* Bitrate in bits per second */
+  uint32_t bitrate;
 
-  uint32_t extradata_size;  /* Size of the codec specific data */
-  uint8_t *extradata;    /* Codec specific data */
+  /* Flags describing properties of the elementary stream.  */
+  uint32_t flags;
+
+  /* Size of the codec specific data */
+  uint32_t extradata_size;
+  /* Codec specific data */
+  uint8_t *extradata;
 };
 
 /* Remote definition of an elementary stream format (MMAL_ES_FORMAT_T) */
 struct mmal_es_format {
-  uint32_t type;  /* enum mmal_es_type */
+  /* enum mmal_es_type */
+  uint32_t type;
 
-  uint32_t encoding;  /* FourCC specifying encoding of the elementary
-       * stream.
-       */
-  uint32_t encoding_variant;  /* FourCC specifying the specific
-         * encoding variant of the elementary
-         * stream.
-         */
+  /* FourCC specifying encoding of the elementary stream.  */
+  uint32_t encoding;
+  /* FourCC specifying the specific encoding variant of the elementary stream.*/
+  uint32_t encoding_variant;
 
-  uint32_t es;  /* Type specific
-     * information for the
-     * elementary stream
-     */
+  /* Type specific information for the elementary stream */
+  uint32_t es;
 
-  uint32_t bitrate;  /* Bitrate in bits per second */
-  uint32_t flags;  /* Flags describing properties of the elementary
-       * stream.
-       */
+  /* Bitrate in bits per second */
+  uint32_t bitrate;
 
-  uint32_t extradata_size;  /* Size of the codec specific data */
-  uint32_t extradata;    /* Codec specific data */
+  /* Flags describing properties of the elementary stream.  */
+  uint32_t flags;
+
+  /* Size of the codec specific data */
+  uint32_t extradata_size;
+  /* Codec specific data */
+  uint32_t extradata;
 };
 
 #endif /* MMAL_MSG_FORMAT_H */
