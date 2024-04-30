@@ -1351,7 +1351,8 @@ static int vchiq_mmal_port_parameter_set(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, uint32_t parameter_id, void *value,
   int value_size)
 {
-  VCHIQ_MMAL_MSG_DECL(c->ms, PORT_PARAMETER_SET, port_parameter_set, port_parameter_set_reply);
+  VCHIQ_MMAL_MSG_DECL(c->ms, PORT_PARAMETER_SET, port_parameter_set,
+    port_parameter_set_reply);
 
   /* GET PARAMETER CAMERA INFO */
   m->component_handle = c->handle;
@@ -1377,6 +1378,42 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_component *cam,
     MMAL_PARAMETER_CAPTURE, &frame_count, sizeof(frame_count));
 }
 
+static int emmc_write_frame(const uint8_t *buf, size_t sz)
+{
+  int err;
+  size_t bytes_left = sz;
+  const size_t sectors_per_io = 128;
+  const size_t bytes_per_sector = 512;
+  const size_t bytes_per_io = bytes_per_sector * sectors_per_io;
+  size_t io_idx = 0;
+
+  while(bytes_left) {
+    const uint8_t *src = buf + io_idx * bytes_per_io;
+    size_t io_start_sector = frame_offset + io_idx * sectors_per_io;
+
+    err = vchiq_block_dev->ops.write(vchiq_block_dev, src, io_start_sector,
+      sectors_per_io);
+
+    if (err != SUCCESS) {
+      printf("Failed to write sectors %d-%d\r\n", io_start_sector,
+        io_start_sector + sectors_per_io);
+      return err;
+    }
+
+    io_idx++;
+    if (bytes_left < bytes_per_io) {
+      printf("bytes_left not granular to bytes per io: %d vs %d\r\n",
+          bytes_left, bytes_per_io);
+      bytes_left = 0;
+    }
+    else
+      bytes_left -= bytes_per_io;
+  }
+  frame_offset += io_idx * sectors_per_io;
+  printf("frame: %d, sectors_written: %d\r\n", frame_num, frame_offset);
+  return SUCCESS;
+}
+
 static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
 {
@@ -1397,34 +1434,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     frame_num++;
     MMAL_DEBUG2("Received non-EOS, pushing to display");
     ili9341_draw_bitmap(b->buffer, h->length);
-    size_t bytes_left = h->length;
-    const size_t sectors_per_io = 128;
-    const size_t bytes_per_sector = 512;
-    const size_t bytes_per_io = bytes_per_sector * sectors_per_io;
-    size_t io_idx = 0;
-
-    while(bytes_left) {
-      const uint8_t *src = b->buffer + io_idx * bytes_per_io;
-      size_t io_start_sector = frame_offset + io_idx * sectors_per_io;
-
-      err = vchiq_block_dev->ops.write(vchiq_block_dev, src, io_start_sector,
-        sectors_per_io);
-
-      if (err != SUCCESS)
-        printf("Failed to write sectors %d-%d\r\n", io_start_sector,
-          io_start_sector + sectors_per_io);
-
-      io_idx++;
-      if (bytes_left < bytes_per_io) {
-        printf("bytes_left not granular to bytes per io: %d vs %d\r\n",
-            bytes_left, bytes_per_io);
-        bytes_left = 0;
-      }
-      else
-        bytes_left -= bytes_per_io;
-    }
-    frame_offset += io_idx * sectors_per_io;
-    printf("frame: %d, sectors_written: %d\r\n", frame_num, frame_offset);
+    emmc_write_frame(b->buffer, h->length);
   }
 
   // printf("New frame written %d\r\n", frame_num);
