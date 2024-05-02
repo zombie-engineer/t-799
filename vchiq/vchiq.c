@@ -147,6 +147,7 @@ struct vchiq_mmal_port_buffer {
 };
 
 struct vchiq_mmal_port {
+  char name[32];
   uint32_t enabled : 1;
   uint32_t zero_copy : 1;
   uint32_t handle;
@@ -181,7 +182,9 @@ struct vchiq_mmal_port {
 
 #define MAX_PORT_COUNT 4
 struct vchiq_mmal_component {
+  struct list_head list;
   char name[32];
+
   uint32_t in_use:1;
   uint32_t enabled:1;
   /* VideoCore handle for component */
@@ -410,6 +413,8 @@ struct vchiq_state {
 
   /* The slot_queue index of the slot to become available next. */
   int slot_queue_available;
+
+  struct list_head components;
 };
 
 struct mmal_io_work {
@@ -513,7 +518,7 @@ static void vchiq_init_state(struct vchiq_state *state,
   os_event_init(&state->sync_trigger_waitflag);
   os_event_init(&state->sync_release_waitflag);
   os_event_init(&state->state_waitflag);
-
+  INIT_LIST_HEAD(&state->components);
   state->slot_queue_available = 0;
 
   for (i = local->slot_first; i <= local->slot_last; i++)
@@ -1291,7 +1296,7 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   m->drvbuf.magic = MMAL_MAGIC;
   m->drvbuf.component_handle = p->component->handle;
   m->drvbuf.port_handle = p->handle;
-  m->drvbuf.client_context = (uint32_t)((uint64_t)p & ~0xffff000000000000);
+  m->drvbuf.client_context = (uint32_t)((uint64_t)b & ~0xffff000000000000);
 
   m->is_zero_copy = p->zero_copy;
   m->buffer_header.next = 0;
@@ -1420,6 +1425,10 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   int err;
   struct mmal_buffer *b;
 
+  if (!p->zero_copy) {
+    b = (void *)(uint64_t)(h->user_data | 0xffff000000000000);
+    goto buffer_return;
+  }
   /*
    * Find the buffer in a list of buffers bound to port
    */
@@ -1438,6 +1447,8 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   }
 
   // printf("New frame written %d\r\n", frame_num);
+
+buffer_return:
   err = mmal_port_buffer_send_one(p, b);
   CHECK_ERR("Failed to submit buffer");
 
@@ -1488,15 +1499,53 @@ static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h)
     h->data, h->user_data, h->alloc_size, h->length, flagsbuf);
 }
 
+static struct vchiq_mmal_port *mmal_port_get_by_handle(
+  struct vchiq_mmal_component *c, uint32_t handle)
+{
+  size_t i;
+
+  if (c->control.handle == handle)
+    return &c->control;
+
+  for (i = 0; i < c->inputs; ++i) {
+    if (c->input[i].handle == handle)
+      return &c->input[i];
+  }
+
+  for (i = 0; i < c->outputs; ++i) {
+    if (c->output[i].handle == handle)
+      return &c->output[i];
+  }
+  return NULL;
+}
+
 static int mmal_buffer_to_host_cb(struct mmal_msg *rmsg)
 {
   int err;
-  struct vchiq_mmal_port *p;
+  struct vchiq_mmal_port *p = NULL;
+  struct vchiq_mmal_component *c;
 
   struct mmal_msg_buffer_from_host *r;
 
   r = (struct mmal_msg_buffer_from_host *)&rmsg->u;
-  p = (struct vchiq_mmal_port *)(uint64_t)(r->drvbuf.client_context | 0xffff000000000000);
+  list_for_each_entry(c, &vchiq_state.components, list) {
+    if (c->handle == r->drvbuf.component_handle)
+      break;
+  }
+
+  if (c->handle != r->drvbuf.component_handle) {
+    MMAL_ERR("Failed to find component for buffer");
+    return ERR_NOT_FOUND;
+  }
+
+  p = mmal_port_get_by_handle(c, r->drvbuf.port_handle);
+  if (!p) {
+    MMAL_ERR("Failed to find component for buffer");
+    return ERR_NOT_FOUND;
+  }
+
+  r->buffer_header.user_data = r->drvbuf.client_context;
+
   mmal_buffer_print_meta(&r->buffer_header);
 
   err = mmal_io_work_push(p->component, p, &r->buffer_header,
@@ -1759,6 +1808,7 @@ struct vchiq_mmal_component *component_create(
   }
 
   strncpy(c->name, name, sizeof(c->name));
+  list_add_tail(&c->list, &vchiq_state.components);
 
   MMAL_INFO("vchiq component created name:%s: handle: %d, input: %d,"
     " output: %d, clock: %d", c->name, c->handle, c->inputs, c->outputs,
