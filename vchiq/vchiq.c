@@ -1288,10 +1288,17 @@ static inline void *mmal_check_reply_msg(struct mmal_msg *rmsg, int msg_type)
 static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   struct mmal_buffer *b)
 {
+  /*
+   * Kernel code in bcm2835-camera.c states this is only possible for enabled
+   * port
+   */
+  if (!p->enabled)
+    return ERR_INVAL;
+
   VCHIQ_MMAL_MSG_DECL_ASYNC(p->component->ms, BUFFER_FROM_HOST,
     buffer_from_host);
 
-  memset(m, 0xbc, sizeof(*m));
+  memset(m, 0, sizeof(*m));
 
   m->drvbuf.magic = MMAL_MAGIC;
   m->drvbuf.component_handle = p->component->handle;
