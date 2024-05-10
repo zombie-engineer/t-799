@@ -2750,14 +2750,14 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = create_encoder(mmal_service, mems_service, &encoder_input,
     &encoder_output, frame_width, frame_height);
   err = vchiq_mmal_port_connect(cam_still, encoder_input);
+  err = mmal_port_set_zero_copy(encoder_output);
+  err = mmal_port_set_zero_copy(encoder_input);
+  err = mmal_port_set_zero_copy(cam_still);
   CHECK_ERR("Failed to connect ports");
   err = vchiq_mmal_port_enable(encoder_output);
   CHECK_ERR("Failed to enable encoder output");
   err = vchiq_mmal_port_enable(encoder_input);
   CHECK_ERR("Failed to enable encoder input");
-  err = mmal_port_set_zero_copy(encoder_output);
-  err = mmal_port_set_zero_copy(encoder_input);
-  err = mmal_port_set_zero_copy(cam_still);
 
   encoder_output->minimum_buffer.num = 1;
   encoder_output->minimum_buffer.size = 512 * 1024;
