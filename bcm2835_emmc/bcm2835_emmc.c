@@ -12,6 +12,8 @@
 #include <mbox_props.h>
 #include <gpio.h>
 #include <bcm2835_dma.h>
+#include <bcm2835/bcm2835_ic.h>
+#include <irq.h>
 
 struct bcm2835_emmc bcm2835_emmc = { 0 };
 int bcm2835_emmc_log_level;
@@ -178,6 +180,8 @@ int bcm2835_emmc_write(size_t first_block_idx, size_t num_blocks,
 int bcm2835_emmc_set_interrupt_mode(void)
 {
   bcm2835_emmc.is_blocking_mode = false;
+  irq_set(BCM2835_IRQNR_ARASAN_SDIO, bcm2835_emmc_irq_handler);
+  bcm2835_ic_enable_irq(BCM2835_IRQNR_ARASAN_SDIO);
 }
 
 #ifdef ENABLE_JTAG

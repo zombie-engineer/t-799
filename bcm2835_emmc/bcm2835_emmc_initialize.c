@@ -11,8 +11,6 @@
 #include <bcm2835/bcm2835_emmc.h>
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
-#include <bcm2835/bcm2835_ic.h>
-#include <irq.h>
 
 #define BCM2835_EMMC_CHECK_ERR(__fmt, ...)\
   do {\
@@ -211,8 +209,10 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   uint32_t bcm2835_emmc_state;
   uint32_t scr[2];
 
+#if 0
   irq_set(BCM2835_IRQNR_ARASAN_SDIO, bcm2835_emmc_irq_handler);
   bcm2835_ic_enable_irq(BCM2835_IRQNR_ARASAN_SDIO);
+#endif
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, 0);
 
   if (!mbox_get_power_state(MBOX_DEVICE_ID_SD, &powered_on, &exists))
