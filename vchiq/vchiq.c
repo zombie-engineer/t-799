@@ -1425,6 +1425,10 @@ static int emmc_write_frame(const uint8_t *buf, size_t sz)
   return SUCCESS;
 }
 
+static char *next_buf;
+static char *next_buf_ptr = 0;
+static int h264_next_sector_idx = 0;
+
 static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
 {
@@ -1435,6 +1439,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (!p->zero_copy) {
     goto buffer_return;
   }
+
 #if 0
   /*
    * Find the buffer in a list of buffers bound to port
@@ -1442,6 +1447,21 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   b = mmal_port_get_buffer_from_header(p, h);
   BUG_IF(!b, "failed to find buffer");
 #endif
+
+  size_t bytes_left = h->length;
+
+  while(bytes_left) {
+    size_t buffer_left = next_buf + 512 - next_buf_ptr;
+    size_t io_sz = MIN(bytes_left, buffer_left);
+    memcpy(next_buf_ptr, b->buffer, io_sz);
+    next_buf_ptr += io_sz;
+    bytes_left -= io_sz;
+    if (next_buf_ptr == next_buf + 512) {
+      next_buf_ptr = next_buf;
+      int err = vchiq_block_dev->ops.write(vchiq_block_dev, next_buf,
+        h264_next_sector_idx++, 1);
+    }
+  }
 
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {
     h->length = 0;
@@ -1456,6 +1476,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     MMAL_DEBUG2("Received non-EOS, pushing to display");
     ili9341_draw_bitmap(b->buffer, h->length);
     // emmc_write_frame(b->buffer, h->length);
+    err = mmal_camera_capture_frames(p);
   }
 
   // printf("New frame written %d\r\n", frame_num);
@@ -2052,7 +2073,7 @@ out_err:
   return err;
 }
 
-static void vchiq_mmal_local_format_fill(struct mmal_es_format_local *f,
+static void mmal_format_set(struct mmal_es_format_local *f,
   int encoding, int encoding_variant, int width, int height, int framerate)
 {
   f->encoding = encoding;
@@ -2677,7 +2698,7 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
 
   CHECK_ERR("Failed to retrieve supported encodings from port");
 
-  vchiq_mmal_local_format_fill(&preview->format, MMAL_ENCODING_OPAQUE,
+  mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
     MMAL_ENCODING_I420, frame_width, frame_height, 3);
 
   err = vchiq_mmal_port_set_format(preview);
@@ -2688,13 +2709,13 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to set zero copy param for camera port");
 #endif
 
-  vchiq_mmal_local_format_fill(&video->format, MMAL_ENCODING_OPAQUE,
+  mmal_format_set(&video->format, MMAL_ENCODING_OPAQUE,
     0, frame_width, frame_height, 0);
 
   err = vchiq_mmal_port_set_format(video);
   CHECK_ERR("Failed to set format for video capture port");
 
-  vchiq_mmal_local_format_fill(&still->format, MMAL_ENCODING_OPAQUE,
+  mmal_format_set(&still->format, MMAL_ENCODING_OPAQUE,
     MMAL_ENCODING_I420, frame_width, frame_height, 0);
 
   err = vchiq_mmal_port_set_format(still);
@@ -2722,6 +2743,8 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *splitter_in, *splitter_out_1,
     *splitter_out_2;
 
+  next_buf = dma_alloc(512);
+  next_buf_ptr = next_buf;
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 
@@ -2805,7 +2828,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to create splitter component");
 
 
-  vchiq_mmal_local_format_fill(&splitter_out_1->format, MMAL_ENCODING_RGB24,
+  mmal_format_set(&splitter_out_1->format, MMAL_ENCODING_RGB24,
     0, frame_width, frame_height, 0);
   err = vchiq_mmal_port_set_format(splitter_out_1);
   if (splitter_out_1->minimum_buffer.num < 3)
