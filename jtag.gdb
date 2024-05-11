@@ -8,6 +8,5 @@ tb mmu_init
 c
 fin
 
-b bcm2835_emmc_write
-b bcm2835_emmc_issue_cmd_polling
+source breakpoints.gdb
 c
