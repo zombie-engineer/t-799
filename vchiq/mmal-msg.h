@@ -256,6 +256,10 @@ struct mmal_msg_port_action_reply {
 #define MMAL_BUFFER_HEADER_FLAG_CORRUPTED              BIT(9)
 /* Signals that a buffer failed to be transmitted */
 #define MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED    BIT(10)
+/** Signals the output buffer won't be used, just update reference frames */
+#define MMAL_BUFFER_HEADER_FLAG_DECODEONLY             (1<<11)
+/** Signals that the end of the current payload ends a NAL */
+#define MMAL_BUFFER_HEADER_FLAG_NAL_END                (1<<12)
 
 struct mmal_driver_buffer {
   uint32_t magic;

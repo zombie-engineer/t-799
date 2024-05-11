@@ -1521,6 +1521,8 @@ static inline void mmal_buffer_header_make_flags_string(
   CHECK_FLAG(SNAPSHOT);
   CHECK_FLAG(CORRUPTED);
   CHECK_FLAG(TRANSMISSION_FAILED);
+  CHECK_FLAG(DECODEONLY);
+  CHECK_FLAG(NAL_END);
 #undef CHECK_FLAG
 }
 
