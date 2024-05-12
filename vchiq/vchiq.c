@@ -1476,20 +1476,26 @@ out_err:
   return err;
 }
 
-static inline void mmal_buffer_header_make_flags_string(
+static inline void mmal_buffer_flags_to_string(
   struct mmal_buffer_header *h, char *buf, int bufsz)
 {
   int n = 0;
 
+  if (!bufsz)
+    return;
+
+  /* No chance to write something meaningful */
+  if (bufsz < 5)
+    goto out;
+
 #define CHECK_FLAG(__name) \
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_ ## __name) { \
     if (n && (bufsz - n >= 2)) { \
-      buf[n++] = ','; \
-      buf[n++] = ' '; \
+      buf[n++] = '|'; \
     } \
-    size_t len = MIN(sizeof(#__name), bufsz - n); \
+    size_t len = MIN(sizeof(#__name) - 1, bufsz - n); \
     strncpy(buf + n, #__name, len);\
-    n += MIN(sizeof(#__name), bufsz - n); \
+    n += len; \
   }
 
   CHECK_FLAG(EOS);
@@ -1506,13 +1512,18 @@ static inline void mmal_buffer_header_make_flags_string(
   CHECK_FLAG(DECODEONLY);
   CHECK_FLAG(NAL_END);
 #undef CHECK_FLAG
+  if (n >= bufsz)
+    n = bufsz - 1;
+
+out:
+  buf[n] = 0;
 }
 
 static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h)
 {
   char flagsbuf[256];
-  mmal_buffer_header_make_flags_string(h, flagsbuf, sizeof(flagsbuf));
-  MMAL_INFO("buffer_header: %p,hdl:%08x,addr:%08x,sz:%d/%d,flags:%0x%s", h,
+  mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
+  MMAL_INFO("buffer_header: %p,hdl:%08x,addr:%08x,sz:%d/%d,flags:%0x,'%s'", h,
     h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf);
 }
 
