@@ -173,8 +173,24 @@ struct vchiq_mmal_port {
   /* elementary stream format */
   union mmal_es_specific_format es;
 
-  /* data buffers to fill */
-  struct list_head buffers;
+  /*
+   * Preallocated free buffers on our side, they are not used but if required
+   * we can release them to the remote side (vcos)
+   */
+  struct list_head buffers_free;
+
+  /*
+   * Buffers that are released to remote side (vcos). At some point they will
+   * be sent to us by BUFFER_TO_HOST message
+   */
+  struct list_head buffers_busy;
+
+  /*
+   * Buffers that are send to use by BUFFER_TO_HOST and are currently being
+   * processed by us. After processing is done these will be sent to
+   * buffers_free
+   */
+  struct list_head buffers_in_process;
 
   /* callback context */
   void *cb_ctx;
@@ -1127,13 +1143,14 @@ static int mmal_io_work_push(struct vchiq_mmal_component *c,
   return SUCCESS;
 }
 
+#if 0
 static inline struct mmal_buffer *mmal_port_get_buffer_from_header(
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
 {
   struct mmal_buffer *b;
   uint32_t buffer_data;
 
-  list_for_each_entry(b, &p->buffers, list) {
+  list_for_each_entry(b, &p->buffers_free, list) {
     if (p->zero_copy)
       buffer_data = (uint32_t)(uint64_t)b->vcsm_handle;
     else
@@ -1145,6 +1162,7 @@ static inline struct mmal_buffer *mmal_port_get_buffer_from_header(
   MMAL_ERR("buffer not found for data: %08x", h->data);
   return NULL;
 }
+#endif
 
 struct mmal_msg_context {
   union {
@@ -1342,6 +1360,14 @@ static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
   struct mmal_buffer *b)
 {
   int err;
+  err = vchiq_mmal_buffer_from_host(p, b);
+  if (err) {
+    MMAL_ERR("failed to submit port buffer to VC");
+    return err;
+  }
+  return SUCCESS;
+
+#if 0
   struct mmal_buffer *pb;
 
   list_for_each_entry(pb, &p->buffers, list) {
@@ -1356,6 +1382,7 @@ static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
   }
 
   MMAL_ERR("Invalid buffer in request: %p: %08x", b, b->buffer);
+#endif
   return ERR_INVAL;
 }
 
@@ -1389,11 +1416,25 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-#define IO_MIN_SECTORS 128
+#define IO_MIN_SECTORS 8192
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
-static char *next_buf;
-static char *next_buf_ptr = 0;
-static int h264_next_sector_idx = 0;
+
+struct camera {
+  char *current_buf;
+  char *current_buf_ptr;
+  int write_sector_offset;
+  char *io_buffers[2];
+  struct event next_buf_avail;
+};
+
+static struct camera cam = {
+  0
+};
+
+static void h264_sectors_write_complete(int err)
+{
+  os_event_notify(&cam.next_buf_avail);
+}
 
 static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
@@ -1406,41 +1447,46 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     goto buffer_return;
   }
 
-#if 0
-  /*
-   * Find the buffer in a list of buffers bound to port
-   */
-  b = mmal_port_get_buffer_from_header(p, h);
-  BUG_IF(!b, "failed to find buffer");
-#endif
-
   size_t bytes_left = h->length;
   const char *src = b->buffer;
 
-  while(bytes_left) {
-    size_t buffer_left = next_buf + H264BUF_SIZE - next_buf_ptr;
+  while (bytes_left) {
+    size_t buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
     size_t io_sz = MIN(bytes_left, buffer_left);
 
-    MMAL_INFO("%d +%d bytes %08x %08x", next_buf_ptr - next_buf, io_sz,
-      ((uint32_t *)b->buffer)[0],
+#if 0
+    MMAL_INFO("%d +%d bytes %08x %08x", cam.current_buf_ptr - cam.current_buf,
+      io_sz, ((uint32_t *)b->buffer)[0],
       ((uint32_t *)b->buffer)[1]);
+#endif
 
-    memcpy(next_buf_ptr, src, io_sz);
-    next_buf_ptr += io_sz;
+    memcpy(cam.current_buf_ptr, src, io_sz);
+    cam.current_buf_ptr += io_sz;
     bytes_left -= io_sz;
     src += io_sz;
 
-    if (next_buf_ptr == next_buf + H264BUF_SIZE) {
-      next_buf_ptr = next_buf;
+    if (cam.current_buf_ptr == cam.current_buf + H264BUF_SIZE) {
 
-      int err = vchiq_block_dev->ops.write(vchiq_block_dev, next_buf,
-        h264_next_sector_idx, IO_MIN_SECTORS);
+      struct blockdev_io io = {
+        .dev = vchiq_block_dev,
+        .is_write = true,
+        .addr = cam.current_buf,
+        .start_sector = cam.write_sector_offset,
+        .num_sectors = IO_MIN_SECTORS,
+        .cb = h264_sectors_write_complete
+      };
 
-      if (err != SUCCESS) {
-        MMAL_ERR("Failed to write to buffer: %d", err);
-        return ERR_GENERIC;
-      }
-      h264_next_sector_idx += IO_MIN_SECTORS;
+      if (cam.current_buf == cam.io_buffers[0])
+        cam.current_buf = cam.io_buffers[1];
+      else
+        cam.current_buf = cam.io_buffers[0];
+
+      cam.current_buf_ptr = cam.current_buf;
+
+      os_event_wait(&cam.next_buf_avail);
+      blockdev_scheduler_push_io(&io);
+      os_event_clear(&cam.next_buf_avail);
+      cam.write_sector_offset += IO_MIN_SECTORS;
     }
   }
 
@@ -1457,14 +1503,15 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     int err;
     frame_num++;
+#if 0
     MMAL_INFO("Done frame %d", frame_num);
     ili9341_draw_bitmap(b->buffer, h->length);
+#endif
   }
 
 buffer_return:
-  err = mmal_port_buffer_send_one(p, b);
-  CHECK_ERR("Failed to submit buffer");
-
+  list_del(&b->list);
+  list_add_tail(&b->list, &p->buffers_free);
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
     MMAL_DEBUG2("EOS received, sending CAPTURE command");
     err = mmal_camera_capture_frames(p);
@@ -1547,7 +1594,7 @@ static struct vchiq_mmal_port *mmal_port_get_by_handle(
   return NULL;
 }
 
-static int mmal_buffer_to_host_cb(struct mmal_msg *rmsg)
+static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 {
   int err;
   struct vchiq_mmal_port *p = NULL;
@@ -1572,7 +1619,12 @@ static int mmal_buffer_to_host_cb(struct mmal_msg *rmsg)
     return ERR_NOT_FOUND;
   }
 
-  struct mmal_buffer *b = list_first_entry(&p->buffers, struct mmal_buffer, list);
+  struct mmal_buffer *b = list_first_entry(&p->buffers_busy,
+    struct mmal_buffer, list);
+
+  list_del(&b->list);
+  list_add_tail(&b->list, &p->buffers_in_process);
+
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
 
   mmal_buffer_print_meta(&r->buffer_header);
@@ -1580,7 +1632,11 @@ static int mmal_buffer_to_host_cb(struct mmal_msg *rmsg)
   err = mmal_io_work_push(p->component, p, &r->buffer_header,
     mmal_port_buffer_io_work);
 
-  CHECK_ERR("Failed to schedule mmal io work");
+  b = list_first_entry(&p->buffers_free, struct mmal_buffer, list);
+  list_del(&b->list);
+  list_add_tail(&b->list, &p->buffers_busy);
+  err = mmal_port_buffer_send_one(p, b);
+  CHECK_ERR("Failed to submit buffer");
 out_err:
   return err;
 }
@@ -1772,7 +1828,10 @@ static int mmal_port_create(struct vchiq_mmal_component *c,
   err = vchiq_mmal_port_info_get(p);
   CHECK_ERR("Failed to get port info");
 
-  INIT_LIST_HEAD(&p->buffers);
+  INIT_LIST_HEAD(&p->buffers_free);
+  INIT_LIST_HEAD(&p->buffers_busy);
+  INIT_LIST_HEAD(&p->buffers_in_process);
+
   return SUCCESS;
 out_err:
   return err;
@@ -2383,7 +2442,7 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
   MMAL_INFO("%s: allocating buffers %dx%d to port %s", p->name, num_buffers,
     p->minimum_buffer.size, p->name);
 
-  for (i = 0; i < num_buffers; ++i) {
+  for (i = 0; i < num_buffers + 1; ++i) {
     buf = dma_alloc(sizeof(*buf));
     buf->buffer_size = p->minimum_buffer.size;
     buf->buffer = dma_alloc(buf->buffer_size);;
@@ -2392,7 +2451,7 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
       err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
       CHECK_ERR("failed to import dmabuf");
     }
-    list_add_tail(&buf->list, &p->buffers);
+    list_add_tail(&buf->list, &p->buffers_free);
   }
 
   MMAL_INFO("%s: port buf alloc: nr:%d, size:%d, align:%d, port_enabled:%s, %08x",
@@ -2413,15 +2472,24 @@ static int mmal_port_buffer_send_all(struct vchiq_mmal_port *p)
 {
   int err;
   struct mmal_buffer *b;
+  struct list_head *node, *tmp;
+  int to_send = p->minimum_buffer.num;
 
-  if (list_empty(&p->buffers)) {
-    MMAL_ERR("port buffer list is empty");
-    return ERR_RESOURCE;
-  }
-
-  list_for_each_entry(b, &p->buffers, list) {
+  list_for_each_safe(node, tmp, &p->buffers_free) {
+    b = container_of(node, struct mmal_buffer, list);
+    list_del(node);
+    list_add_tail(node, &p->buffers_busy);
     err = vchiq_mmal_buffer_from_host(p, b);
     CHECK_ERR("failed to submit port buffer to VC");
+    to_send--;
+
+    if (!to_send)
+      break;
+  }
+
+  if (to_send) {
+    MMAL_ERR("failed to send all required buffers");
+    return ERR_RESOURCE;
   }
 
   err = vchiq_mmal_port_info_get(p);
@@ -2742,9 +2810,15 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *splitter_in, *splitter_out_1,
     *splitter_out_2;
 
-  next_buf = dma_alloc(H264BUF_SIZE);
-  next_buf_ptr = next_buf;
-  h264_next_sector_idx = 0;
+  cam.io_buffers[0] = dma_alloc(H264BUF_SIZE);
+  cam.io_buffers[1] = dma_alloc(H264BUF_SIZE);
+
+  cam.current_buf = cam.io_buffers[0];
+  cam.current_buf_ptr = cam.current_buf;
+  os_event_init(&cam.next_buf_avail);
+  os_event_notify(&cam.next_buf_avail);
+
+  cam.write_sector_offset = 0;
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 

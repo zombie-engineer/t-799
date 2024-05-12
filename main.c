@@ -109,6 +109,7 @@ static void kernel_init(void)
   debug_led_init();
   bcm2835_dma_init();
   bcm2835_emmc_init();
+  blockdev_scheduler_init();
 }
 
 atomic_t test_atomic;
@@ -137,17 +138,6 @@ static void vchiq_main(void)
   vchiq_init();
 out:
   os_exit_current_task();
-}
-
-static void kernel_start_task2(void)
-{
-  while(1) {
-    printf("task2\r\n");
-    os_wait_ms(5000);
-    // atomic_cmp_and_swap(&test_atomic, 1, 0);
-    os_yield();
-    os_event_notify(&test_ev);
-  }
 }
 
 #if 0
@@ -191,7 +181,7 @@ static void kernel_run(void)
   printf("Hello %d\r\n", myvar);
   t = task_create(vchiq_main, "vchiq_main");
   sched_run_task_isr(t);
-  t = task_create(kernel_start_task2, "t2");
+  t = task_create(blockdev_scheduler_fn, "block-sched");
   sched_run_task_isr(t);
   bcm2835_emmc_set_interrupt_mode();
   scheduler_start();

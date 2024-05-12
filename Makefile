@@ -31,6 +31,7 @@ OBJS := \
   bcm2835_emmc/bcm2835_emmc_utils \
   bcm2835_dma \
   bcm2835_ic \
+  blockdev \
   debug_led \
   delay \
   dma_memory \
