@@ -1389,42 +1389,6 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-static int emmc_write_frame(const uint8_t *buf, size_t sz)
-{
-  int err;
-  size_t bytes_left = sz;
-  const size_t sectors_per_io = 128;
-  const size_t bytes_per_sector = 512;
-  const size_t bytes_per_io = bytes_per_sector * sectors_per_io;
-  size_t io_idx = 0;
-
-  while(bytes_left) {
-    const uint8_t *src = buf + io_idx * bytes_per_io;
-    size_t io_start_sector = frame_offset + io_idx * sectors_per_io;
-
-    err = vchiq_block_dev->ops.write(vchiq_block_dev, src, io_start_sector,
-      sectors_per_io);
-
-    if (err != SUCCESS) {
-      printf("Failed to write sectors %d-%d\r\n", io_start_sector,
-        io_start_sector + sectors_per_io);
-      return err;
-    }
-
-    io_idx++;
-    if (bytes_left < bytes_per_io) {
-      printf("bytes_left not granular to bytes per io: %d vs %d\r\n",
-          bytes_left, bytes_per_io);
-      bytes_left = 0;
-    }
-    else
-      bytes_left -= bytes_per_io;
-  }
-  frame_offset += io_idx * sectors_per_io;
-  printf("frame: %d, sectors_written: %d\r\n", frame_num, frame_offset);
-  return SUCCESS;
-}
-
 #define IO_MIN_SECTORS 128
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
 static char *next_buf;
@@ -1451,19 +1415,31 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
 #endif
 
   size_t bytes_left = h->length;
+  const char *src = b->buffer;
 
   while(bytes_left) {
     size_t buffer_left = next_buf + H264BUF_SIZE - next_buf_ptr;
     size_t io_sz = MIN(bytes_left, buffer_left);
-    MMAL_INFO("%d + %d", buffer_left, bytes_left);
-    memcpy(next_buf_ptr, b->buffer, io_sz);
+
+    MMAL_INFO("%d +%d bytes %08x %08x", next_buf_ptr - next_buf, io_sz,
+      ((uint32_t *)b->buffer)[0],
+      ((uint32_t *)b->buffer)[1]);
+
+    memcpy(next_buf_ptr, src, io_sz);
     next_buf_ptr += io_sz;
     bytes_left -= io_sz;
+    src += io_sz;
+
     if (next_buf_ptr == next_buf + H264BUF_SIZE) {
       next_buf_ptr = next_buf;
 
       int err = vchiq_block_dev->ops.write(vchiq_block_dev, next_buf,
         h264_next_sector_idx, IO_MIN_SECTORS);
+
+      if (err != SUCCESS) {
+        MMAL_ERR("Failed to write to buffer: %d", err);
+        return ERR_GENERIC;
+      }
       h264_next_sector_idx += IO_MIN_SECTORS;
     }
   }
@@ -1481,12 +1457,9 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     int err;
     frame_num++;
+    MMAL_INFO("Done frame %d", frame_num);
     ili9341_draw_bitmap(b->buffer, h->length);
-    // emmc_write_frame(b->buffer, h->length);
-    // err = mmal_camera_capture_frames(p);
   }
-
-  // printf("New frame written %d\r\n", frame_num);
 
 buffer_return:
   err = mmal_port_buffer_send_one(p, b);
