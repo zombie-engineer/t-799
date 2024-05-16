@@ -1432,23 +1432,6 @@ static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
   }
   return SUCCESS;
 
-#if 0
-  struct mmal_buffer *pb;
-
-  list_for_each_entry(pb, &p->buffers, list) {
-    if (pb == b) {
-      err = vchiq_mmal_buffer_from_host(p, pb);
-      if (err) {
-        MMAL_ERR("failed to submit port buffer to VC");
-        return err;
-      }
-      return SUCCESS;
-    }
-  }
-
-  MMAL_ERR("Invalid buffer in request: %p: %08x", b, b->buffer);
-#endif
-  return ERR_INVAL;
 }
 
 static int vchiq_mmal_port_parameter_set(struct vchiq_mmal_port *p,
