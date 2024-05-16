@@ -1948,14 +1948,25 @@ static int vchiq_mmal_handmade_component_destroy(
   return SUCCESS;
 }
 
+struct mmal_parameter_logging
+{
+   uint32_t set;     /**< Logging bits to set */
+   uint32_t clear;   /**< Logging bits to clear */
+};
+
 static int vchiq_mmal_get_cam_info(struct vchiq_service_common *ms,
   struct mmal_cam_info *cam_info)
 {
   int err;
   struct vchiq_mmal_component *camera_info;
   struct vchiq_mmal_component *cam;
+  struct mmal_parameter_logging l = { .set = 0x3f, .clear = 0 };
 
   camera_info = vchiq_mmal_create_camera_info(ms);
+
+  err = vchiq_mmal_port_parameter_set(&camera_info->control,
+    MMAL_PARAMETER_LOGGING, &l, sizeof(l));
+
   err = vchiq_mmal_get_camera_info(ms, camera_info, cam_info);
   CHECK_ERR("Failed to get camera info");
 
