@@ -1356,6 +1356,71 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   return SUCCESS;
 }
 
+struct mmal_port_param_stats {
+   uint32_t buffer_count;           /**< Total number of buffers processed */
+   uint32_t frame_count;            /**< Total number of frames processed */
+   uint32_t frames_skipped;         /**< Number of frames without expected PTS based on frame rate */
+   uint32_t frames_discarded;       /**< Number of frames discarded */
+   uint32_t eos_seen;               /**< Set if the end of stream has been reached */
+   uint32_t maximum_frame_bytes;    /**< Maximum frame size in bytes */
+   int64_t  total_bytes;            /**< Total number of bytes processed */
+   uint32_t corrupt_macroblocks;    /**< Number of corrupt macroblocks in the stream */
+};
+
+struct mmal_port_param_core_stats {
+   uint32_t buffer_count;        /**< Total buffer count on this port */
+   uint32_t first_buffer_time;   /**< Time (us) of first buffer seen on this port */
+   uint32_t last_buffer_time;    /**< Time (us) of most recently buffer on this port */
+   uint32_t max_delay;           /**< Max delay (us) between buffers, ignoring first few frames */
+};
+
+static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_component *c,
+  struct vchiq_mmal_port *port, int parameter_id, void *value,
+  uint32_t *value_size);
+
+static int mmal_port_get_stats(struct vchiq_mmal_port *p)
+{
+  int err;
+  struct mmal_port_param_stats stats;
+  uint32_t size;
+  struct mmal_port_param_core_stats core_stats;
+  uint32_t pool_mem_alloc_size;
+
+  size = sizeof(stats);
+  err = vchiq_mmal_port_parameter_get(p->component, p,
+    MMAL_PARAMETER_STATISTICS, &stats, &size);
+  CHECK_ERR("Failed to get port stats");
+
+  MMAL_INFO("b:%d,fski:%d,fdis:%d,eos:%d,maxb:%d,tot:%d,cmb:%d",
+   stats.buffer_count, stats.frame_count,
+   stats.frames_skipped,
+   stats.frames_discarded,
+   stats.frames_discarded,
+   stats.eos_seen,
+   stats.maximum_frame_bytes,
+   stats.total_bytes,
+   stats.corrupt_macroblocks
+   );
+
+#if 0
+  size = sizeof(core_stats);
+  err = vchiq_mmal_port_parameter_get(p->component, p,
+    MMAL_PARAMETER_CORE_STATISTICS, &core_stats, &size);
+  CHECK_ERR("Failed to get port core stats");
+
+  size = sizeof(pool_mem_alloc_size);
+  err = vchiq_mmal_port_parameter_get(p->component, p,
+    MMAL_PARAMETER_MEM_USAGE, &pool_mem_alloc_size, &size);
+  CHECK_ERR("Failed to get port mem usage");
+
+#endif
+
+out_err:
+  return err;
+
+  return SUCCESS;
+}
+
 static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
   struct mmal_buffer *b)
 {
@@ -1503,6 +1568,8 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     int err;
     frame_num++;
+    if (frame_num % 20)
+      mmal_port_get_stats(p);
 #if 0
     MMAL_INFO("Done frame %d", frame_num);
     ili9341_draw_bitmap(b->buffer, h->length);
