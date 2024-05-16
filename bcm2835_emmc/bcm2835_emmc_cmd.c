@@ -214,33 +214,7 @@ static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
 static void bcm2835_emmc_on_cmd_done(struct bcm2835_emmc_io *io, uint32_t intr)
 {
   io->err = SUCCESS;
-  bool is_data = BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(bcm2835_emmc.io.cmdreg);
-  bool is_write;
-  bool run_dma = false;
-
   os_event_notify(&bcm2835_emmc_event);
-#if 0
-  if (!is_data) {
-    /* DONE */
-
-    return;
-  }
-
-  is_write = BCM2835_EMMC_CMDTM_GET_TM_DAT_DIR(bcm2835_emmc.io.cmdreg) ==
-    BCM2835_EMMC_TRANS_TYPE_DATA_HOST_TO_CARD;
-
-  if (is_write)
-    run_dma = BCM2835_EMMC_INTERRUPT_GET_WRITE_RDY(intr);
-  else
-    run_dma = BCM2835_EMMC_INTERRUPT_GET_READ_RDY(intr);
-
-  if (!run_dma) {
-    /* Postpone DMA io */
-    return;
-  }
-
-  bcm2835_dma_activate(bcm2835_emmc.io.dma_channel);
-#endif
 }
 
 static void bcm2835_emmc_on_error(struct bcm2835_emmc_io *io, int interrupt)
