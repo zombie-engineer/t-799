@@ -479,3 +479,11 @@ define lemmc
   printf "EMMC_SPI_INT_SPT: %08x\n", *(int *)$emmc_spi_int_spt
   printf "EMMC_SLOTISR_VER: %08x\n", *(int *)$emmc_slotisr_ver
 end
+
+define emmc_write
+  set $i = 0
+  while $i < $arg0
+    set $i = $i + 1
+    p $emmc_data[0] = $arg1
+  end
+end
