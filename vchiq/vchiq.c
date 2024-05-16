@@ -228,10 +228,10 @@ struct vchiq_mmal_component {
 static int vc_trans_id = 0;
 static int frame_num = 0;
 static size_t frame_offset = 0;
-static struct block_device *vchiq_block_dev = NULL;
+static struct block_device *bdev = NULL;
 void vchiq_set_blockdev(struct block_device *bd)
 {
-  vchiq_block_dev = bd;
+  bdev = bd;
 }
 
 static struct vchiq_state vchiq_state;
@@ -1468,7 +1468,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     if (cam.current_buf_ptr == cam.current_buf + H264BUF_SIZE) {
 
       struct blockdev_io io = {
-        .dev = vchiq_block_dev,
+        .dev = bdev,
         .is_write = true,
         .addr = cam.current_buf,
         .start_sector = cam.write_sector_offset,
