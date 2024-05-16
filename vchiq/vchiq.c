@@ -20,6 +20,7 @@
 #include "mmal-parameters.h"
 #include "mmal-encodings.h"
 #include "vc_sm_defs.h"
+#include <bcm2835/bcm2835_emmc.h>
 #include <ili9341.h>
 #include <bitmap.h>
 #include <fs/fat32.h>
@@ -225,6 +226,7 @@ struct vchiq_mmal_component {
 };
 
 
+static struct block_dev_write_stream sd_stream;
 static int vc_trans_id = 0;
 static int frame_num = 0;
 static size_t frame_offset = 0;
@@ -2884,6 +2886,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   cam.current_buf_ptr = cam.current_buf;
   os_event_init(&cam.next_buf_avail);
   os_event_notify(&cam.next_buf_avail);
+  bdev->ops.write_stream_open(bdev, &sd_stream, 0);
 
   cam.write_sector_offset = 0;
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
