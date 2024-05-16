@@ -17,12 +17,11 @@
 #define MMAL_COMMON_H
 #include <list.h>
 
-#define BIT_ULL(nr)                (1ULL << (nr))
 #define MMAL_FOURCC(a, b, c, d) ((a) | (b << 8) | (c << 16) | (d << 24))
 #define MMAL_MAGIC MMAL_FOURCC('m', 'm', 'a', 'l')
 
 /** Special value signalling that time is not known */
-#define MMAL_TIME_UNKNOWN BIT_ULL(63)
+#define MMAL_TIME_UNKNOWN (1ull << 63)
 
 struct mmal_msg_context;
 
