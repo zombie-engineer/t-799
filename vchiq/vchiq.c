@@ -1636,11 +1636,13 @@ out:
   buf[n] = 0;
 }
 
-static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h)
+static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h,
+  const char *tag)
 {
   char flagsbuf[256];
   mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
-  MMAL_INFO("buffer_header: %p,hdl:%08x,addr:%08x,sz:%d/%d,flags:%0x,'%s'", h,
+
+  MMAL_INFO("%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s'", tag,
     h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf);
 }
 
@@ -1697,7 +1699,7 @@ static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
 
-  mmal_buffer_print_meta(&r->buffer_header);
+  mmal_buffer_print_meta(&r->buffer_header, "--");
 
   err = mmal_io_work_push(p->component, p, &r->buffer_header,
     mmal_port_buffer_io_work);
