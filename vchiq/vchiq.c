@@ -2507,8 +2507,8 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
   MMAL_INFO("%s: allocating buffers %dx%d to port %s", p->name, num_buffers,
     p->minimum_buffer.size, p->name);
 
-  for (i = 0; i < num_buffers + 1; ++i) {
-    buf = dma_alloc(sizeof(*buf));
+  for (i = 0; i < num_buffers + 10; ++i) {
+    buf = kzalloc(sizeof(*buf));
     buf->buffer_size = p->minimum_buffer.size;
     buf->buffer = dma_alloc(buf->buffer_size);;
 
