@@ -2522,16 +2522,16 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
   int err;
   size_t i;
   struct mmal_buffer *buf;
-  size_t num_buffers = p->minimum_buffer.num;
+  size_t num_buffers = p->current_buffer.num;
   if (num_buffers < min_buffers)
     num_buffers = min_buffers;
 
   MMAL_INFO("%s: allocating buffers %dx%d to port %s", p->name, num_buffers,
     p->minimum_buffer.size, p->name);
 
-  for (i = 0; i < num_buffers + 10; ++i) {
+  for (i = 0; i < num_buffers; ++i) {
     buf = kzalloc(sizeof(*buf));
-    buf->buffer_size = p->minimum_buffer.size;
+    buf->buffer_size = p->current_buffer.size;
     buf->buffer = dma_alloc(buf->buffer_size);;
 
     if (p->zero_copy) {
@@ -2570,14 +2570,18 @@ static int mmal_port_buffer_send_all(struct vchiq_mmal_port *p)
     CHECK_ERR("failed to submit port buffer to VC");
     to_send--;
 
+#if 0
     if (!to_send)
       break;
+#endif
   }
 
+#if 0
   if (to_send) {
     MMAL_ERR("failed to send all required buffers");
     return ERR_RESOURCE;
   }
+#endif
 
   err = vchiq_mmal_port_info_get(p);
   CHECK_ERR("failed to get port info");
@@ -2709,12 +2713,19 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(&encoder->control);
   CHECK_ERR("failed to enable control port");
 
-  // mmal_format_copy(&encoder->output[0].format, &encoder->input[0].format);
-
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
     height, 0, 25000000);
+
+  encoder->output[0].current_buffer.num = 10;
+  encoder->output[0].current_buffer.size = 512 * 1024;
+
   err = mmal_port_set_format(&encoder->output[0]);
   CHECK_ERR("Failed to set format for preview capture port");
+  if (encoder->output[0].current_buffer.num != 10 ||
+    encoder->output[0].current_buffer.size != 512 * 1024) {
+    MMAL_ERR("Failed to set encoder buffers to required sizes");
+    return ERR_GENERIC;
+  }
 
   mmal_format_set(&encoder->input[0].format, MMAL_ENCODING_OPAQUE,
     MMAL_ENCODING_I420, width, height, 0, 0);
@@ -2941,8 +2952,10 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   if (err != SUCCESS)
     goto out_err;
 
+#if 0
   encoder_output->minimum_buffer.num = 1;
   encoder_output->minimum_buffer.size = 512 * 1024;
+#endif
 
   err = mmal_apply_buffers(mems_service, encoder_output, true, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
