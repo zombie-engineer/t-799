@@ -562,6 +562,24 @@ int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
     mode_polling);
 }
 
+int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx)
+{
+  uint32_t cmd = sd_commands[BCM2835_EMMC_CMD25];
+  // BCM2835_EMMC_CMDTM_CLR_SET_TM_BLKCNT_EN(cmd, 1);
+  uint32_t blksizecnt = 0;
+
+  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKSIZE(blksizecnt, 512);
+  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKCNT(blksizecnt, 0xffff);
+  ioreg32_write(BCM2835_EMMC_BLKSIZECNT, blksizecnt);
+  ioreg32_write(BCM2835_EMMC_ARG1, block_idx);
+  ioreg32_write(BCM2835_EMMC_CMDTM, cmd);
+
+  os_event_wait(&bcm2835_emmc_event);
+  os_event_clear(&bcm2835_emmc_event);
+
+  return SUCCESS;
+}
+
 int bcm2835_emmc_reset_cmd(bool mode_polling)
 {
   uint32_t control1;

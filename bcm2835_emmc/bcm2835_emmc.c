@@ -165,6 +165,35 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   return 0;
 }
 
+int bcm2835_emmc_write_stream_open(
+    struct block_device *b,
+    struct block_dev_write_stream *s,
+    size_t start_sector)
+{
+  int err;
+
+  err = bcm2835_emmc_cmd23(0xffff, bcm2835_emmc.is_blocking_mode);
+  if (err)
+    return err;
+
+  return bcm2835_emmc_cmd25_nonstop(start_sector);
+}
+
+int bcm2835_emmc_write_stream_write(
+  struct block_device *b,
+  struct block_dev_write_stream *s,
+  const void *buf, size_t bufsz)
+{
+  const uint32_t *ptr = buf;
+
+  for (int i = 0; i < bufsz / 4; ++i)
+    ioreg32_write(BCM2835_EMMC_DATA, ptr[i]);
+
+  printf("BLKSIZECNT          : %08x\r\n", ioreg32_read(BCM2835_EMMC_BLKSIZECNT));
+
+  return SUCCESS;
+}
+
 static int bcm2835_emmc_read(struct block_device *b, char *buf,
   size_t start_sector, size_t num_blocks)
 {
@@ -198,4 +227,6 @@ int bcm2835_emmc_block_device_init(struct block_device *bdev)
 {
   bdev->ops.read = bcm2835_emmc_read;
   bdev->ops.write = bcm2835_emmc_write;
+  bdev->ops.write_stream_open = bcm2835_emmc_write_stream_open;
+  bdev->ops.write_stream_write = bcm2835_emmc_write_stream_write;
 }

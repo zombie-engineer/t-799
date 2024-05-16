@@ -157,6 +157,8 @@ static inline int bcm2835_emmc_cmd24(uint32_t block_idx, char *srcbuf,
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
+int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx);
+
 static inline int bcm2835_emmc_cmd25(uint32_t block_idx, size_t num_blocks,
   char *srcbuf, bool blocking)
 {

@@ -21,12 +21,31 @@ static int partition_write(struct block_device *b,
     num_sectors);
 }
 
+int partition_emmc_write_stream_open(struct block_device *b,
+  struct block_dev_write_stream *s, size_t start_sector)
+{
+  struct partition *p = container_of(b, struct partition, bdev);
+
+  return p->blockdev->ops.write_stream_open(p->blockdev, s,
+    p->start_sector + start_sector);
+}
+
+int partition_emmc_write_stream_write(struct block_device *bd,
+  struct block_dev_write_stream *s, const void *buf, size_t bufsz)
+{
+  struct partition *p = container_of(bd, struct partition, bdev);
+
+  return p->blockdev->ops.write_stream_write(p->blockdev, s, buf, bufsz);
+}
+
 void partition_init(struct partition *p, struct block_device *b,
   size_t start_sector, size_t end_sector)
 {
   memset(p, 0, sizeof(*p));
   p->bdev.ops.read = partition_read;
   p->bdev.ops.write = partition_write;
+  p->bdev.ops.write_stream_open = partition_emmc_write_stream_open;
+  p->bdev.ops.write_stream_write = partition_emmc_write_stream_write;
   p->blockdev = b;
   p->start_sector = start_sector;
   p->end_sector = end_sector;

@@ -4,12 +4,22 @@
 
 struct block_device;
 
+struct block_dev_write_stream {
+  struct block_device *bd;
+};
+
 struct block_device_ops {
   int (*read)(struct block_device *, char *buf, size_t start_sector,
     size_t num_sectors);
 
   int (*write)(struct block_device *, const void *src, size_t start_sector,
     size_t num_sectors);
+
+  int (*write_stream_open)(struct block_device *,
+    struct block_dev_write_stream *, size_t start_sector);
+
+  int (*write_stream_write)(struct block_device *,
+    struct block_dev_write_stream *, const void *data, size_t num_bytes);
 };
 
 struct block_device {
