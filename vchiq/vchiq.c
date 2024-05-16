@@ -1642,10 +1642,28 @@ static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h,
   const char *tag)
 {
   char flagsbuf[256];
+  int pts_sec = 0;
+  int pts_frac = 0;
+  int dts_sec = 0;
+  int dts_frac = 0;
+
   mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
 
-  MMAL_INFO("%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s'", tag,
-    h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf);
+  if (h->pts != MMAL_TIME_UNKNOWN)
+  {
+    pts_sec = h->pts / 1000000;
+    pts_frac = h->pts % 1000000;
+  }
+
+  if (h->dts != MMAL_TIME_UNKNOWN)
+  {
+    dts_sec = h->dts / 1000000;
+    dts_frac = h->dts % 1000000;
+  }
+
+  MMAL_INFO("%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s', pts:%d.%d, dts:%d.%d", tag,
+    h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf,
+    pts_sec, pts_frac, dts_sec, dts_frac);
 }
 
 static struct vchiq_mmal_port *mmal_port_get_by_handle(
@@ -1701,7 +1719,7 @@ static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
 
-  mmal_buffer_print_meta(&r->buffer_header, "--");
+  mmal_buffer_print_meta(&r->buffer_header, "received");
 
   err = mmal_io_work_push(p->component, p, &r->buffer_header,
     mmal_port_buffer_io_work);
