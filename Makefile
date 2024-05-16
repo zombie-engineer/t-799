@@ -25,7 +25,6 @@ OBJS := \
   bcm2835_systimer \
   bcm2835_emmc/bcm2835_emmc \
   bcm2835_emmc/bcm2835_emmc_cmd \
-  bcm2835_emmc/bcm2835_emmc_dev \
   bcm2835_emmc/bcm2835_emmc_priv \
   bcm2835_emmc/bcm2835_emmc_initialize \
   bcm2835_emmc/bcm2835_emmc_utils \

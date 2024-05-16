@@ -2,6 +2,7 @@
 #include <common.h>
 #include <ioreg.h>
 #include <stringlib.h>
+#include <block_device.h>
 #include "bcm2835_emmc_priv.h"
 #include "bcm2835_emmc_regs.h"
 #include "bcm2835_emmc_cmd.h"
@@ -127,7 +128,7 @@ typedef enum {
 } bcm2835_emmc_io_type_t;
 
 static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
-  char *buf, size_t first_block_idx, size_t num_blocks)
+  char *buf, size_t start_sector, size_t num_blocks)
 {
   int cmd_err;
 
@@ -137,10 +138,10 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   if (io_type == BCM2835_EMMC_IO_READ) {
     /* READ_SINGLE_BLOCK */
     if (num_blocks > 1) {
-      cmd_err = bcm2835_emmc_cmd18(first_block_idx, num_blocks, buf,
+      cmd_err = bcm2835_emmc_cmd18(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
     } else {
-      cmd_err = bcm2835_emmc_cmd17(first_block_idx, buf,
+      cmd_err = bcm2835_emmc_cmd17(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
     }
     if (cmd_err)
@@ -148,10 +149,10 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   } else if (io_type == BCM2835_EMMC_IO_WRITE) {
     /* WRITE_BLOCK */
     if (num_blocks > 1) {
-      cmd_err = bcm2835_emmc_cmd25(first_block_idx, num_blocks, buf,
+      cmd_err = bcm2835_emmc_cmd25(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
     } else {
-      cmd_err = bcm2835_emmc_cmd24(first_block_idx, buf,
+      cmd_err = bcm2835_emmc_cmd24(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
     }
     if (cmd_err)
@@ -164,17 +165,18 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   return 0;
 }
 
-int bcm2835_emmc_read(size_t first_block_idx, size_t num_blocks, char *buf)
+static int bcm2835_emmc_read(struct block_device *b, char *buf,
+  size_t start_sector, size_t num_blocks)
 {
-  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, first_block_idx,
+  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, start_sector,
     num_blocks);
 }
 
-int bcm2835_emmc_write(size_t first_block_idx, size_t num_blocks,
-  const char *buf)
+static int bcm2835_emmc_write(struct block_device *b, const void *buf,
+  size_t start_sector, size_t num_blocks)
 {
   return bcm2835_emmc_data_io(BCM2835_EMMC_IO_WRITE, (char *)buf,
-    first_block_idx, num_blocks);
+    start_sector, num_blocks);
 }
 
 int bcm2835_emmc_set_interrupt_mode(void)
@@ -191,3 +193,9 @@ void bcm2835_emmc_write_kernel_to_card()
 }
 
 #endif
+
+int bcm2835_emmc_block_device_init(struct block_device *bdev)
+{
+  bdev->ops.read = bcm2835_emmc_read;
+  bdev->ops.write = bcm2835_emmc_write;
+}

@@ -5,7 +5,7 @@
 #include <common.h>
 #include <errcode.h>
 #include <printf.h>
-#include <bcm2835/bcm2835_emmc_dev.h>
+#include <bcm2835/bcm2835_emmc.h>
 #include <stringlib.h>
 #include <kmalloc.h>
 
