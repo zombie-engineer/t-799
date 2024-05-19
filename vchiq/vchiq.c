@@ -1145,26 +1145,25 @@ static int mmal_io_work_push(struct vchiq_mmal_component *c,
   return SUCCESS;
 }
 
-#if 0
 static inline struct mmal_buffer *mmal_port_get_buffer_from_header(
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
 {
   struct mmal_buffer *b;
   uint32_t buffer_data;
 
-  list_for_each_entry(b, &p->buffers_free, list) {
-    if (p->zero_copy)
-      buffer_data = (uint32_t)(uint64_t)b->vcsm_handle;
-    else
-      buffer_data = (uint32_t)(uint64_t)b->buffer;
-    if (buffer_data == h->user_data)
+  irq_disable();
+  list_for_each_entry(b, &p->buffers_busy, list) {
+    buffer_data = (uint32_t)(uint64_t)b->vcsm_handle;
+    if (buffer_data == h->data) {
+      irq_enable();
       return b;
+    }
   }
 
+  irq_enable();
   MMAL_ERR("buffer not found for data: %08x", h->data);
   return NULL;
 }
-#endif
 
 struct mmal_msg_context {
   union {
@@ -1696,8 +1695,8 @@ static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
     return ERR_NOT_FOUND;
   }
 
-  struct mmal_buffer *b = list_first_entry(&p->buffers_busy,
-    struct mmal_buffer, list);
+  struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
+    &r->buffer_header);
 
   irq_disable();
   list_del(&b->list);
