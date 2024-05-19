@@ -125,41 +125,57 @@ SYNC_HANDLER(granule_protect)
 {
 }
 
-SYNC_HANDLER(inst_abrt_lo_el)
+static inline void dump_exception_context(const char *exception)
 {
-  printf("instruction abort at lower level\r\n");
-}
-
-SYNC_HANDLER(inst_abrt_eq_el)
-{
-  printf("instruction abort same level\r\n");
-}
-
-SYNC_HANDLER(inst_alignment)
-{
-  uint64_t pc = 0x1;
+  uint64_t pc;
+  uint64_t sp;
+  size_t i;
 
   struct task *t = sched_get_current_task();
   const struct armv8_cpuctx *c;
 
-  if (t) {
-    c = t->cpuctx;
-    pc = c->pc;
+  if (!t) {
+    printf("aarch64 exception: '%s' no current task");
+    return;
   }
 
-  printf("instruction alignment at pc %08lx\r\n", pc);
+  c = t->cpuctx;
+  pc = c->pc;
+  sp = c->sp;
+
+  printf("aarch64 exception: '%s', task: %s, pc:%016lx, sp:%016lx\r\n",
+    exception, t->name, pc, sp);
+
+  for (i = 0; i < 20; ++i) {
+    printf("  %016x: %016x\r\n", sp + i * 8, ((const uint64_t *)sp)[i]);
+  }
+}
+
+SYNC_HANDLER(inst_abrt_lo_el)
+{
+  dump_exception_context("intruction abort lower EL");
+}
+
+SYNC_HANDLER(inst_abrt_eq_el)
+{
+  dump_exception_context("intruction abort same EL");
+}
+
+SYNC_HANDLER(inst_alignment)
+{
+  dump_exception_context("intruction alignment");
+  while(1) { }
 }
 
 SYNC_HANDLER(data_abrt_lo_el)
 {
-  printf("--");
-  while(1) {
-  }
+  dump_exception_context("data abort lower EL");
+  while(1) { }
 }
 
 SYNC_HANDLER(data_abrt_eq_el)
 {
-  printf("--");
+  dump_exception_context("data abort same EL");
   while(1);
 }
 
@@ -179,7 +195,7 @@ SYNC_HANDLER(serror)
 {
 }
 
-SYNC_HANDLER(bktp_low_lvl)
+SYNC_HANDLER(bkpt_low_lvl)
 {
 }
 
@@ -245,7 +261,7 @@ static __attribute__((section(".rodata_nommu"))) armv8_exception_handler_sync_fn
   ITEM(MEMOP, memop),
   ITEM(FLOATING_POINT, floating_point),
   ITEM(SERROR, serror),
-  ITEM(BKPT_LOW_LVL, bktp_low_lvl),
+  ITEM(BKPT_LOW_LVL, bkpt_low_lvl),
   ITEM(BKPT_SAME_LVL, bkpt_same_lvl),
   ITEM(SW_STEP_LOW_LVL, sw_step_low_lvl),
   ITEM(SW_STEP_SAME_LVL, sw_step_same_lvl),
