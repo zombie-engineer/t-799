@@ -2897,7 +2897,6 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   cam.current_buf_ptr = cam.current_buf;
   os_event_init(&cam.next_buf_avail);
   os_event_notify(&cam.next_buf_avail);
-  bdev->ops.write_stream_open(bdev, &sd_stream, 0);
 
   cam.write_sector_offset = 0;
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
