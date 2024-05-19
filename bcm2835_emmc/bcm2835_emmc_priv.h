@@ -17,6 +17,9 @@ struct bcm2835_emmc_io {
   uint32_t interrupt;
   int dma_channel;
   int dma_control_block_idx;
+
+  /* Number of irqs that have been fired for this command */
+  int num_irqs;
 };
 
 struct bcm2835_emmc {

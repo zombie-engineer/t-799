@@ -131,6 +131,8 @@ static inline int bcm2835_emmc_cmd18(uint32_t block_idx, size_t num_blocks,
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
+extern bool emmc_should_log;
+
 static inline int bcm2835_emmc_cmd23(size_t num_blocks, bool blocking)
 {
   struct bcm2835_emmc_cmd c;

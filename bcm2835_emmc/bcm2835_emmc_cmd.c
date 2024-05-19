@@ -9,6 +9,7 @@
 #include <bcm2835_dma.h>
 #include <memory_map.h>
 #include <os_api.h>
+#include <cpu.h>
 
 /* P1 Physical Layer Simplified Specification.  * 4.9 Responces */
 
@@ -182,6 +183,8 @@ extern struct bcm2835_emmc bcm2835_emmc;
 
 void bcm2835_emmc_dma_irq_callback(void)
 {
+  printf("dma_irq cb\r\n");
+
   os_event_notify(&bcm2835_emmc_event);
 }
 
@@ -211,28 +214,54 @@ static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
   bcm2835_dma_program_cb(&r, control_block);
 }
 
-static void bcm2835_emmc_on_cmd_done(struct bcm2835_emmc_io *io, uint32_t intr)
-{
-  io->err = SUCCESS;
-  os_event_notify(&bcm2835_emmc_event);
-}
-
 static void bcm2835_emmc_on_error(struct bcm2835_emmc_io *io, int interrupt)
 {
   io->err = ERR_GENERIC;
   os_event_notify(&bcm2835_emmc_event);
 }
 
+bool emmc_should_log = false;
+
 void bcm2835_emmc_irq_handler(void)
 {
   uint32_t r;
+  bool cmd_completed = false;
+  bcm2835_emmc.io.num_irqs++;
 
-  r = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, r);
+  r = ioreg32_read(BCM2835_EMMC_INTERRUPT);
+
+  if (emmc_should_log) {
+    printf("bcm2835_emmc_irq_handler: CMD%d(%08x),i:%d,r:%08x\r\n",
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(bcm2835_emmc.io.cmdreg),
+      bcm2835_emmc.io.cmdreg, bcm2835_emmc.io.num_irqs, r);
+  }
+
+  ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
+
   if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR)
     bcm2835_emmc_on_error(&bcm2835_emmc.io, r);
-  if (r & BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE)
-    bcm2835_emmc_on_cmd_done(&bcm2835_emmc.io, r);
+
+  if (r & BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE) {
+  /*
+   * DATA done can be issued by READ/WRITE block commands, in this case driver
+   * should not notify completion here, instead wait DMA IRQ callback to signal
+   * IO completion event
+   * Non-data commands still have interrupts with DATA_DONE flag set, so they
+   * will notify copletion here at this point
+   */
+    if (!BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(bcm2835_emmc.io.cmdreg)) {
+      bcm2835_emmc.io.err = SUCCESS;
+      os_event_notify(&bcm2835_emmc_event);
+      cmd_completed = true;
+    }
+  }
+
+  if (emmc_should_log) {
+    printf("bcm2835_emmc_irq_handler: CMD%d,after_read:%08x,completed:%d\r\n",
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(bcm2835_emmc.io.cmdreg),
+      bcm2835_emmc.io.num_irqs, ioreg32_read(BCM2835_EMMC_INTERRUPT),
+      cmd_completed);
+  }
 }
 
 static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
@@ -357,12 +386,15 @@ static inline int OPTIMIZED bcm2835_emmc_polling_data_io(
     intbits, timeout_usec);
 }
 
-static inline int bcm2835_emmc_issue_cmd_dma(struct bcm2835_emmc_cmd *c,
-  uint32_t cmdreg, uint64_t timeout_usec)
+static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
 {
+  uint32_t cmdreg = bcm2835_emmc.io.cmdreg;
+
   bool is_data = BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg);
   bool is_write;
-  
+  uint32_t intreg;
+  uint32_t intreg_new;
+
   if (is_data) {
     is_write = BCM2835_EMMC_CMDTM_GET_TM_DAT_DIR(cmdreg) ==
       BCM2835_EMMC_TRANS_TYPE_DATA_HOST_TO_CARD;
@@ -374,7 +406,24 @@ static inline int bcm2835_emmc_issue_cmd_dma(struct bcm2835_emmc_cmd *c,
 
     bcm2835_dma_set_cb(bcm2835_emmc.io.dma_channel,
       bcm2835_emmc.io.dma_control_block_idx);
+
+    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
   }
+  else {
+    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3);
+  }
+
+  if (emmc_should_log)
+    printf("CMD%d write %08x\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
+      cmdreg);
+
+#if 0
+  intreg = intreg_new = ioreg32_read(BCM2835_EMMC_IRPT_EN);
+
+  BCM2835_EMMC_IRPT_EN_CLR_WRITE_RDY(intreg_new);
+  BCM2835_EMMC_IRPT_EN_CLR_DATA_DONE(intreg_new);
+  BCM2835_EMMC_IRPT_EN_CLR_DMA_DONE(intreg_new);
+#endif
 
   ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
 
@@ -383,6 +432,7 @@ static inline int bcm2835_emmc_issue_cmd_dma(struct bcm2835_emmc_cmd *c,
 
   os_event_wait(&bcm2835_emmc_event);
   os_event_clear(&bcm2835_emmc_event);
+  // ioreg32_write(BCM2835_EMMC_INTERRUPT, intreg);
 
   return bcm2835_emmc.io.err;
 }
@@ -408,15 +458,14 @@ static inline void bcm2835_emmc_read_response(struct bcm2835_emmc_cmd *c,
   }
 }
 
-static inline int bcm2835_emmc_issue_cmd_polling(struct bcm2835_emmc_cmd *c,
-  uint32_t cmdreg, uint64_t timeout_usec)
+static inline int bcm2835_emmc_cmd_polled(struct bcm2835_emmc_cmd *c,
+  uint64_t timeout_usec)
 {
   int data_status;
   int err;
   uint32_t intval, intval_cmp;
   char intbuf[256];
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
+  uint32_t cmdreg = bcm2835_emmc.io.cmdreg;
 
   uint32_t r = 0;
   uint64_t time_left_us = timeout_usec;
@@ -424,8 +473,16 @@ static inline int bcm2835_emmc_issue_cmd_polling(struct bcm2835_emmc_cmd *c,
   uint32_t mask = BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE
     | BCM2835_EMMC_INTERRUPT_MASK_ERR;
 
+  if (irq_is_enabled()) {
+    printf("bcm2835_emmc runs in polled mode and "
+    "interrups enabled");
+    return ERR_GENERIC;
+  }
+
   if (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg))
     mask |= BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE;
+
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
 
   while(time_left_us) {
     r = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
@@ -485,22 +542,34 @@ static inline int bcm2835_emmc_issue_cmd_polling(struct bcm2835_emmc_cmd *c,
   return SUCCESS;
 }
 
-static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
+static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
   uint32_t cmdreg, uint64_t timeout_usec, bool polling)
 {
   uint32_t blksizecnt;
+  uint32_t status;
 
   int i;
+  emmc_should_log = true;
+  if (emmc_should_log)
+  {
+    printf("CMD%d, arg:%d,blocking:%d, cmdreg:%08x,irq_enabled:%d\r\n",
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
+      c->arg, polling, cmdreg, irq_is_enabled());
+  }
 
   const uint32_t mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
     BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
 
-  while(ioreg32_read(BCM2835_EMMC_STATUS) & mask) {
-    bcm2835_emmc.num_inhibit_waits++;
-    delay_us(10);
+  while(1) {
+    status = ioreg32_read(BCM2835_EMMC_STATUS);
+    printf("CMD%d wait inhibit\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg));
+    if (!(status & mask))
+      break;
+    delay_us(100);
   }
 
   bcm2835_emmc.io.c = c;
+  bcm2835_emmc.io.num_irqs = 0;
   blksizecnt = 0;
   BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKSIZE(blksizecnt, c->block_size);
   BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKCNT(blksizecnt, c->num_blocks);
@@ -512,12 +581,12 @@ static inline int bcm2835_emmc_issue_cmd(struct bcm2835_emmc_cmd *c,
   bcm2835_emmc.io.cmdreg = cmdreg;
 
   if (polling)
-    return bcm2835_emmc_issue_cmd_polling(c, cmdreg, timeout_usec);
+    return bcm2835_emmc_cmd_polled(c, timeout_usec);
 
-  return bcm2835_emmc_issue_cmd_dma(c, cmdreg, timeout_usec);
+  return bcm2835_emmc_cmd_interrupt_based(c);
 }
 
-static int bcm2835_emmc_issue_acmd(struct bcm2835_emmc_cmd *c,
+static int bcm2835_emmc_run_acmd(struct bcm2835_emmc_cmd *c,
   uint64_t timeout_usec, bool mode_polling)
 {
   int acmd_idx;
@@ -529,14 +598,14 @@ static int bcm2835_emmc_issue_acmd(struct bcm2835_emmc_cmd *c,
   acmd.num_blocks = c->num_blocks;
   acmd.block_size = c->block_size;
 
-  status = bcm2835_emmc_issue_cmd(&acmd, sd_commands[BCM2835_EMMC_CMD55],
+  status = bcm2835_emmc_run_cmd(&acmd, sd_commands[BCM2835_EMMC_CMD55],
     timeout_usec, mode_polling);
 
   if (status != SUCCESS)
     return status;
 
   acmd_idx = BCM2835_EMMC_ACMD_RAW_IDX(c->cmd_idx);
-  return bcm2835_emmc_issue_cmd(c, sd_acommands[acmd_idx], timeout_usec,
+  return bcm2835_emmc_run_cmd(c, sd_acommands[acmd_idx], timeout_usec,
     mode_polling);
 }
 
@@ -556,9 +625,9 @@ int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
 #endif
 
   if (BCM2835_EMMC_CMD_IS_ACMD(c->cmd_idx))
-    return bcm2835_emmc_issue_acmd(c, timeout_usec, mode_polling);
+    return bcm2835_emmc_run_acmd(c, timeout_usec, mode_polling);
 
-  return bcm2835_emmc_issue_cmd(c, sd_commands[c->cmd_idx], timeout_usec,
+  return bcm2835_emmc_run_cmd(c, sd_commands[c->cmd_idx], timeout_usec,
     mode_polling);
 }
 
