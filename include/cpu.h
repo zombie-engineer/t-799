@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 /*
  * dcache_clean_and_invalidate_rng - cleans and invalidates
@@ -36,6 +37,27 @@ static inline void irq_enable(void)
 static inline void irq_disable(void)
 {
   asm volatile ("msr daifset, #(1 << 1)");
+}
+
+static inline bool irq_is_enabled(void)
+{
+  asm volatile (
+    /*
+     * Move DAIF to x0, x0 will have bits set as  D | A | I | F | RES0,
+     * Where RES0 is bits 0,1,2,3,4,5,
+     * F - is bit 6,
+     * I - is bit 7
+     * Bit I == 1 (set) means IRQ exception /interrupt is masked (disabled),
+     *      == 0 (clear) means IRQ exception / interrupt is not masked(enabled)
+     */
+    "mrs x0, daif\n"
+    /* Invert bits in X0 to have 1 for interrupt enabled, 0 for disabled */
+    "mvn x0, x0\n"
+    /* Shift bit I (IRQ masked) to bit 0 */
+    "lsr x0, x0, #7\n"
+    /* Return 0 for IRQ disabled, 1 for IRQ enabled */
+    "and x0, x0, #1\n"
+  );
 }
 
 #define disable_irq_save_flags(__flags)\
