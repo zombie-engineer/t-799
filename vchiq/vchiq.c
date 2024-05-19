@@ -1632,9 +1632,12 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   }
 
 buffer_return:
+  irq_disable();
   list_del(&b->list);
   list_add_tail(&b->list, &p->buffers_busy);
+  irq_enable();
   err = mmal_port_buffer_send_one(p, b);
+
   CHECK_ERR("Failed to submit buffer");
 
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
@@ -1696,8 +1699,10 @@ static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   struct mmal_buffer *b = list_first_entry(&p->buffers_busy,
     struct mmal_buffer, list);
 
+  irq_disable();
   list_del(&b->list);
   list_add_tail(&b->list, &p->buffers_in_process);
+  irq_enable();
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
 
