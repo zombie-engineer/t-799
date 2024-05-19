@@ -2517,8 +2517,17 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
 
   for (i = 0; i < num_buffers; ++i) {
     buf = kzalloc(sizeof(*buf));
+    if (!buf) {
+      MMAL_ERR("Failed to allocate buffer");
+      return ERR_RESOURCE;
+    }
+
     buf->buffer_size = p->current_buffer.size;
     buf->buffer = dma_alloc(buf->buffer_size);;
+    if (!buf->buffer) {
+      MMAL_ERR("Failed to allocate dma buffer");
+      return ERR_RESOURCE;
+    }
 
     if (p->zero_copy) {
       err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
