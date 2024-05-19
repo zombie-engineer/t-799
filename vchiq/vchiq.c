@@ -444,7 +444,7 @@ struct mmal_io_work {
   int idx;
 };
 
-#define MAX_MMAL_WORKS 12
+#define MAX_MMAL_WORKS 60
 
 struct mmal_state {
   struct mmal_io_work work_array[MAX_MMAL_WORKS];
@@ -591,18 +591,22 @@ struct mmal_io_work *mmal_io_work_pop(void)
 {
   int irqflags;
   struct mmal_io_work *w = NULL;
-  if (list_empty(&mmal_io_work_list))
+  irq_disable();
+  if (list_empty(&mmal_io_work_list)) {
+    irq_enable();
     return NULL;
+  }
 
   w = list_first_entry(&mmal_io_work_list, typeof(*w), list);
   list_del_init(&w->list);
+  irq_enable();
   wmb();
   return w;
 }
 
 static struct mmal_io_work *mmal_io_work_alloc(void)
 {
-  struct mmal_io_work *w;
+  struct mmal_io_work *w = NULL;
 
   int idx = bitmap_set_next_free(&mmal_state.work_bitmap);
   if (idx != -1) {
@@ -624,8 +628,11 @@ static void vchiq_io_thread(void)
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
-    w = mmal_io_work_pop();
-    if (w) {
+    while(1) {
+      w = mmal_io_work_pop();
+      if (!w)
+        break;
+
       w->fn(w->component, w->port, w->buffer_header);
       mmal_io_work_free(w);
     }
@@ -1132,15 +1139,19 @@ static int mmal_io_work_push(struct vchiq_mmal_component *c,
   struct mmal_io_work *w;
 
   w = mmal_io_work_alloc();
-  if (!w)
+  if (!w) {
+    MMAL_ERR("Failed to allocate io work");
     return ERR_GENERIC;
+  }
 
   w->component = c;
   w->port = p;
   w->buffer_header = b;
   w->fn = fn;
   wmb();
+  irq_disable();
   list_add_tail(&w->list, &mmal_io_work_list);
+  irq_enable();
   os_event_notify(&mmal_io_work_waitflag);
   return SUCCESS;
 }
