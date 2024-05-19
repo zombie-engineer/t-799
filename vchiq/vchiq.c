@@ -231,6 +231,8 @@ static int vc_trans_id = 0;
 static int frame_num = 0;
 static size_t frame_offset = 0;
 static struct block_device *bdev = NULL;
+static int sdcard_io_count = 0;
+
 void vchiq_set_blockdev(struct block_device *bd)
 {
   bdev = bd;
@@ -1437,6 +1439,10 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
     sizeof(m->buffer_header_type_specific));
   m->payload_in_message = 0;
 
+#if 0
+  mmal_buffer_print_meta(&m->buffer_header, "submitted");
+#endif
+
   VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC();
   return SUCCESS;
 }
@@ -1589,6 +1595,11 @@ static inline void camera_io_on_buffer_filled(void)
 
   os_event_wait(&cam.next_buf_avail);
   os_event_clear(&cam.next_buf_avail);
+
+  MMAL_INFO("wr_req#%d, from:%ld,num:%ld", sdcard_io_count,
+    cam.write_sector_offset, IO_MIN_SECTORS);
+
+  sdcard_io_count++;
   blockdev_scheduler_push_io(&io);
   cam.write_sector_offset += IO_MIN_SECTORS;
 }
@@ -1604,6 +1615,7 @@ static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
     buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
     io_sz = MIN(bytes_left, buffer_left);
 
+  puts("+");
 #if 0
     MMAL_INFO("%d +%d bytes %08x %08x", cam.current_buf_ptr - cam.current_buf,
       io_sz, ((uint32_t *)b->buffer)[0],
@@ -1630,6 +1642,9 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (!p->zero_copy)
     goto buffer_return;
 
+#if 0
+  mmal_buffer_print_meta(h, "received");
+#endif
 
   camera_io_process_new_data(b->buffer, h->length);
 
@@ -1715,8 +1730,6 @@ static int mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   irq_enable();
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
-
-  mmal_buffer_print_meta(&r->buffer_header, "received");
 
   err = mmal_io_work_push(p->component, p, &r->buffer_header,
     mmal_port_buffer_io_work);
