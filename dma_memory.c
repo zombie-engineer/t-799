@@ -158,6 +158,7 @@ void *dma_alloc(size_t sz)
   struct dma_mem_header *c;
   struct dma_mem_area *a;
   a = chunk_area_get_by_sz(sz);
+  printf("dma_alloc: %d, area: %016lx\r\n", sz, a);
   BUG_IF(!a, "dma_alloc: size too big");
   if (list_empty(&a->free_list))
   {
@@ -188,23 +189,31 @@ void OPTIMIZED dma_memory_init(void)
   struct dma_mem_header *c, *c_end;
   char *chunk_mem;
   uint64_t t;
+  size_t i;
   t = get_boottime_msec();
 
   ca = dma_chunk_areas;
   ca_end = ca + ARRAY_SIZE(dma_chunk_areas);
 
   for (; ca < ca_end; ca++) {
+    printf("dma_init: init area for chunks (sz: %d,n: %d at %016lx)\r\n",
+      1<<ca->chunk_sz_log, ca->num_chunks, ca->chunks_mem);
+
     INIT_LIST_HEAD(&ca->free_list);
     INIT_LIST_HEAD(&ca->busy_list);
 
     c = ca->chunks_table;
     c_end = c + ca->num_chunks;
     chunk_mem = ca->chunks_mem;
+    i = 0;
     for (; c < c_end; ++c) {
+
       INIT_LIST_HEAD(&c->list);
       list_add_tail(&c->list, &ca->free_list);
       c->addr = chunk_mem;
       chunk_mem += (1 << ca->chunk_sz_log);
+      printf("dma_init:   chunk %d at addr %016lx\r\n", i, c->addr);
+      ++i;
     }
   }
   t = get_boottime_msec() - t;
