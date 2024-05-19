@@ -2711,13 +2711,13 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
     height, 0, 25000000);
 
-  encoder->output[0].current_buffer.num = 10;
-  encoder->output[0].current_buffer.size = 512 * 1024;
+  encoder->output[0].current_buffer.num = 16;
+  encoder->output[0].current_buffer.size = encoder->output[0].minimum_buffer.size;
 
   err = mmal_port_set_format(&encoder->output[0]);
   CHECK_ERR("Failed to set format for preview capture port");
-  if (encoder->output[0].current_buffer.num != 10 ||
-    encoder->output[0].current_buffer.size != 512 * 1024) {
+  if (encoder->output[0].current_buffer.num != 16 ||
+    encoder->output[0].current_buffer.size != encoder->output[0].minimum_buffer.size) {
     MMAL_ERR("Failed to set encoder buffers to required sizes");
     return ERR_GENERIC;
   }
@@ -2870,7 +2870,7 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
 #endif
 
   mmal_format_set(&video->format, MMAL_ENCODING_OPAQUE,
-    0, frame_width, frame_height, 3, 0);
+    0, frame_width, frame_height, 25, 0);
 
   err = mmal_port_set_format(video);
   CHECK_ERR("Failed to set format for video capture port");
@@ -3014,7 +3014,7 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   smem_service = vchiq_open_smem_service(s);
   BUG_IF(!smem_service, "failed at open smem service");
 
-  err = vchiq_startup_camera(mmal_service, smem_service, 1920, 1088);
+  err = vchiq_startup_camera(mmal_service, smem_service, 800, 600);
   BUG_IF(err != SUCCESS, "failed to run camera");
 }
 
