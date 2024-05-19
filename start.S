@@ -114,7 +114,8 @@ start_primary_cpu:
   msr   spsr_el2, x0
 
 debug_wait:
-  1: b 1b
+  nop
+#  1: b 1b
 
   /*
    * Set ELR_EL2 to point to __start_el1_nommu from where it proceeds execution
