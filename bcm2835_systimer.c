@@ -5,6 +5,7 @@
 #include <ioreg.h>
 #include <string.h>
 #include <irq.h>
+#include <cpu.h>
 #include <common.h>
 
 #define BCM2835_SYSTIMER_BASE   (uint64_t)(BCM2835_MEM_PERIPH_BASE + 0x3000)
@@ -128,6 +129,25 @@ void bcm2835_systimer_init(void)
   bcm2835_ic_enable_irq(BCM2835_IRQNR_SYSTIMER_1);
 }
 
-void bcm2835_systimer_get(void)
+uint64_t bcm2835_systimer_get_time_us_locked(void)
 {
+  uint64_t hi1 = ioreg32_read(BCM2835_SYSTIMER_CHI);
+  uint64_t low = ioreg32_read(BCM2835_SYSTIMER_CLO);
+
+  uint64_t hi2 = ioreg32_read(BCM2835_SYSTIMER_CHI);
+
+  if (hi2 != hi1)
+    low = ioreg32_read(BCM2835_SYSTIMER_CLO);
+
+  return (hi2 << 32) | low;
+}
+
+uint64_t bcm2835_systimer_get_time_us(void)
+{
+  uint64_t result;
+  int flags;
+  disable_irq_save_flags(flags);
+  result = bcm2835_systimer_get_time_us_locked();
+  restore_irq_flags(flags);
+  return result;
 }

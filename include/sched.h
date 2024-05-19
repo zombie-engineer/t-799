@@ -34,3 +34,5 @@ bool sched_exit_current_task_isr(void);
 void sched_event_wait_isr(struct event *ev);
 
 void sched_event_notify(struct event *ev);
+
+uint64_t sched_get_time_us(void);
