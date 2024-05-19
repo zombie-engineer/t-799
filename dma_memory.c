@@ -159,6 +159,12 @@ void *dma_alloc(size_t sz)
   struct dma_mem_area *a;
   a = chunk_area_get_by_sz(sz);
   BUG_IF(!a, "dma_alloc: size too big");
+  if (list_empty(&a->free_list))
+  {
+    printf("Failed to allocate dma chunk with size %ld bytes, "
+      "no free chunks\r\n", sz);
+    return NULL;
+  }
   c = list_first_entry(&a->free_list, struct dma_mem_header, list);
   list_del(&c->list);
   list_add_tail(&c->list, &a->busy_list);
