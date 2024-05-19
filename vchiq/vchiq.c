@@ -1305,6 +1305,79 @@ static inline void *mmal_check_reply_msg(struct mmal_msg *rmsg, int msg_type)
     return ERR_GENERIC; \
   }
 
+static inline void mmal_buffer_flags_to_string(
+  struct mmal_buffer_header *h, char *buf, int bufsz)
+{
+  int n = 0;
+
+  if (!bufsz)
+    return;
+
+  /* No chance to write something meaningful */
+  if (bufsz < 5)
+    goto out;
+
+#define CHECK_FLAG(__name) \
+  if (h->flags & MMAL_BUFFER_HEADER_FLAG_ ## __name) { \
+    if (n && (bufsz - n >= 2)) { \
+      buf[n++] = '|'; \
+    } \
+    size_t len = MIN(sizeof(#__name) - 1, bufsz - n); \
+    strncpy(buf + n, #__name, len);\
+    n += len; \
+  }
+
+  CHECK_FLAG(EOS);
+  CHECK_FLAG(FRAME_START);
+  CHECK_FLAG(FRAME_END);
+  CHECK_FLAG(KEYFRAME);
+  CHECK_FLAG(DISCONTINUITY);
+  CHECK_FLAG(CONFIG);
+  CHECK_FLAG(ENCRYPTED);
+  CHECK_FLAG(CODECSIDEINFO);
+  CHECK_FLAG(SNAPSHOT);
+  CHECK_FLAG(CORRUPTED);
+  CHECK_FLAG(TRANSMISSION_FAILED);
+  CHECK_FLAG(DECODEONLY);
+  CHECK_FLAG(NAL_END);
+#undef CHECK_FLAG
+  if (n >= bufsz)
+    n = bufsz - 1;
+
+out:
+  buf[n] = 0;
+}
+
+static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h,
+  const char *tag)
+{
+  char flagsbuf[256];
+  int pts_sec = 0;
+  int pts_frac = 0;
+  int dts_sec = 0;
+  int dts_frac = 0;
+
+  mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
+
+  if (h->pts != MMAL_TIME_UNKNOWN)
+  {
+    pts_sec = h->pts / 1000000;
+    pts_frac = h->pts % 1000000;
+  }
+
+  if (h->dts != MMAL_TIME_UNKNOWN)
+  {
+    dts_sec = h->dts / 1000000;
+    dts_frac = h->dts % 1000000;
+  }
+
+  irq_disable();
+  MMAL_INFO("%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s', pts:%d.%d, dts:%d.%d", tag,
+    h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf,
+    pts_sec, pts_frac, dts_sec, dts_frac);
+  irq_enable();
+}
+
 static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   struct mmal_buffer *b)
 {
@@ -1593,77 +1666,6 @@ buffer_return:
   return SUCCESS;
 out_err:
   return err;
-}
-
-static inline void mmal_buffer_flags_to_string(
-  struct mmal_buffer_header *h, char *buf, int bufsz)
-{
-  int n = 0;
-
-  if (!bufsz)
-    return;
-
-  /* No chance to write something meaningful */
-  if (bufsz < 5)
-    goto out;
-
-#define CHECK_FLAG(__name) \
-  if (h->flags & MMAL_BUFFER_HEADER_FLAG_ ## __name) { \
-    if (n && (bufsz - n >= 2)) { \
-      buf[n++] = '|'; \
-    } \
-    size_t len = MIN(sizeof(#__name) - 1, bufsz - n); \
-    strncpy(buf + n, #__name, len);\
-    n += len; \
-  }
-
-  CHECK_FLAG(EOS);
-  CHECK_FLAG(FRAME_START);
-  CHECK_FLAG(FRAME_END);
-  CHECK_FLAG(KEYFRAME);
-  CHECK_FLAG(DISCONTINUITY);
-  CHECK_FLAG(CONFIG);
-  CHECK_FLAG(ENCRYPTED);
-  CHECK_FLAG(CODECSIDEINFO);
-  CHECK_FLAG(SNAPSHOT);
-  CHECK_FLAG(CORRUPTED);
-  CHECK_FLAG(TRANSMISSION_FAILED);
-  CHECK_FLAG(DECODEONLY);
-  CHECK_FLAG(NAL_END);
-#undef CHECK_FLAG
-  if (n >= bufsz)
-    n = bufsz - 1;
-
-out:
-  buf[n] = 0;
-}
-
-static inline void mmal_buffer_print_meta(struct mmal_buffer_header *h,
-  const char *tag)
-{
-  char flagsbuf[256];
-  int pts_sec = 0;
-  int pts_frac = 0;
-  int dts_sec = 0;
-  int dts_frac = 0;
-
-  mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
-
-  if (h->pts != MMAL_TIME_UNKNOWN)
-  {
-    pts_sec = h->pts / 1000000;
-    pts_frac = h->pts % 1000000;
-  }
-
-  if (h->dts != MMAL_TIME_UNKNOWN)
-  {
-    dts_sec = h->dts / 1000000;
-    dts_frac = h->dts % 1000000;
-  }
-
-  MMAL_INFO("%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s', pts:%d.%d, dts:%d.%d", tag,
-    h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf,
-    pts_sec, pts_frac, dts_sec, dts_frac);
 }
 
 static struct vchiq_mmal_port *mmal_port_get_by_handle(
