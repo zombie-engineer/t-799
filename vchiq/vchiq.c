@@ -1621,17 +1621,6 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
     goto buffer_return;
 
 
-#if 0
-  if (h->length < 512) {
-    err = vchiq_mmal_buffer_from_host(p, b, h->length);
-    if (err) {
-      MMAL_ERR("failed to submit port buffer to VC");
-      return err;
-    }
-    return SUCCESS;
-  }
-#endif
-
   camera_io_process_new_data(b->buffer, h->length);
 
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) { }
@@ -1640,19 +1629,10 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
 
   /* Buffer payload */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    int err;
-    frame_num++;
-    if (frame_num % 20)
-      mmal_port_get_stats(p);
-#if 0
-    MMAL_INFO("Done frame %d", frame_num);
-    ili9341_draw_bitmap(b->buffer, h->length);
-#endif
   }
 
 buffer_return:
   list_del(&b->list);
-
   list_add_tail(&b->list, &p->buffers_busy);
   err = mmal_port_buffer_send_one(p, b);
   CHECK_ERR("Failed to submit buffer");
@@ -2953,11 +2933,6 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(encoder_input);
   if (err != SUCCESS)
     goto out_err;
-
-#if 0
-  encoder_output->minimum_buffer.num = 1;
-  encoder_output->minimum_buffer.size = 512 * 1024;
-#endif
 
   err = mmal_apply_buffers(mems_service, encoder_output, true, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
