@@ -157,7 +157,7 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
       uint64_t t1, t2, delta;
 
       t1 = sched_get_time_us();
-      printf("%ld: CMD25\r\n", t1);
+      printf("\r\n%ld: CMD25\r\n", t1);
 
       cmd_err = bcm2835_emmc_cmd25(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
@@ -165,7 +165,7 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
       t2 = sched_get_time_us();
       delta = t2 - t1;
 
-      printf("%ld, CMD25 done(d=%d.%d)\r\n", t2, delta / 1000, delta % 1000);
+      printf("\r\n%ld, CMD25 done(d=%d.%d)\r\n", t2, delta / 1000, delta % 1000);
     } else {
       cmd_err = bcm2835_emmc_cmd24(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);

@@ -184,8 +184,7 @@ extern struct bcm2835_emmc bcm2835_emmc;
 void bcm2835_emmc_dma_irq_callback(void)
 {
   printf("dma_irq cb\r\n");
-
-  os_event_notify(&bcm2835_emmc_event);
+  ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
 }
 
 static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
@@ -214,54 +213,55 @@ static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
   bcm2835_dma_program_cb(&r, control_block);
 }
 
-static void bcm2835_emmc_on_error(struct bcm2835_emmc_io *io, int interrupt)
-{
-  io->err = ERR_GENERIC;
-  os_event_notify(&bcm2835_emmc_event);
-}
-
 bool emmc_should_log = false;
+
+#define CUR_CMD_REG bcm2835_emmc.io.cmdreg
+#define CUR_CMD_IDX (BCM2835_EMMC_CMDTM_GET_CMD_INDEX(CUR_CMD_REG))
+#define CUR_CMD_ISDATA (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(CUR_CMD_REG))
 
 void bcm2835_emmc_irq_handler(void)
 {
   uint32_t r;
-  bool cmd_completed = false;
+  int cmd_idx;
+  bool cmd_done = false;
   bcm2835_emmc.io.num_irqs++;
 
   r = ioreg32_read(BCM2835_EMMC_INTERRUPT);
 
   if (emmc_should_log) {
     printf("bcm2835_emmc_irq_handler: CMD%d(%08x),i:%d,r:%08x\r\n",
-      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(bcm2835_emmc.io.cmdreg),
-      bcm2835_emmc.io.cmdreg, bcm2835_emmc.io.num_irqs, r);
+      CUR_CMD_IDX, CUR_CMD_REG, bcm2835_emmc.io.num_irqs, r);
   }
 
   ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
 
-  if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR)
-    bcm2835_emmc_on_error(&bcm2835_emmc.io, r);
+  if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR) {
+    printf(",CMD_ERR");
+    bcm2835_emmc.io.err = ERR_GENERIC;
+    cmd_done = true;
+  }
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE) {
-  /*
-   * DATA done can be issued by READ/WRITE block commands, in this case driver
-   * should not notify completion here, instead wait DMA IRQ callback to signal
-   * IO completion event
-   * Non-data commands still have interrupts with DATA_DONE flag set, so they
-   * will notify copletion here at this point
-   */
-    if (!BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(bcm2835_emmc.io.cmdreg)) {
+    printf(",CMD_DONE");
+
+    if (!CUR_CMD_ISDATA) {
       bcm2835_emmc.io.err = SUCCESS;
-      os_event_notify(&bcm2835_emmc_event);
-      cmd_completed = true;
+      cmd_done = true;
     }
   }
 
-  if (emmc_should_log) {
-    printf("bcm2835_emmc_irq_handler: CMD%d,after_read:%08x,completed:%d\r\n",
-      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(bcm2835_emmc.io.cmdreg),
-      bcm2835_emmc.io.num_irqs, ioreg32_read(BCM2835_EMMC_INTERRUPT),
-      cmd_completed);
+  if (r & BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE) {
+    printf(",DATA_DONE");
+    bcm2835_emmc.io.err = SUCCESS;
+    cmd_done = true;
   }
+
+  if (cmd_done)
+    os_event_notify(&bcm2835_emmc_event);
+
+  if (emmc_should_log)
+    printf("\r\nbcm2835_emmc_irq_handler: CMD%d,after:%08x,done:%d\r\n",
+      CUR_CMD_IDX, ioreg32_read(BCM2835_EMMC_INTERRUPT), cmd_done);
 }
 
 static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
@@ -392,8 +392,6 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
 
   bool is_data = BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg);
   bool is_write;
-  uint32_t intreg;
-  uint32_t intreg_new;
 
   if (is_data) {
     is_write = BCM2835_EMMC_CMDTM_GET_TM_DAT_DIR(cmdreg) ==
@@ -407,23 +405,15 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
     bcm2835_dma_set_cb(bcm2835_emmc.io.dma_channel,
       bcm2835_emmc.io.dma_control_block_idx);
 
-    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
+    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | (1<<15));
   }
   else {
-    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3);
+    ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3 | (1<<15));
   }
 
   if (emmc_should_log)
-    printf("CMD%d write %08x\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
-      cmdreg);
-
-#if 0
-  intreg = intreg_new = ioreg32_read(BCM2835_EMMC_IRPT_EN);
-
-  BCM2835_EMMC_IRPT_EN_CLR_WRITE_RDY(intreg_new);
-  BCM2835_EMMC_IRPT_EN_CLR_DATA_DONE(intreg_new);
-  BCM2835_EMMC_IRPT_EN_CLR_DMA_DONE(intreg_new);
-#endif
+    printf("CMD%d: writing to CMDTM: %08x\r\n",
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), cmdreg);
 
   ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
 
@@ -432,7 +422,6 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
 
   os_event_wait(&bcm2835_emmc_event);
   os_event_clear(&bcm2835_emmc_event);
-  // ioreg32_write(BCM2835_EMMC_INTERRUPT, intreg);
 
   return bcm2835_emmc.io.err;
 }
@@ -562,9 +551,9 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
 
   while(1) {
     status = ioreg32_read(BCM2835_EMMC_STATUS);
-    printf("CMD%d wait inhibit\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg));
     if (!(status & mask))
       break;
+    printf("CMD%d wait inhibit\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg));
     delay_us(100);
   }
 
