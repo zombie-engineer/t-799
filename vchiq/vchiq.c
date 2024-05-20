@@ -1615,7 +1615,7 @@ static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
     buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
     io_sz = MIN(bytes_left, buffer_left);
 
-  puts("+");
+  putc('+');
 #if 0
     MMAL_INFO("%d +%d bytes %08x %08x", cam.current_buf_ptr - cam.current_buf,
       io_sz, ((uint32_t *)b->buffer)[0],

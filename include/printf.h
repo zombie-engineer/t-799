@@ -28,4 +28,12 @@ static inline void puts(const char *string)
   uart_pl011_send(string, 0);
   restore_irq_flags(irqflags);
 }
+
+static inline void putc(char c)
+{
+  int irqflags;
+  disable_irq_save_flags(irqflags);
+  uart_pl011_send_char(c);
+  restore_irq_flags(irqflags);
+}
 #define printf _printf

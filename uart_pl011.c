@@ -138,6 +138,12 @@ int uart_pl011_send(const void *buf, int num)
   return ptr - (const char *)buf;
 }
 
+void uart_pl011_send_char(char c)
+{
+  while(pl011_uart->fr & (1<<3));
+  pl011_uart->dr = c;
+}
+
 int uart_pl011_recv(void *buf, int num)
 {
   int i;
