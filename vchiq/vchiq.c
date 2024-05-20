@@ -3038,7 +3038,7 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   smem_service = vchiq_open_smem_service(s);
   BUG_IF(!smem_service, "failed at open smem service");
 
-  err = vchiq_startup_camera(mmal_service, smem_service, 800, 600);
+  err = vchiq_startup_camera(mmal_service, smem_service, 1280, 1024);
   BUG_IF(err != SUCCESS, "failed to run camera");
 }
 
