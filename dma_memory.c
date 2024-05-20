@@ -56,7 +56,7 @@ DMA_MEM_GROUP(12, 32, 4096);
 DMA_MEM_GROUP(16, 64, 4096);
 DMA_MEM_GROUP(19, 32, 4096);
 DMA_MEM_GROUP(21, 8 , 4096);
-DMA_MEM_GROUP(22, 2 , 4096);
+DMA_MEM_GROUP(22, 4 , 4096);
 
 static struct dma_mem_area dma_chunk_areas[] = {
   DMA_MEM_AREA(6),
@@ -158,7 +158,7 @@ void *dma_alloc(size_t sz)
   struct dma_mem_header *c;
   struct dma_mem_area *a;
   a = chunk_area_get_by_sz(sz);
-  printf("dma_alloc: %d, area: %016lx\r\n", sz, a);
+  printf("dma_alloc: %d, area: %016lx, log:%d\r\n", sz, a, a->chunk_sz_log);
   BUG_IF(!a, "dma_alloc: size too big");
   if (list_empty(&a->free_list))
   {
