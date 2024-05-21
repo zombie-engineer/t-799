@@ -1633,6 +1633,36 @@ static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
   }
 }
 
+static struct mmal_buffer *display_buffer = NULL;
+
+static int mmal_port_io_work_display_buf_release(
+  struct vchiq_mmal_component *c,
+  struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
+{
+  int err;
+  struct mmal_buffer *b = display_buffer;
+  if (!b) {
+    MMAL_ERR("No display buffer to release");
+    return ERR_GENERIC;
+  }
+
+  irq_disable();
+  list_del(&b->list);
+  list_add_tail(&b->list, &p->buffers_busy);
+  irq_enable();
+  err = mmal_port_buffer_send_one(p, b);
+  if (err != SUCCESS) {
+    MMAL_ERR("Failed to submit buffer");
+  }
+  return SUCCESS;
+}
+
+static void mmal_cb_on_buffer_done_irq(void)
+{
+  mmal_io_work_push(port_to_display->component, port_to_display, NULL,
+    mmal_port_io_work_display_buf_release);
+}
+
 static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h)
 {
@@ -1657,8 +1687,9 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   /* Buffer payload */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     if (p == port_to_display) {
-      // putc('|');
-      ili9341_draw_bitmap(b->buffer, h->length);
+      display_buffer = b;
+      ili9341_draw_bitmap(b->buffer, h->length, mmal_cb_on_buffer_done_irq);
+      return SUCCESS;
     }
   }
 
@@ -1668,14 +1699,7 @@ buffer_return:
   list_add_tail(&b->list, &p->buffers_busy);
   irq_enable();
   err = mmal_port_buffer_send_one(p, b);
-
   CHECK_ERR("Failed to submit buffer");
-
-  if (h->flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
-    MMAL_DEBUG2("EOS received, sending CAPTURE command");
-    err = mmal_camera_capture_frames(p);
-    CHECK_ERR("Failed to initiate frame capture");
-  }
 
   return SUCCESS;
 out_err:
@@ -2945,7 +2969,7 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to retrieve supported encodings from port");
 
   mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
-    MMAL_ENCODING_I420, frame_width, frame_height, 3, 0);
+    MMAL_ENCODING_I420, frame_width, frame_height, 1, 0);
 
   err = mmal_port_set_format(preview);
   CHECK_ERR("Failed to set format for preview capture port");
@@ -2986,8 +3010,6 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *cam_preview, *cam_video, *cam_still;
   struct vchiq_mmal_port *encoder_in, *encoder_out;
   struct vchiq_mmal_port *resizer_in, *resizer_out;
-  struct vchiq_mmal_port *splitter_in, *splitter_out0,
-    *splitter_out1;
   uint8_t *display_dma_buf;
   size_t display_dma_buf_size;
 
@@ -3022,21 +3044,14 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
     &encoder_out, frame_width, frame_height);
   CHECK_ERR("Failed to create encoder component");
 
-  err = create_splitter_component(mmal_service, &splitter_in, &splitter_out0,
-    &splitter_out1, frame_width, frame_height);
-  CHECK_ERR("Failed to create splitter component");
-
   err = create_resizer_component(mmal_service, &resizer_in, &resizer_out,
     frame_width, frame_height, 320, 240);
 
-  err = vchiq_mmal_port_connect(cam_video, splitter_in);
-  CHECK_ERR("Failed to connect camera video.OUT to splitter.IN");
+  err = vchiq_mmal_port_connect(cam_video, encoder_in);
+  CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
-  err = vchiq_mmal_port_connect(splitter_out0, encoder_in);
-  CHECK_ERR("Failed to connect splitter.OUT0 to encoder.IN");
-
-  err = vchiq_mmal_port_connect(splitter_out1, resizer_in);
-  CHECK_ERR("Failed to connect splitter.OUT1 to resizer.IN");
+  err = vchiq_mmal_port_connect(cam_preview, resizer_in);
+  CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
   err = mmal_port_set_zero_copy(encoder_out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
@@ -3047,14 +3062,8 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_zero_copy(cam_video);
   CHECK_ERR("Failed to set zero copy to video.OUT");
 
-  err = mmal_port_set_zero_copy(splitter_in);
-  CHECK_ERR("Failed to set zero copy to splitter.IN");
-
-  err = mmal_port_set_zero_copy(splitter_out0);
-  CHECK_ERR("Failed to set zero copy to splitter.OUT0");
-
-  err = mmal_port_set_zero_copy(splitter_out1);
-  CHECK_ERR("Failed to set zero copy to splitter.OUT1");
+  err = mmal_port_set_zero_copy(cam_preview);
+  CHECK_ERR("Failed to set zero copy to preview.OUT");
 
   err = mmal_port_set_zero_copy(resizer_in);
   CHECK_ERR("Failed to set zero copy to resizer.IN");
@@ -3062,15 +3071,8 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_zero_copy(resizer_out);
   CHECK_ERR("Failed to set zero copy to resizer.OUT");
 
-  /* Enable splitter ports */
-  err = vchiq_mmal_port_enable(splitter_in);
-  CHECK_ERR("Failed to enable splitter.IN");
-
-  err = vchiq_mmal_port_enable(splitter_out0);
-  CHECK_ERR("Failed to enable splitter.OUT0");
-
-  err = vchiq_mmal_port_enable(splitter_out1);
-  CHECK_ERR("Failed to enable splitter.OUT1");
+  err = vchiq_mmal_port_enable(cam_preview);
+  CHECK_ERR("Failed to enable preview.OUT");
 
   /* Enable resizer ports */
   err = vchiq_mmal_port_enable(resizer_out);
@@ -3082,6 +3084,9 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
 
+  err = vchiq_mmal_port_enable(encoder_in);
+  CHECK_ERR("Failed to enable encoder.OUT");
+
   err = mmal_apply_ext_buffer(mems_service, resizer_out, display_dma_buf,
     display_dma_buf_size);
   CHECK_ERR("Failed to add buffers to resizer output");
@@ -3091,6 +3096,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");
+  printf("Started video capture, err = %d\r\n", err);
 
 
   while(1)

@@ -139,10 +139,16 @@ struct ili9341 {
 
 static struct ili9341 ili9341;
 
+static void (*ili9341_dma_done_cb_irq)(void) = NULL;
+
 static void ili9341_dma_irq_callback_spi_rx(void)
 {
   if (ili9341.last_transfer_idx == NUM_DMA_TRANSFERS - 1) {
     ili9341.transfer_done = true;
+    *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
+    *(int *)0x3f204000 |= SPI_CS_CLEAR;
+    if (ili9341_dma_done_cb_irq)
+      ili9341_dma_done_cb_irq();
     return;
   }
 
@@ -447,6 +453,7 @@ int ili9341_nonstop_refresh_get_dma_buffer(uint8_t **dma_buf, size_t *sz)
 
 int ili9341_nonstop_refresh_start(void)
 {
+  ili9341.transfer_done = true;
   return SUCCESS;
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_READY) {
     printf("Failed to start nontstop refresh mode for ili9341,"
@@ -491,10 +498,16 @@ void ili9341_nonstop_refresh_poke(void)
   ili9341_nonstop_refresh_dirty = true;
 }
 
-void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
+void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
+  void (*dma_done_cb_irq)(void))
 {
   size_t i;
-  printf("ili9341_draw: %08lx, %ld\r\n", data, data_sz);
+
+  if (!ili9341.transfer_done)
+    return;
+
+  ili9341.transfer_done = false;
+  ili9341_dma_done_cb_irq = dma_done_cb_irq;
 
   if (!ili9341_first) {
     ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
@@ -541,12 +554,6 @@ void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
      */
   bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
   bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
-
-  while(!ili9341.transfer_done);
-  ili9341.transfer_done = false;
-
-  *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
-  *(int *)0x3f204000 |= SPI_CS_CLEAR;
 }
 
 static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
