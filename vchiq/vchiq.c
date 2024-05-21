@@ -1859,11 +1859,14 @@ static void mmal_format_print(const char *action, const char *name,
 {
   const char *src0 = (const char *)&f->encoding;
   const char *src1 = (const char *)&f->encoding_variant;
+
   char str_enc[] = { src0[0], src0[1], src0[2], src0[3], 0 };
   char str_enc_var[] = { src1[0], src1[1], src1[2], src1[3], 0 };
 
   MMAL_INFO("%s:%s:tp:%d %s/%s,bitrate:%d,%dx%d,f:%02x", action, name,
-    f->type, str_enc, str_enc_var, f->bitrate, f->es->video.width,
+    f->type, str_enc,
+    f->encoding_variant ? str_enc_var : "0",
+    f->bitrate, f->es->video.width,
     f->es->video.height, f->flags);
 }
 
@@ -2094,7 +2097,7 @@ static void vchiq_mmal_cam_info_print(struct mmal_cam_info *cam_info)
 
   for (i = 0; i < cam_info->num_cameras; ++i) {
     c = &cam_info->cameras[i];
-    MMAL_INFO("cam %d: name:%s, W x H: %dx%x\r\n",
+    MMAL_INFO("cam %d: name:%s, W x H: %dx%d\r\n",
       i, c->camera_name, c->max_width, c->max_height);
   }
 }
