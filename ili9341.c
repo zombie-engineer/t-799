@@ -402,10 +402,99 @@ static void draw_line(int y, uint8_t *data, uint8_t color)
 
 volatile int ili9341_use_dma = 0;
 bool ili9341_first = false;
+static bool ili9341_nonstop_refresh_dirty;
+typedef enum {
+  ILI9341_NONSTOP_REFRESH_NONE = 0,
+  ILI9341_NONSTOP_REFRESH_READY,
+  ILI9341_NONSTOP_REFRESH_RUNNING,
+  ILI9341_NONSTOP_REFRESH_PAUSED
+} ili9341_nonstop_refresh_state_t;
+
+static ili9341_nonstop_refresh_state_t
+ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
+
+static uint8_t *ili9341_nonstop_refresh_dma_buffer = NULL;
+
+int ili9341_nonstop_refresh_init(void)
+{
+  if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
+    printf("WARN: tried to initialized nonstop refresh twice\r\n");
+    return ERR_GENERIC;
+  }
+
+  ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH,
+    DISPLAY_HEIGHT);
+
+  ili9341_nonstop_refresh_dma_buffer = dma_alloc(NUM_BYTES_PER_FRAME);
+  if (!ili9341_nonstop_refresh_dma_buffer) {
+    printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
+    return ERR_RESOURCE;
+  }
+
+  ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_READY;
+  return SUCCESS;
+}
+
+int ili9341_nonstop_refresh_get_dma_buffer(uint8_t **dma_buf, size_t *sz)
+{
+  if (ili9341_nonstop_refresh_state == ILI9341_NONSTOP_REFRESH_NONE)
+    return ERR_GENERIC;
+
+  *dma_buf = ili9341_nonstop_refresh_dma_buffer;
+  *sz = NUM_BYTES_PER_FRAME;
+  return SUCCESS;
+}
+
+int ili9341_nonstop_refresh_start(void)
+{
+  return SUCCESS;
+  if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_READY) {
+    printf("Failed to start nontstop refresh mode for ili9341,"
+        " should be in READY state\r\n");
+    return ERR_GENERIC;
+  }
+
+  ili9341_nonstop_refresh_dirty = true;
+  
+  for (size_t i = 0; i < NUM_DMA_TRANSFERS; ++i) {
+    bcm2835_dma_update_cb_src(ili9341.tx_cbs[i],
+      RAM_PHY_TO_BUS_UNCACHED(ili9341_nonstop_refresh_dma_buffer +
+        i * MAX_BYTES_PER_TRANSFER));
+  }
+
+  *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
+  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
+  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+
+  ili9341.last_transfer_idx = 0;
+  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx, ili9341.header_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx, ili9341.rx_cbs[0]);
+
+    /*
+     * Observations:
+     * - We only write to display, so naively we would only use one channel for
+     *   TX DMA
+     * - But RX fifo will be full rather quick and stall transmission
+     * - That is why it is required to have second DMA channel to serve SPI RX
+     * - If SPI RX TI has DST_IGNORE flag set - this will lead no LEN register
+     *   not being decremented, and control block for RX will not be switched
+     * - Activation of RX and TX channels is not done atomically, but RX will
+     *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
+     */
+  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
+  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
+  return SUCCESS;
+}
+
+void ili9341_nonstop_refresh_poke(void)
+{
+  ili9341_nonstop_refresh_dirty = true;
+}
 
 void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz)
 {
   size_t i;
+  printf("ili9341_draw: %08lx, %ld\r\n", data, data_sz);
 
   if (!ili9341_first) {
     ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);

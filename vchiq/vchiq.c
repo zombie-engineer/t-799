@@ -2535,13 +2535,41 @@ out_err:
   return err;
 }
 
+static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
+  struct vchiq_mmal_port *p, void *dma_buf, size_t dma_buf_size)
+{
+  int err;
+  struct mmal_buffer *buf;
+
+  buf = kzalloc(sizeof(*buf));
+  if (!buf) {
+    MMAL_ERR("Failed to allocate buffer");
+    return ERR_RESOURCE;
+  }
+
+  buf->buffer = dma_buf;
+  buf->buffer_size = dma_buf_size;
+
+  if (p->zero_copy) {
+    printf("zero copy\r\n");
+  }
+  err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
+  CHECK_ERR("failed to import dmabuf");
+  list_add_tail(&buf->list, &p->buffers_free);
+
+out_err:
+  return err;
+}
+
 static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
   struct vchiq_mmal_port *p, size_t min_buffers)
 {
   int err;
   size_t i;
-  struct mmal_buffer *buf;
   size_t num_buffers = p->current_buffer.num;
+  size_t dma_buf_size = p->current_buffer.size;
+  void *dma_buf;
+
   if (num_buffers < min_buffers)
     num_buffers = min_buffers;
 
@@ -2549,33 +2577,22 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
     p->minimum_buffer.size, p->name);
 
   for (i = 0; i < num_buffers; ++i) {
-    buf = kzalloc(sizeof(*buf));
-    if (!buf) {
-      MMAL_ERR("Failed to allocate buffer");
-      return ERR_RESOURCE;
-    }
-
-    buf->buffer_size = p->current_buffer.size;
-    buf->buffer = dma_alloc(buf->buffer_size);;
-    if (!buf->buffer) {
+    dma_buf = dma_alloc(dma_buf_size);
+    if (!dma_buf) {
       MMAL_ERR("Failed to allocate dma buffer");
       return ERR_RESOURCE;
     }
 
-    if (p->zero_copy) {
-      err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
-      CHECK_ERR("failed to import dmabuf");
-    }
-    list_add_tail(&buf->list, &p->buffers_free);
+    err = mmal_port_add_buffer(mems_service, p, dma_buf, dma_buf_size);
+    CHECK_ERR("failed to import dmabuf");
   }
 
-  MMAL_INFO("%s: port buf alloc: nr:%d, size:%d, align:%d, port_enabled:%s, %08x",
+  MMAL_INFO("%s: port buf alloc: nr:%d, size:%d, align:%d, port_enabled:%s",
     p->name,
     p->minimum_buffer.num,
     p->minimum_buffer.size,
     p->minimum_buffer.alignment,
-    p->enabled ? "yes" : "no",
-    buf->buffer);
+    p->enabled ? "yes" : "no");
 
   return SUCCESS;
 
@@ -2632,17 +2649,32 @@ static void mmal_format_copy(struct mmal_es_format_local *to,
 }
 
 static int mmal_apply_buffers(struct vchiq_service_common *mems_service,
-  struct vchiq_mmal_port *p, bool zero_copy, size_t min_buffers)
+  struct vchiq_mmal_port *p, size_t min_buffers)
 {
   int err;
 
-  if (zero_copy) {
-    err = mmal_port_set_zero_copy(p);
-    CHECK_ERR("Failed to set 'zero copy' for port");
-  }
-
   err = mmal_alloc_port_buffers(mems_service, p, min_buffers);
   CHECK_ERR("Failed to alloc buffers for port");
+  err = mmal_port_buffer_send_all(p);
+  CHECK_ERR("Failed to send buffers to port");
+out_err:
+  return err;
+}
+
+static int mmal_apply_ext_buffer(struct vchiq_service_common *mems_service,
+  struct vchiq_mmal_port *p, void *dma_buf, size_t dma_buf_size)
+{
+  int err;
+
+  err = mmal_port_add_buffer(mems_service, p, dma_buf, dma_buf_size);
+  CHECK_ERR("Failed to import external dmabuf");
+
+  MMAL_INFO("mmal_apply_ext_buffer: %s: port buf alloc: nr:1, size:%d"
+    " at %08x, port_enabled:%s", p->name,
+    dma_buf_size,
+    dma_buf,
+    p->enabled ? "yes" : "no");
+
   err = mmal_port_buffer_send_all(p);
   CHECK_ERR("Failed to send buffers to port");
 out_err:
@@ -2956,9 +2988,22 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *resizer_in, *resizer_out;
   struct vchiq_mmal_port *splitter_in, *splitter_out0,
     *splitter_out1;
+  uint8_t *display_dma_buf;
+  size_t display_dma_buf_size;
 
   cam.io_buffers[0] = dma_alloc(H264BUF_SIZE);
   cam.io_buffers[1] = dma_alloc(H264BUF_SIZE);
+
+  err = ili9341_nonstop_refresh_init();
+  CHECK_ERR("Failed to init display in non-stop refresh mode");
+  err = ili9341_nonstop_refresh_get_dma_buffer(&display_dma_buf,
+    &display_dma_buf_size);
+  CHECK_ERR("Failed to get dma buffer for display refresh");
+  MMAL_INFO("Received dma buffer %08x(size %ld) from display", display_dma_buf,
+    display_dma_buf_size);
+
+  err = ili9341_nonstop_refresh_start();
+  CHECK_ERR("Failed to start nonstop refresh");
 
   cam.current_buf = cam.io_buffers[0];
   cam.current_buf_ptr = cam.current_buf;
@@ -3037,15 +3082,11 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
 
-#if 0
-  err = vchiq_mmal_port_enable(encoder_in);
-  CHECK_ERR("Failed to enable encoder.IN");
-#endif
+  err = mmal_apply_ext_buffer(mems_service, resizer_out, display_dma_buf,
+    display_dma_buf_size);
+  CHECK_ERR("Failed to add buffers to resizer output");
 
-  err = mmal_apply_buffers(mems_service, resizer_out, true, 1);
-  CHECK_ERR("Failed to add buffers to encoder output");
-
-  err = mmal_apply_buffers(mems_service, encoder_out, true, 1);
+  err = mmal_apply_buffers(mems_service, encoder_out, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
   err = mmal_camera_capture_frames(cam_video);
