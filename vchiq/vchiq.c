@@ -1688,7 +1688,7 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     if (p == port_to_display) {
       display_buffer = b;
-      ili9341_draw_bitmap(b->buffer, h->length, mmal_cb_on_buffer_done_irq);
+      ili9341_nonstop_refresh_poke();
       return SUCCESS;
     }
   }
@@ -3016,7 +3016,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   cam.io_buffers[0] = dma_alloc(H264BUF_SIZE);
   cam.io_buffers[1] = dma_alloc(H264BUF_SIZE);
 
-  err = ili9341_nonstop_refresh_init();
+  err = ili9341_nonstop_refresh_init(mmal_cb_on_buffer_done_irq);
   CHECK_ERR("Failed to init display in non-stop refresh mode");
   err = ili9341_nonstop_refresh_get_dma_buffer(&display_dma_buf,
     &display_dma_buf_size);
@@ -3071,9 +3071,6 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_zero_copy(resizer_out);
   CHECK_ERR("Failed to set zero copy to resizer.OUT");
 
-  err = vchiq_mmal_port_enable(cam_preview);
-  CHECK_ERR("Failed to enable preview.OUT");
-
   /* Enable resizer ports */
   err = vchiq_mmal_port_enable(resizer_out);
   CHECK_ERR("Failed to enable resizer.OUT");
@@ -3087,17 +3084,28 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(encoder_in);
   CHECK_ERR("Failed to enable encoder.OUT");
 
+  err = mmal_apply_buffers(mems_service, encoder_out, 1);
+  CHECK_ERR("Failed to add buffers to encoder output");
+
+  /*
+   * Preview frames will start coming indefinitely as soon as
+   * - preview port is enabled
+   * - buffer is provided to the output of MMAL component graph, to where
+   *   preview port is connected, in our case this is 'ril.isp.OUT' node of
+   *   graph 'ril.camera.PREVIEW -> ril.isp.IN -> ril.isp.OUT'
+   * - var name for ril.isp nodes are named as resizer_X
+   */
+  err = vchiq_mmal_port_enable(cam_preview);
+  CHECK_ERR("Failed to enable preview.OUT");
+  MMAL_INFO("Preview port enabled %p", cam_preview);
+
   err = mmal_apply_ext_buffer(mems_service, resizer_out, display_dma_buf,
     display_dma_buf_size);
   CHECK_ERR("Failed to add buffers to resizer output");
 
-  err = mmal_apply_buffers(mems_service, encoder_out, 1);
-  CHECK_ERR("Failed to add buffers to encoder output");
-
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");
   printf("Started video capture, err = %d\r\n", err);
-
 
   while(1)
     asm volatile ("wfe");

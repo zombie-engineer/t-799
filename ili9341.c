@@ -144,11 +144,11 @@ static void (*ili9341_dma_done_cb_irq)(void) = NULL;
 static void ili9341_dma_irq_callback_spi_rx(void)
 {
   if (ili9341.last_transfer_idx == NUM_DMA_TRANSFERS - 1) {
-    ili9341.transfer_done = true;
     *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
     *(int *)0x3f204000 |= SPI_CS_CLEAR;
     if (ili9341_dma_done_cb_irq)
       ili9341_dma_done_cb_irq();
+    ili9341.transfer_done = true;
     return;
   }
 
@@ -391,7 +391,8 @@ static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
 
 static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
 {
-  ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 240, 0, 255);
+  ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 240,
+    0, 255);
 }
 
 int line_y = 0;
@@ -408,7 +409,6 @@ static void draw_line(int y, uint8_t *data, uint8_t color)
 
 volatile int ili9341_use_dma = 0;
 bool ili9341_first = false;
-static bool ili9341_nonstop_refresh_dirty;
 typedef enum {
   ILI9341_NONSTOP_REFRESH_NONE = 0,
   ILI9341_NONSTOP_REFRESH_READY,
@@ -421,7 +421,7 @@ ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
 
 static uint8_t *ili9341_nonstop_refresh_dma_buffer = NULL;
 
-int ili9341_nonstop_refresh_init(void)
+int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(void))
 {
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
     printf("WARN: tried to initialized nonstop refresh twice\r\n");
@@ -430,12 +430,15 @@ int ili9341_nonstop_refresh_init(void)
 
   ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH,
     DISPLAY_HEIGHT);
+  SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
 
   ili9341_nonstop_refresh_dma_buffer = dma_alloc(NUM_BYTES_PER_FRAME);
   if (!ili9341_nonstop_refresh_dma_buffer) {
     printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
     return ERR_RESOURCE;
   }
+
+  ili9341_dma_done_cb_irq = dma_done_cb_irq;
 
   ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_READY;
   return SUCCESS;
@@ -454,19 +457,27 @@ int ili9341_nonstop_refresh_get_dma_buffer(uint8_t **dma_buf, size_t *sz)
 int ili9341_nonstop_refresh_start(void)
 {
   ili9341.transfer_done = true;
-  return SUCCESS;
+
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_READY) {
     printf("Failed to start nontstop refresh mode for ili9341,"
         " should be in READY state\r\n");
     return ERR_GENERIC;
   }
-
-  ili9341_nonstop_refresh_dirty = true;
   
   for (size_t i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     bcm2835_dma_update_cb_src(ili9341.tx_cbs[i],
       RAM_PHY_TO_BUS_UNCACHED(ili9341_nonstop_refresh_dma_buffer +
         i * MAX_BYTES_PER_TRANSFER));
+  }
+
+  return SUCCESS;
+}
+
+int ili9341_nonstop_refresh_poke(void)
+{
+  if (!ili9341.transfer_done) {
+    putc('%');
+    return ERR_GENERIC;
   }
 
   *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
@@ -491,11 +502,6 @@ int ili9341_nonstop_refresh_start(void)
   bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
   bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
   return SUCCESS;
-}
-
-void ili9341_nonstop_refresh_poke(void)
-{
-  ili9341_nonstop_refresh_dirty = true;
 }
 
 void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
