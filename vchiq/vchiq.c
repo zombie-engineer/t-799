@@ -1657,8 +1657,8 @@ static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
   /* Buffer payload */
   if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
     if (p == port_to_display) {
-      putc('|');
-      // ili9341_draw_bitmap(b->buffer, h->length);
+      // putc('|');
+      ili9341_draw_bitmap(b->buffer, h->length);
     }
   }
 
@@ -2646,64 +2646,6 @@ out_err:
   return err;
 }
 
-static int create_resizer(struct vchiq_service_common *mmal_service,
-  struct vchiq_service_common *mems_service,
-  struct vchiq_mmal_port **resizer_input,
-  struct vchiq_mmal_port **resizer_output, int width, int height)
-{
-  bool bool_arg;
-  int err = SUCCESS;
-  struct vchiq_mmal_component *resizer;
-  struct mmal_parameter_video_profile video_profile;
- 
-  resizer = component_create(mmal_service, "ril.resize");
-
-  CHECK_ERR_PTR(resizer, "Failed to create component 'ril.video_encode'");
-  if (!resizer->inputs || !resizer->outputs) {
-    MMAL_ERR("err: resizer has 0 outputs or inputs");
-    return ERR_GENERIC;
-  }
-
-  err = mmal_component_enable(resizer);
-  CHECK_ERR("Failed to enable resizer");
-
-  *resizer_input = &resizer->input[0];
-  *resizer_output = &resizer->output[0];
-
-  resizer->input[0].format.encoding = MMAL_ENCODING_RGB24;
-  resizer->input[0].format.encoding_variant = 0;
-  resizer->input[0].format.bitrate = 0;
-  resizer->input[0].format.es->video.frame_rate.num = 0;
-  resizer->input[0].format.es->video.frame_rate.den = 0;
-  resizer->input[0].format.es->video.width = width;
-  resizer->input[0].format.es->video.height = height;
-  resizer->input[0].format.es->video.crop.x = 0;
-  resizer->input[0].format.es->video.crop.y = 0;
-  resizer->input[0].format.es->video.crop.width = width;
-  resizer->input[0].format.es->video.crop.height = height;
-
-  err = mmal_port_set_format(&resizer->input[0]);
-  CHECK_ERR("Failed to set format for resizer input port");
-
-  resizer->output[0].format.encoding = MMAL_ENCODING_RGB24;
-  resizer->output[0].format.encoding_variant = 0;
-  resizer->output[0].format.bitrate = 0;
-  resizer->output[0].format.es->video.frame_rate.num = 0;
-  resizer->output[0].format.es->video.frame_rate.den = 0;
-  resizer->output[0].format.es->video.width = width;
-  resizer->output[0].format.es->video.height = height;
-  resizer->output[0].format.es->video.crop.x = 0;
-  resizer->output[0].format.es->video.crop.y = 0;
-  resizer->output[0].format.es->video.crop.width = width;
-  resizer->output[0].format.es->video.crop.height = height;
-
-  err = mmal_port_set_format(&resizer->output[0]);
-  CHECK_ERR("Failed to set format for resizer output port");
-
-out_err:
-  return err;
-}
-
 struct encoder_h264_params {
   uint32_t quantization;
 };
@@ -2844,8 +2786,8 @@ static int create_splitter_component(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_format(&splitter->output[0]);
 
   /* Output 1 will go to preview display */
-  mmal_format_set(&splitter->output[1].format, MMAL_ENCODING_RGB24,
-    0, width, height, 0, 0);
+  mmal_format_set(&splitter->output[1].format, MMAL_ENCODING_OPAQUE,
+    MMAL_ENCODING_I420, width, height, 0, 0);
   err = mmal_port_set_format(&splitter->output[1]);
 
   CHECK_ERR("Failed to set splitter input format");
@@ -2853,6 +2795,78 @@ static int create_splitter_component(struct vchiq_service_common *mmal_service,
 out_err:
   return err;
 }
+
+static void mmal_port_dump(const char *tag, const struct vchiq_mmal_port *p)
+{
+  printf("%s:handle:%d type:%d,encoding:%08x,variant:%08x,%dx%d,f:%d/%d,aspect:%d/%d,color:%d\r\n",
+    tag, p->handle, p->format.type, p->format.encoding,
+    p->format.encoding_variant, p->format.es->video.width,
+    p->format.es->video.height,
+    p->format.es->video.frame_rate.num,
+    p->format.es->video.frame_rate.den,
+    p->format.es->video.par.num,
+    p->format.es->video.par.den,
+    p->format.es->video.color_space);
+
+  printf("%s: minbuf: %dx%ld, recommended:%dx%d, current:%dx%ld\r\n",
+    tag,
+    p->minimum_buffer.num,
+    p->minimum_buffer.size,
+    p->recommended_buffer.num,
+    p->recommended_buffer.size,
+    p->current_buffer.num,
+    p->current_buffer.size);
+  printf("%s: es:%p\r\n", tag);
+}
+
+static int create_resizer_component(struct vchiq_service_common *mmal_service,
+  struct vchiq_mmal_port **resizer_in,
+  struct vchiq_mmal_port **resizer_out,
+  int in_width, int in_height,
+  int out_width, int out_height)
+{
+  bool bool_arg;
+  int err = SUCCESS;
+  struct vchiq_mmal_component *resizer;
+ 
+  resizer = component_create(mmal_service, "ril.isp");
+  CHECK_ERR_PTR(resizer, "Failed to create component 'ril.isp'");
+
+  if (!resizer->inputs || !resizer->outputs) {
+    MMAL_ERR("err: ril.isp has 0 outputs or inputs");
+    return ERR_GENERIC;
+  }
+
+  err = mmal_component_enable(resizer);
+  CHECK_ERR("Failed to enable resizer");
+
+  *resizer_in = &resizer->input[0];
+  *resizer_out = &resizer->output[0];
+  mmal_port_dump("resizer.IN", &resizer->input[0]);
+  mmal_port_dump("resizer.OUT", &resizer->output[0]);
+
+  resizer->input[0].format.encoding = MMAL_ENCODING_OPAQUE;
+  resizer->input[0].format.encoding_variant = MMAL_ENCODING_I420;
+  resizer->input[0].format.es->video.width = in_width;
+  resizer->input[0].format.es->video.height = in_height;
+  resizer->input[0].format.es->video.crop.width = in_width;
+  resizer->input[0].format.es->video.crop.height = in_height;
+  err = mmal_port_set_format(&resizer->input[0]);
+  CHECK_ERR("Failed to set format for resizer.IN port");
+
+  resizer->output[0].format.encoding = MMAL_ENCODING_RGB24;
+  resizer->output[0].format.encoding_variant = 0;
+  resizer->output[0].format.es->video.width = out_width;
+  resizer->output[0].format.es->video.height = out_height;
+  resizer->output[0].format.es->video.crop.width = out_width;
+  resizer->output[0].format.es->video.crop.height = out_height;
+  err = mmal_port_set_format(&resizer->output[0]);
+  CHECK_ERR("Failed to set format for resizer.OUT port");
+
+out_err:
+  return err;
+}
+
 
 static int create_camera_component(struct vchiq_service_common *mmal_service,
   int frame_width ,int frame_height,
@@ -2936,7 +2950,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct mmal_cam_info cam_info = {0};
   struct vchiq_mmal_port *cam_preview, *cam_video, *cam_still;
   struct vchiq_mmal_port *encoder_in, *encoder_out;
-  struct vchiq_mmal_port *resizer_input, *resizer_output;
+  struct vchiq_mmal_port *resizer_in, *resizer_out;
   struct vchiq_mmal_port *splitter_in, *splitter_out0,
     *splitter_out1;
 
@@ -2964,11 +2978,17 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
     &splitter_out1, frame_width, frame_height);
   CHECK_ERR("Failed to create splitter component");
 
+  err = create_resizer_component(mmal_service, &resizer_in, &resizer_out,
+    frame_width, frame_height, 320, 240);
+
   err = vchiq_mmal_port_connect(cam_video, splitter_in);
   CHECK_ERR("Failed to connect camera video.OUT to splitter.IN");
 
   err = vchiq_mmal_port_connect(splitter_out0, encoder_in);
   CHECK_ERR("Failed to connect splitter.OUT0 to encoder.IN");
+
+  err = vchiq_mmal_port_connect(splitter_out1, resizer_in);
+  CHECK_ERR("Failed to connect splitter.OUT1 to resizer.IN");
 
   err = mmal_port_set_zero_copy(encoder_out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
@@ -2988,6 +3008,12 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_zero_copy(splitter_out1);
   CHECK_ERR("Failed to set zero copy to splitter.OUT1");
 
+  err = mmal_port_set_zero_copy(resizer_in);
+  CHECK_ERR("Failed to set zero copy to resizer.IN");
+
+  err = mmal_port_set_zero_copy(resizer_out);
+  CHECK_ERR("Failed to set zero copy to resizer.OUT");
+
   /* Enable splitter ports */
   err = vchiq_mmal_port_enable(splitter_in);
   CHECK_ERR("Failed to enable splitter.IN");
@@ -2998,7 +3024,11 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(splitter_out1);
   CHECK_ERR("Failed to enable splitter.OUT1");
 
-  port_to_display = splitter_out1;
+  /* Enable resizer ports */
+  err = vchiq_mmal_port_enable(resizer_out);
+  CHECK_ERR("Failed to enable resizer.OUT");
+
+  port_to_display = resizer_out;
 
   /* Enable encoder ports */
   err = vchiq_mmal_port_enable(encoder_out);
@@ -3009,7 +3039,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to enable encoder.IN");
 #endif
 
-  err = mmal_apply_buffers(mems_service, splitter_out1, true, 1);
+  err = mmal_apply_buffers(mems_service, resizer_out, true, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
   err = mmal_apply_buffers(mems_service, encoder_out, true, 1);
