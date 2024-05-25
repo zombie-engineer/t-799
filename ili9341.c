@@ -23,6 +23,7 @@
 #define ILI9341_CMD_SET_CURSOR_Y 0x2b
 #define ILI9341_CMD_WRITE_PIXELS 0x2c
 #define ILI9341_CMD_MEM_ACCESS_CONTROL 0x36
+#define ILI9341_CMD_SET_PIXEL_FORMAT 0x3a
 #define ILI9341_CMD_WRITE_MEMORY_CONTINUE 0x3c
 #define ILI9341_CMD_POWER_CTL_A  0xcb
 #define ILI9341_CMD_POWER_CTL_B  0xcf
@@ -135,19 +136,23 @@ struct ili9341 {
   int dma_channel_idx_spi_rx;
   uint32_t *spi_dma_tx_headers;
   int last_transfer_idx;
+  uint32_t current_buffer_handle;
 };
 
 static struct ili9341 ili9341;
 
-static void (*ili9341_dma_done_cb_irq)(void) = NULL;
+static void (*ili9341_dma_done_cb_irq)(uint32_t) = NULL;
 
 static void ili9341_dma_irq_callback_spi_rx(void)
 {
   if (ili9341.last_transfer_idx == NUM_DMA_TRANSFERS - 1) {
     *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
     *(int *)0x3f204000 |= SPI_CS_CLEAR;
+
+    // printf("< [Done %08x]\r\n", ili9341.current_buffer_handle);
+
     if (ili9341_dma_done_cb_irq)
-      ili9341_dma_done_cb_irq();
+      ili9341_dma_done_cb_irq(ili9341.current_buffer_handle);
     ili9341.transfer_done = true;
     return;
   }
@@ -391,8 +396,8 @@ static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
 
 static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
 {
-  ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 240,
-    0, 255);
+  ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
+    255, 0);
 }
 
 int line_y = 0;
@@ -419,9 +424,10 @@ typedef enum {
 static ili9341_nonstop_refresh_state_t
 ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
 
-static uint8_t *ili9341_nonstop_refresh_dma_buffer = NULL;
+static uint8_t *ili9341_nonstop_refresh_dma_buffer_a = NULL;
+static uint8_t *ili9341_nonstop_refresh_dma_buffer_b = NULL;
 
-int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(void))
+int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t))
 {
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
     printf("WARN: tried to initialized nonstop refresh twice\r\n");
@@ -432,8 +438,14 @@ int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(void))
     DISPLAY_HEIGHT);
   SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
 
-  ili9341_nonstop_refresh_dma_buffer = dma_alloc(NUM_BYTES_PER_FRAME);
-  if (!ili9341_nonstop_refresh_dma_buffer) {
+  ili9341_nonstop_refresh_dma_buffer_a = dma_alloc(NUM_BYTES_PER_FRAME);
+  if (!ili9341_nonstop_refresh_dma_buffer_a) {
+    printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
+    return ERR_RESOURCE;
+  }
+
+  ili9341_nonstop_refresh_dma_buffer_b = dma_alloc(NUM_BYTES_PER_FRAME);
+  if (!ili9341_nonstop_refresh_dma_buffer_b) {
     printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
     return ERR_RESOURCE;
   }
@@ -444,12 +456,14 @@ int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(void))
   return SUCCESS;
 }
 
-int ili9341_nonstop_refresh_get_dma_buffer(uint8_t **dma_buf, size_t *sz)
+int ili9341_nonstop_refresh_get_dma_buffer(uint8_t **dma_buf_a,
+  uint8_t **dma_buf_b, size_t *sz)
 {
   if (ili9341_nonstop_refresh_state == ILI9341_NONSTOP_REFRESH_NONE)
     return ERR_GENERIC;
 
-  *dma_buf = ili9341_nonstop_refresh_dma_buffer;
+  *dma_buf_a = ili9341_nonstop_refresh_dma_buffer_a;
+  *dma_buf_b = ili9341_nonstop_refresh_dma_buffer_b;
   *sz = NUM_BYTES_PER_FRAME;
   return SUCCESS;
 }
@@ -466,19 +480,33 @@ int ili9341_nonstop_refresh_start(void)
   
   for (size_t i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     bcm2835_dma_update_cb_src(ili9341.tx_cbs[i],
-      RAM_PHY_TO_BUS_UNCACHED(ili9341_nonstop_refresh_dma_buffer +
+      RAM_PHY_TO_BUS_UNCACHED(ili9341_nonstop_refresh_dma_buffer_a +
         i * MAX_BYTES_PER_TRANSFER));
   }
 
   return SUCCESS;
 }
 
-int ili9341_nonstop_refresh_poke(void)
+int OPTIMIZED ili9341_nonstop_refresh_poke(uint32_t handle)
 {
   if (!ili9341.transfer_done) {
-    putc('%');
+    // printf("** [Not accepted %08x]\r\n", handle);
     return ERR_GENERIC;
   }
+
+  // printf("> [Accepted %08x]\r\n", handle);
+  ili9341.current_buffer_handle = handle;
+  ili9341.transfer_done = false;
+
+#if 0
+  for (int i = 0; i < 320*240; ++i) {
+    uint8_t *ptr = ili9341_nonstop_refresh_dma_buffer + i * 2;
+    uint8_t tmp;
+    tmp = ptr[0];
+    ptr[0] = ptr[1];
+    ptr[1] = tmp;
+  }
+#endif
 
   *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
   bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
@@ -505,7 +533,7 @@ int ili9341_nonstop_refresh_poke(void)
 }
 
 void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
-  void (*dma_done_cb_irq)(void))
+  void (*dma_done_cb_irq)(uint32_t))
 {
   size_t i;
 
@@ -715,17 +743,21 @@ void ili9341_init(void)
 /* row address order */
 #define ILI9341_CMD_MEM_ACCESS_CONTROL_MY  (1<<7)
   data[0] = ILI9341_CMD_MEM_ACCESS_CONTROL_BGR
+    | ILI9341_CMD_MEM_ACCESS_CONTROL_MX
+    | ILI9341_CMD_MEM_ACCESS_CONTROL_MY
 #ifndef DISPLAY_MODE_PORTRAIT
     | ILI9341_CMD_MEM_ACCESS_CONTROL_MV
 #endif
   ;
   SEND_CMD_DATA(ILI9341_CMD_MEM_ACCESS_CONTROL, data, 1);
 
+  // data[0] = 0b101 | (0b101 << 4);
+  // SEND_CMD_DATA(ILI9341_CMD_SET_PIXEL_FORMAT, data, 1);
+
   SEND_CMD(ILI9341_CMD_SLEEP_OUT);
   os_wait_ms(120);
   SEND_CMD(ILI9341_CMD_DISPLAY_ON);
   os_wait_ms(120);
   ili9341_setup_dma_control_blocks();
-
   ili9341_fill_screen(ili9341.gpio.pin_dc);
 }
