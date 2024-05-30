@@ -268,9 +268,11 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui,
   uint64_t page_idx_periph_start = PERIPH_ADDR_RANGE_START / MMU_PAGE_GRANULE;
   uint64_t page_idx_periph_end = PERIPH_ADDR_RANGE_END / MMU_PAGE_GRANULE;
 
-  mmui->pagetable_start = (uint64_t *)&__pagetable_start;
-  mmui->pagetable_end = (uint64_t *)&__pagetable_end;
-  section_size = &__pagetable_end - &__pagetable_start;
+  asm volatile ("ldr %0, =__pagetable_start\n" :"=r"(mmui->pagetable_start));
+  asm volatile ("ldr %0, =__pagetable_end\n" :"=r"(mmui->pagetable_end));
+
+  section_size = (uint8_t *)mmui->pagetable_end
+    - (uint8_t *)mmui->pagetable_start;
 
   mmui->virtual_mem_size = max_mem_size;
   mmui->num_pages = (max_mem_size + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE;
