@@ -153,7 +153,7 @@ uint64_t dma_memory_get_end_addr(void)
   return (uint64_t)dma_memory_end;
 }
 
-void *dma_alloc(size_t sz)
+void *dma_alloc(size_t sz, bool zero)
 {
   struct dma_mem_header *c;
   struct dma_mem_area *a;
@@ -169,7 +169,10 @@ void *dma_alloc(size_t sz)
   c = list_first_entry(&a->free_list, struct dma_mem_header, list);
   list_del(&c->list);
   list_add_tail(&c->list, &a->busy_list);
-  memset(c->addr, 0, sz);
+
+  if (zero)
+    memset(c->addr, 0, sz);
+
   return c->addr;
 }
 

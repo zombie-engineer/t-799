@@ -1,14 +1,14 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 void kmalloc_init(void);
 void *kmalloc(size_t sz);
 void *kzalloc(size_t sz);
-void *dma_alloc(size_t sz);
 void kfree(void *);
 void dma_memory_init(void);
-void *dma_alloc(size_t sz);
+void *dma_alloc(size_t sz, bool zero);
 void dma_free(void *);
 
 uint64_t dma_memory_get_start_addr(void);

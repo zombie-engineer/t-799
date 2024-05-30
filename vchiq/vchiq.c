@@ -2645,7 +2645,7 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
     p->minimum_buffer.size, p->name);
 
   for (i = 0; i < num_buffers; ++i) {
-    dma_buf = dma_alloc(dma_buf_size);
+    dma_buf = dma_alloc(dma_buf_size, 0);
     if (!dma_buf) {
       MMAL_ERR("Failed to allocate dma buffer");
       return ERR_RESOURCE;
@@ -3066,8 +3066,8 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   uint8_t *display_dma_buf_b;
   size_t display_dma_buf_size;
 
-  cam.io_buffers[0] = dma_alloc(H264BUF_SIZE);
-  cam.io_buffers[1] = dma_alloc(H264BUF_SIZE);
+  cam.io_buffers[0] = dma_alloc(H264BUF_SIZE, 0);
+  cam.io_buffers[1] = dma_alloc(H264BUF_SIZE, 0);
 
   err = ili9341_nonstop_refresh_init(mmal_cb_on_buffer_done_irq);
   CHECK_ERR("Failed to init display in non-stop refresh mode");
@@ -3251,7 +3251,7 @@ void vchiq_init(void)
   slot_mem_size = 16 * VCHIQ_SLOT_SIZE;
   frag_mem_size = fragment_size * MAX_FRAGMENTS;
 
-  slot_mem = dma_alloc(slot_mem_size + frag_mem_size);
+  slot_mem = dma_alloc(slot_mem_size + frag_mem_size, 1);
   slot_phys = (uint32_t)(uint64_t)slot_mem;
   if (!slot_mem) {
     printf("failed to allocate DMA memory");

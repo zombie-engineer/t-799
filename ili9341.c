@@ -438,13 +438,13 @@ int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t))
     DISPLAY_HEIGHT);
   SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
 
-  ili9341_nonstop_refresh_dma_buffer_a = dma_alloc(NUM_BYTES_PER_FRAME);
+  ili9341_nonstop_refresh_dma_buffer_a = dma_alloc(NUM_BYTES_PER_FRAME, 0);
   if (!ili9341_nonstop_refresh_dma_buffer_a) {
     printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
     return ERR_RESOURCE;
   }
 
-  ili9341_nonstop_refresh_dma_buffer_b = dma_alloc(NUM_BYTES_PER_FRAME);
+  ili9341_nonstop_refresh_dma_buffer_b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
   if (!ili9341_nonstop_refresh_dma_buffer_b) {
     printf("Failed to allocate DMA buffer for ili9341 nonstop refresh\r\n");
     return ERR_RESOURCE;
@@ -679,7 +679,7 @@ static void ili9341_setup_dma_control_blocks(void)
     "Failed to request DMA channel for SPI TX");
 
   ili9341.spi_dma_tx_headers = dma_alloc(
-    MAX(sizeof(*ili9341.spi_dma_tx_headers) * (NUM_DMA_TRANSFERS + 1), 32));
+    MAX(sizeof(*ili9341.spi_dma_tx_headers) * (NUM_DMA_TRANSFERS + 1), 32), 0);
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     ili9341.header_cbs[i] = bcm2835_dma_reserve_cb();

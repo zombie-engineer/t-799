@@ -308,7 +308,7 @@ void bcm2835_dma_init(void)
   size_t total_size = 256 * (BCM2835_DMA_NUM_SCBS + 1);
   uint64_t addr;
 
-  bcm2835_dma.cb_area = dma_alloc(total_size);
+  bcm2835_dma.cb_area = dma_alloc(total_size, 1);
   if (!bcm2835_dma.cb_area)
     return;
 
