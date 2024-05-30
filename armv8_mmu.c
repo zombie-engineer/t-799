@@ -116,6 +116,7 @@ struct mmu_info {
 
   int memattr_idx_normal;
   int memattr_idx_device;
+  int memattr_idx_dma;
 };
 
 typedef enum {
@@ -314,7 +315,7 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_s
     mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_normal);
 
   for (i = page_idx_dma_start; i < page_idx_dma_end; ++i)
-    mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_device);
+    mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_dma);
 
   for (i = page_idx_periph_start; i < page_idx_periph_end; ++i)
     mmui->l3_pte_base[i] = mmu_make_page_desc(i, mmui->memattr_idx_device);
@@ -338,6 +339,8 @@ NO_MMU int mmu_get_num_paddr_bits(void)
   MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA),\
   MEMATTR_WRITEBACK_NONTRANS(MEMATTR_RA, MEMATTR_WA))
 
+#define ARMV8_MAIR_DMA_MEM MEMATTR_DEVICE_GRE
+
 NO_MMU void mmu_init(uint64_t dma_memory_start, uint64_t dma_memory_end)
 {
   struct armv8_mair mair = { 0 };
@@ -347,9 +350,11 @@ NO_MMU void mmu_init(uint64_t dma_memory_start, uint64_t dma_memory_end)
 
   mmu.memattr_idx_normal = 0;
   mmu.memattr_idx_device = 1;
+  mmu.memattr_idx_dma    = 2;
 
   mair.memattrs[mmu.memattr_idx_normal] = ARMV8_MAIR_NORMAL_MEM;
   mair.memattrs[mmu.memattr_idx_device] = ARMV8_MAIR_DEVICE_MEM;
+  mair.memattrs[mmu.memattr_idx_dma] = ARMV8_MAIR_DMA_MEM;
 
   asm volatile(
       "msr mair_el1, %0\n" :: "r"(mair.value)
