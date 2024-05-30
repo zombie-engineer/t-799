@@ -39,7 +39,7 @@
  *             |        |        |        |                     \_
  *             |        |        |        |                       \_
  *             |        |        |        |                         \
- *             |        |        |     (table 3)[x]->(page address)+([11:0]offset)
+ *             |        |        |     (table 3)[x]->(page address)+[11:0]off
  *             |        |        |
  *             |        |       (table 2)[x]->(table 3)[x]
  *             |        |
@@ -49,7 +49,7 @@
  *
  *
  *
- * num entries in table = 2**(n - 3) = 2 ** 9 = 512 (3bits - are 8byte alignement)
+ * num entries in table = 2**(n - 3) = 2 ** 9 = 512 (3bits - are 8byte align)
  * 4096 - 2**12
  * OA[11:0] = IA[11:0]
  * 48 - 11 = 37
@@ -254,8 +254,8 @@ static inline NO_MMU uint64_t mmu_make_page_desc(uint64_t page_idx,
 }
 
 
-static NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_size,
-    uint64_t dma_mem_start, uint64_t dma_mem_end)
+static NO_MMU void mmu_page_table_init(struct mmu_info *mmui,
+  uint32_t max_mem_size, uint64_t dma_mem_start, uint64_t dma_mem_end)
 {
   int i;
   uint64_t desc;
@@ -288,9 +288,15 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui, uint32_t max_mem_s
   mmui->num_l3_pages = NUM_DESCRIPTOR_PAGES(mmui->num_l3_ptes);
 
   mmui->l0_pte_base = mmui->pagetable_start;
-  mmui->l1_pte_base = mmui->l0_pte_base + mmui->num_l0_pages * MMU_PAGE_GRANULE / 8;
-  mmui->l2_pte_base = mmui->l1_pte_base + mmui->num_l1_pages * MMU_PAGE_GRANULE / 8;
-  mmui->l3_pte_base = mmui->l2_pte_base + mmui->num_l2_pages * MMU_PAGE_GRANULE / 8;
+  mmui->l1_pte_base = mmui->l0_pte_base +
+    mmui->num_l0_pages * MMU_PAGE_GRANULE / 8;
+
+  mmui->l2_pte_base = mmui->l1_pte_base +
+    mmui->num_l1_pages * MMU_PAGE_GRANULE / 8;
+
+  mmui->l3_pte_base = mmui->l2_pte_base +
+    mmui->num_l2_pages * MMU_PAGE_GRANULE / 8;
+
   mmui->page_table_real_end = mmui->l3_pte_base + mmui->num_l3_ptes;
 
   if (mmui->page_table_real_end > mmui->pagetable_end)
@@ -405,7 +411,8 @@ static inline void par_to_string(uint64_t par, char *par_desc,
     sh_str);
 }
 
-static inline void mair_to_string(char attr, char *attr_desc, int attr_desc_len)
+static inline void mair_to_string(char attr, char *attr_desc,
+  int attr_desc_len)
 {
   int i, n = 0;
   if (!attr_desc_len)
@@ -447,10 +454,12 @@ static inline void mair_to_string(char attr, char *attr_desc, int attr_desc_len)
             n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Back Trans");
           break;
           case 0x8:
-            n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Thr Non-Trans");
+            n += snprintf(attr_desc + n, attr_desc_len - n,
+              " Wr-Thr Non-Trans");
           break;
           case 0xc:
-            n += snprintf(attr_desc + n, attr_desc_len - n, " Wr-Back Non-Trans");
+            n += snprintf(attr_desc + n, attr_desc_len - n,
+              " Wr-Back Non-Trans");
           break;
         }
         if (nattr & 1)
