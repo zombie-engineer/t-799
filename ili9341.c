@@ -357,14 +357,14 @@ static inline void ili9341_set_region_coords(int gpio_pin_dc, uint16_t x0,
     ".unreq val3\n"\
     ::"r"(__dst), "r"(__count), "r"(__v1), "r"(__v2), "r"(__v3): "x0", "x1", "x2", "x3", "x4")
 
-static char ili9341_canvas[DISPLAY_WIDTH * DISPLAY_HEIGHT * 3] ALIGNED(64);
+static char ili9341_canvas[DISPLAY_WIDTH * DISPLAY_HEIGHT * BYTES_PER_PIXEL] ALIGNED(64);
 
 static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
-  int x1, int y1, char r, char g, char b)
+  int x1, int y1, uint8_t r, uint8_t g, uint8_t b)
 {
   int y, x;
   int local_width, local_height;
-  char *c;
+  uint8_t *c;
   uint64_t v1, v2, v3, iters;
 
   local_width = x1 - x0;
