@@ -9,7 +9,7 @@ struct irq_desc {
 };
 
 static BSS_NOMMU struct irq_desc irq_table[NUM_IRQS];
-static BSS_NOMMU struct irq_desc irq_local;
+BSS_NOMMU struct irq_desc irq_local;
 
 int irq_set(int irqnr, irq_func func)
 {
