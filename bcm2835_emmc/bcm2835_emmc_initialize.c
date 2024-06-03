@@ -177,10 +177,10 @@ static inline int bcm2835_emmc_reset_handle_scr(uint32_t rca, uint32_t *scr,
   char *s = (char *)scr;
   uint32_t control0;
   uint32_t scr_le32 = (s[0]<<24)| (s[1]<<16) | (s[2]<<8) | s[3];
-  int sd_spec = BITS_EXTRACT32(scr_le32, (56-32), 4);
-  int sd_spec3 = BITS_EXTRACT32(scr_le32, (47-32), 1);
-  int sd_spec4 = BITS_EXTRACT32(scr_le32, (42-32), 1);
-  int sd_specx = BITS_EXTRACT32(scr_le32, (38-32), 4);
+  int sd_spec   = BITS_EXTRACT32(scr_le32, (56-32), 4);
+  int sd_spec3  = BITS_EXTRACT32(scr_le32, (47-32), 1);
+  int sd_spec4  = BITS_EXTRACT32(scr_le32, (42-32), 1);
+  int sd_specx  = BITS_EXTRACT32(scr_le32, (38-32), 4);
   int bus_width = BITS_EXTRACT32(scr_le32, (48-32), 4);
 
   BCM2835_EMMC_LOG("SCR: sd_spec:%d, sd_spec3:%d, sd_spec4:%d, sd_specx:%d",
