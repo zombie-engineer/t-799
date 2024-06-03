@@ -188,7 +188,7 @@ static void kernel_run(void)
   panic();
 }
 
-void main(void)
+void SECTION(".text") main(void)
 {
   kernel_init();
   kernel_run();
