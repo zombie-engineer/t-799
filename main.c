@@ -172,10 +172,12 @@ static void test_dma(void)
 static void kernel_run(void)
 {
   struct task *t;
+#if 0
   mmu_print_va(0x0000000001ff1000, 1);
   mmu_print_va(0xffff000001ff0000, 1);
   mmu_print_va(0xffff000001ff1000, 1);
   mmu_print_va(0xffff00000201c000, 1);
+#endif
   // test_dma();
 
   printf("Hello %d\r\n", myvar);

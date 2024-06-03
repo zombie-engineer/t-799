@@ -491,6 +491,7 @@ bool mmu_get_pddr(uint64_t va, uint64_t *pa)
   return true;
 }
 
+#if 0
 void mmu_print_va(uint64_t addr, int verbose)
 {
   uint64_t va = addr;
@@ -510,3 +511,4 @@ void mmu_print_va(uint64_t addr, int verbose)
     printf("-------: MEMATTR:%02x %s" __endline, memattr, attr_desc);
   }
 }
+#endif
