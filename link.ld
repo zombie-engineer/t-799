@@ -129,4 +129,5 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   __dma_memory_end = __dma_memory_start + SIZEOF(.dma_memory);
   __dma_memory_start_phys = __dma_memory_start - KERNEL_ADDR_SPACE_START;
   __dma_memory_end_phys = __dma_memory_end - KERNEL_ADDR_SPACE_START;
+  __dma_memory_size = SIZEOF(.dma_memory);
 }
