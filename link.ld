@@ -94,10 +94,10 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   .rodata KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     *.o(.rodata*)
   }
-  PHY_ADDR += SIZEOF(.rodata);
+  PHY_ADDR = ALIGN(PHY_ADDR + SIZEOF(.rodata), 16);
 
   .bss  KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
-    __bss_start = ALIGN(16);
+    __bss_start = .;
     *(.bss)
     *(COMMON)
     __bss_end = ALIGN(16);
