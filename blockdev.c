@@ -83,7 +83,7 @@ void blockdev_scheduler_fn(void)
     irq_disable();
     blockdev_sched.nr_done++;
     irq_enable();
-    printf("IO %d done\r\n", next_req);
+    // printf("IO %d done\r\n", next_req);
     os_event_notify(&blockdev_sched.done_event);
     next_req++;
   }

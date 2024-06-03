@@ -209,8 +209,10 @@ void OPTIMIZED dma_memory_init(void)
   ca_end = ca + ARRAY_SIZE(dma_chunk_areas);
 
   for (; ca < ca_end; ca++) {
+#if 0
     printf("dma_init: init area for chunks (sz: %d,n: %d at %016lx)\r\n",
       1<<ca->chunk_sz_log, ca->num_chunks, ca->chunks_mem);
+#endif
 
     INIT_LIST_HEAD(&ca->free_list);
     INIT_LIST_HEAD(&ca->busy_list);
@@ -225,7 +227,7 @@ void OPTIMIZED dma_memory_init(void)
       list_add_tail(&c->list, &ca->free_list);
       c->addr = chunk_mem;
       chunk_mem += (1 << ca->chunk_sz_log);
-      printf("dma_init:   chunk %d at addr %016lx\r\n", i, c->addr);
+      // printf("dma_init:   chunk %d at addr %016lx\r\n", i, c->addr);
       ++i;
     }
   }

@@ -183,7 +183,7 @@ extern struct bcm2835_emmc bcm2835_emmc;
 
 void bcm2835_emmc_dma_irq_callback(void)
 {
-  printf("dma_irq cb\r\n");
+  // printf("dma_irq cb\r\n");
   ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
 }
 
@@ -228,10 +228,12 @@ void bcm2835_emmc_irq_handler(void)
 
   r = ioreg32_read(BCM2835_EMMC_INTERRUPT);
 
+#if 0
   if (emmc_should_log) {
     printf("bcm2835_emmc_irq_handler: CMD%d(%08x),i:%d,r:%08x\r\n",
       CUR_CMD_IDX, CUR_CMD_REG, bcm2835_emmc.io.num_irqs, r);
   }
+#endif
 
   ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
 
@@ -242,7 +244,7 @@ void bcm2835_emmc_irq_handler(void)
   }
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE) {
-    printf(",CMD_DONE");
+    // printf(",CMD_DONE");
 
     if (!CUR_CMD_ISDATA) {
       bcm2835_emmc.io.err = SUCCESS;
@@ -251,7 +253,7 @@ void bcm2835_emmc_irq_handler(void)
   }
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE) {
-    printf(",DATA_DONE");
+    // printf(",DATA_DONE");
     bcm2835_emmc.io.err = SUCCESS;
     cmd_done = true;
   }
@@ -259,9 +261,11 @@ void bcm2835_emmc_irq_handler(void)
   if (cmd_done)
     os_event_notify(&bcm2835_emmc_event);
 
+#if 0
   if (emmc_should_log)
     printf("\r\nbcm2835_emmc_irq_handler: CMD%d,after:%08x,done:%d\r\n",
       CUR_CMD_IDX, ioreg32_read(BCM2835_EMMC_INTERRUPT), cmd_done);
+#endif
 }
 
 static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
