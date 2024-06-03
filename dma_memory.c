@@ -54,9 +54,11 @@ DMA_MEM_GROUP(7 , 64, 64);
 DMA_MEM_GROUP(9 , 64, 1024);
 DMA_MEM_GROUP(12, 32, 4096);
 DMA_MEM_GROUP(16, 64, 4096);
-DMA_MEM_GROUP(19, 32, 4096);
+DMA_MEM_GROUP(19, 512, 4096);
 DMA_MEM_GROUP(21, 8 , 4096);
 DMA_MEM_GROUP(22, 4 , 4096);
+DMA_MEM_GROUP(23, 2 , 4096);
+DMA_MEM_GROUP(24, 2 , 4096);
 
 static struct dma_mem_area dma_chunk_areas[] = {
   DMA_MEM_AREA(6),
@@ -66,7 +68,9 @@ static struct dma_mem_area dma_chunk_areas[] = {
   DMA_MEM_AREA(16),
   DMA_MEM_AREA(19),
   DMA_MEM_AREA(21),
-  DMA_MEM_AREA(22)
+  DMA_MEM_AREA(22),
+  DMA_MEM_AREA(23),
+  DMA_MEM_AREA(24)
 };
 
 static int logsize_to_area_idx[] = {
@@ -89,6 +93,9 @@ static int logsize_to_area_idx[] = {
   6, /* 20: 1048576 -> 2097152 */
   6, /* 21: 2097152 -> 2097152 */
   7, /* 22: 4194304 -> 4194304 */
+  8, /* 23: 8388608 -> 8388608 */
+  9, /* 24: 16777216 -> 16777216 */
+
 };
 
 static inline int chunk_area_get_szlog(struct dma_mem_area *a)
