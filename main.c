@@ -134,7 +134,10 @@ static void vchiq_main(void)
   // err = fat32_create(&fat32fs, "/test", true, false);
   vchiq_set_blockdev(bd);
 
-  ili9341_init();
+  err = ili9341_init();
+  if (err != SUCCESS) {
+    printf("Failed to init ili9341 display, err: %d\r\n", err);
+  }
   vchiq_init();
 out:
   os_exit_current_task();

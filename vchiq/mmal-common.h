@@ -50,15 +50,13 @@ struct mmal_buffer {
   void *buffer; /* buffer pointer */
   unsigned long buffer_size; /* size of allocated buffer */
 
-  struct mmal_msg_context *msg_context;
+  /* VCSM handle having imported the dmabuf */
+  uint32_t vcsm_handle;
+  /* */
+  uint32_t user_handle;
 
-  struct dma_buf *dma_buf;/* Exported dmabuf fd from videobuf2 */
-  void *vcsm_handle;  /* VCSM handle having imported the dmabuf */
-  uint32_t vc_handle;    /* VC handle to that dmabuf */
-
-  uint32_t cmd;    /* MMAL command. 0=data. */
   unsigned long length;
-  uint32_t mmal_flags;
+  uint32_t flags;
   int64_t dts;
   int64_t pts;
 };

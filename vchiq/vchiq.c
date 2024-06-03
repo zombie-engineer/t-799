@@ -179,12 +179,17 @@ struct vchiq_mmal_port {
    * we can release them to the remote side (vcos)
    */
   struct list_head buffers_free;
+  size_t nr_free;
 
   /*
    * Buffers that are released to remote side (vcos). At some point they will
    * be sent to us by BUFFER_TO_HOST message
    */
   struct list_head buffers_busy;
+  size_t nr_busy;
+
+  struct list_head buffers_pending;
+  size_t nr_pending;
 
   /*
    * Buffers that are send to use by BUFFER_TO_HOST and are currently being
@@ -192,6 +197,8 @@ struct vchiq_mmal_port {
    * buffers_free
    */
   struct list_head buffers_in_process;
+  size_t nr_in_process;
+
 
   /* callback context */
   void *cb_ctx;
@@ -591,40 +598,103 @@ static inline void vchiq_init_fragments(void *baseaddr, int num_fragments,
   f->next = NULL;
 }
 
-struct mmal_io_work *mmal_io_work_pop(void)
+static struct vchiq_mmal_port *port_to_sdcard = NULL;
+
+static void camera_io_process_new_data(const uint8_t *data,
+  size_t total_bytes);
+
+static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
+  struct mmal_buffer *b);
+
+static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
 {
   int irqflags;
-  struct mmal_io_work *w = NULL;
+  int err;
+  struct mmal_buffer *b;
+  uint64_t vcos_systime;
+  bool buffer_processed = false;
 
-  disable_irq_save_flags(irqflags);
-  if (list_empty(&mmal_io_work_list)) {
+  // printf("process_port_buffers: %p\r\n", p);
+  if (list_empty(&p->buffers_pending))
+    goto buffer_return;
+
+  b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
+  // printf("process_port_buffers: buffer: %p->%p, user:%d\r\n", b, b->buffer,
+  //  b->user_handle);
+
+  if (p != port_to_display) {
+    camera_io_process_new_data(b->buffer, b->length);
+    buffer_processed = true;
+  }
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {
+  }
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {
+  }
+
+  /* Buffer payload */
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
+    if (p == port_to_display) {
+      bool should_draw = false;
+
+      /* Drop all unprocessed buffers except for the last one */
+      disable_irq_save_flags(irqflags);
+
+      while(1) {
+        list_del(&b->list);
+        if (list_empty(&p->buffers_pending))
+          break;
+
+        // printf("process_port_buffers: skipping buf: %p\r\n", b);
+        list_add_tail(&b->list, &p->buffers_free);
+        b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
+      }
+
+      should_draw = list_empty(&p->buffers_in_process);
+      if (should_draw)
+        list_add_tail(&b->list, &p->buffers_in_process);
+
+      restore_irq_flags(irqflags);
+
+      // last_draw_start = sched_get_time_us();
+      if (!should_draw)
+        goto buffer_return;
+
+      err = ili9341_draw_dma_buf(b->user_handle);
+      if (err != SUCCESS) {
+       //  printf("dbuf skipped\r\n");
+        buffer_processed = true;
+      }
+    }
+  }
+
+  if (buffer_processed) {
+    disable_irq_save_flags(irqflags);
+    list_del(&b->list);
+    list_add_tail(&b->list, &p->buffers_free);
     restore_irq_flags(irqflags);
-    return NULL;
   }
 
-  w = list_first_entry(&mmal_io_work_list, typeof(*w), list);
-  list_del_init(&w->list);
-  restore_irq_flags(irqflags);
-  wmb();
-  return w;
-}
-
-static struct mmal_io_work *mmal_io_work_alloc(void)
-{
-  struct mmal_io_work *w = NULL;
-
-  int idx = bitmap_set_next_free(&mmal_state.work_bitmap);
-  if (idx != -1) {
-    w = &mmal_state.work_array[idx];
-    w->idx = idx;
+buffer_return:
+  while (!list_empty(&p->buffers_free)) {
+    b = list_first_entry(&p->buffers_free, struct mmal_buffer, list);
+#if 0
+  MMAL_DEBUG("Submitting buffer %08x to port:%s",
+    (uint32_t)(uint64_t)b->vcsm_handle, p->name);
+#endif
+    disable_irq_save_flags(irqflags);
+    list_del(&b->list);
+    list_add_tail(&b->list, &p->buffers_busy);
+    p->nr_busy++;
+    restore_irq_flags(irqflags);
+    err = mmal_port_buffer_send_one(p, b);
+    CHECK_ERR("Failed to submit buffer");
   }
 
-  return w;
-}
-
-static void mmal_io_work_free(struct mmal_io_work *w)
-{
-  bitmap_clear_entry(&mmal_state.work_bitmap, w->idx);
+  return SUCCESS;
+out_err:
+  return err;
 }
 
 static void vchiq_io_thread(void)
@@ -633,14 +703,8 @@ static void vchiq_io_thread(void)
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
-    while(1) {
-      w = mmal_io_work_pop();
-      if (!w)
-        break;
-
-      w->fn(w->component, w->port, w->buffer_header, w->buffer_handle);
-      mmal_io_work_free(w);
-    }
+    mmal_process_port_buffers(port_to_sdcard);
+    mmal_process_port_buffers(port_to_display);
   }
 }
 
@@ -877,7 +941,8 @@ out_err:
   return err;
 }
 
-void vchiq_event_wait(struct event *ev, struct vchiq_remote_event *event)
+static void vchiq_event_wait(struct event *ev,
+  struct vchiq_remote_event *event)
 {
   if (!event->fired) {
     event->armed = 1;
@@ -1137,32 +1202,6 @@ static struct vchiq_service_common *vchiq_alloc_open_service(
   return service;
 }
 
-static int OPTIMIZED mmal_io_work_push(struct vchiq_mmal_component *c,
-  struct vchiq_mmal_port *p, struct mmal_buffer_header *buf_header,
-  uint32_t buffer_handle, mmal_io_fn fn)
-{
-  int irqflags;
-  struct mmal_io_work *w;
-
-  w = mmal_io_work_alloc();
-  if (!w) {
-    MMAL_ERR("Failed to allocate io work");
-    return ERR_GENERIC;
-  }
-
-  w->component = c;
-  w->port = p;
-  w->buffer_header = buf_header;
-  w->fn = fn;
-  w->buffer_handle = buffer_handle;
-  wmb();
-  disable_irq_save_flags(irqflags);
-  list_add_tail(&w->list, &mmal_io_work_list);
-  restore_irq_flags(irqflags);
-  os_event_notify(&mmal_io_work_waitflag);
-  return SUCCESS;
-}
-
 static inline struct mmal_buffer *mmal_port_get_buffer_from_header(
   struct vchiq_mmal_port *p, struct list_head *buffers, uint32_t handle)
 {
@@ -1171,7 +1210,7 @@ static inline struct mmal_buffer *mmal_port_get_buffer_from_header(
 
   disable_irq_save_flags(irqflags);
   list_for_each_entry(b, buffers, list) {
-    if (handle == (uint32_t)(uint64_t)b->vcsm_handle) {
+    if (handle == b->vcsm_handle) {
       restore_irq_flags(irqflags);
       return b;
     }
@@ -1296,7 +1335,8 @@ static const char *const mmal_msg_type_names[] = {
   "HOST_LOG",
 };
 
-static inline void *mmal_check_reply_msg(struct mmal_msg *rmsg, int msg_type)
+static inline void *mmal_check_reply_msg(struct mmal_msg *rmsg,
+  int msg_type)
 {
   if (rmsg->h.type != msg_type) {
     MMAL_ERR("mmal msg expected type %s, received: %s",
@@ -1364,7 +1404,7 @@ out:
   buf[n] = 0;
 }
 
-static inline void mmal_buffer_print_meta(uint64_t systime,
+static inline void mmal_buffer_print_meta(size_t nr_busy,
   struct mmal_buffer_header *h, const char *tag)
 {
   int irqflags;
@@ -1389,8 +1429,8 @@ static inline void mmal_buffer_print_meta(uint64_t systime,
   }
 
   disable_irq_save_flags(irqflags);
-  MMAL_INFO("%d.%d:%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s', pts:%d.%d",
-    systime / 1000, systime % 1000,
+  MMAL_INFO("%d:%s:%08x,a:%08x,sz:%d/%d,f:%0x,'%s', pts:%d.%d",
+    nr_busy,
     tag, h->data, h->user_data, h->alloc_size, h->length, h->flags, flagsbuf,
     pts_sec, pts_frac);
   restore_irq_flags(irqflags);
@@ -1422,7 +1462,7 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   m->buffer_header.cmd = 0;
   m->buffer_header.user_data =(uint32_t)(uint64_t)b;
   if (p->zero_copy)
-    m->buffer_header.data = (uint32_t)(uint64_t)b->vcsm_handle;
+    m->buffer_header.data = b->vcsm_handle;
   else
     m->buffer_header.data = ((uint32_t)(uint64_t)b->buffer) | 0xc0000000;
   m->buffer_header.alloc_size = b->buffer_size;
@@ -1436,18 +1476,15 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
   } else {
     m->buffer_header.length = b->length;
     m->buffer_header.offset = 0;
-    m->buffer_header.flags = b->mmal_flags;
+    m->buffer_header.flags = b->flags;
     m->buffer_header.pts = b->pts;
     m->buffer_header.dts = b->dts;
   }
 
+  mmal_buffer_print_meta(p->nr_busy, &m->buffer_header, "from_host");
   memset(&m->buffer_header_type_specific, 0,
     sizeof(m->buffer_header_type_specific));
   m->payload_in_message = 0;
-
-#if 0
-  mmal_buffer_print_meta(&m->buffer_header, "submitted");
-#endif
 
   VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC();
   return SUCCESS;
@@ -1580,7 +1617,7 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-#define IO_MIN_SECTORS 128
+#define IO_MIN_SECTORS (8192)
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
 
 struct camera {
@@ -1640,8 +1677,8 @@ static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
     buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
     io_sz = MIN(bytes_left, buffer_left);
 
-  putc('+');
 #if 0
+  putc('+');
     MMAL_INFO("%d +%d bytes %08x %08x", cam.current_buf_ptr - cam.current_buf,
       io_sz, ((uint32_t *)b->buffer)[0],
       ((uint32_t *)b->buffer)[1]);
@@ -1671,12 +1708,13 @@ static int mmal_port_io_work_display_buf_release(
     return ERR_GENERIC;
   }
 
-  MMAL_DEBUG("Submitting buffer %08x to port:%s",
-    (uint32_t)(uint64_t)b->vcsm_handle, p->name);
+  MMAL_DEBUG("Submitting buffer %08x to port:%s", b->vcsm_handle, p->name);
 
   disable_irq_save_flags(irqflags);
   list_del(&b->list);
   list_add_tail(&b->list, &p->buffers_busy);
+  p->nr_busy++;
+
   restore_irq_flags(irqflags);
   err = mmal_port_buffer_send_one(p, b);
   if (err != SUCCESS) {
@@ -1688,61 +1726,24 @@ static int mmal_port_io_work_display_buf_release(
 uint64_t last_draw_time;
 uint64_t last_draw_start;
 
-static void OPTIMIZED mmal_cb_on_buffer_done_irq(uint32_t buffer_handle)
+static void OPTIMIZED mmal_cb_on_buffer_done_irq(uint32_t buf_handle)
 {
   // last_draw_time = sched_get_time_us() - last_draw_start;
-  // printf("last_draw: %d\r\n", last_draw_time);
+  // printf("buf_handle: %d, last_draw: %d\r\n", buf_handle, last_draw_time);
 
-  mmal_io_work_push(port_to_display->component, port_to_display, NULL,
-    buffer_handle, mmal_port_io_work_display_buf_release);
-}
+  struct vchiq_mmal_port *p = port_to_display;
+  struct mmal_buffer *b = NULL;
 
-static int mmal_port_buffer_io_work(struct vchiq_mmal_component *c,
-  struct vchiq_mmal_port *p, struct mmal_buffer_header *h, uint32_t handle)
-{
-  int irqflags;
-  int err;
-  struct mmal_buffer *b;
-  uint64_t vcos_systime;
-  b = (void *)(uint64_t)(h->user_data | 0xffff000000000000);
-
-#if 0
-  err = mmal_port_get_systime(p, &vcos_systime);
-  CHECK_ERR("Failed to get systime");
-  mmal_buffer_print_meta(vcos_systime, h, p == port_to_display ? "preview" : "encoder");
-#endif
-
-  if (p != port_to_display)
-    camera_io_process_new_data(b->buffer, h->length);
-
-  if (h->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) { }
-
-  if (h->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) { }
-
-  /* Buffer payload */
-  if (h->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    if (p == port_to_display) {
-      last_draw_start = sched_get_time_us();
-      if (ili9341_nonstop_refresh_poke(h->data) == SUCCESS)
-        return SUCCESS;
+  list_for_each_entry(b, &p->buffers_in_process, list) {
+    if (buf_handle == b->user_handle) {
+      list_del(&b->list);
+      list_add_tail(&b->list, &p->buffers_free);
+      os_event_notify(&mmal_io_work_waitflag);
+      return;
     }
   }
 
-buffer_return:
-#if 0
-  MMAL_DEBUG("Submitting buffer %08x to port:%s",
-    (uint32_t)(uint64_t)b->vcsm_handle, p->name);
-#endif
-  disable_irq_save_flags(irqflags);
-  list_del(&b->list);
-  list_add_tail(&b->list, &p->buffers_busy);
-  restore_irq_flags(irqflags);
-  err = mmal_port_buffer_send_one(p, b);
-  CHECK_ERR("Failed to submit buffer");
-
-  return SUCCESS;
-out_err:
-  return err;
+  MMAL_ERR("Failed to find display buffer\r\n");
 }
 
 static struct vchiq_mmal_port *mmal_port_get_by_handle(
@@ -1793,6 +1794,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 
   struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
     &p->buffers_busy, r->buffer_header.data);
+
   if (!b) {
     while(1)
       asm volatile ("wfe");
@@ -1800,13 +1802,16 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 
   disable_irq_save_flags(irqflags);
   list_del(&b->list);
-  list_add_tail(&b->list, &p->buffers_in_process);
+  b->length = r->buffer_header.length;
+  b->flags = r->buffer_header.flags;
+  list_add_tail(&b->list, &p->buffers_pending);
+  p->nr_busy--;
   restore_irq_flags(irqflags);
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
+  mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
-  err = mmal_io_work_push(p->component, p, &r->buffer_header,
-    r->buffer_header.data, mmal_port_buffer_io_work);
+  os_event_notify(&mmal_io_work_waitflag);
 
 out_err:
   return err;
@@ -2004,6 +2009,9 @@ static int mmal_port_create(struct vchiq_mmal_component *c,
 
   INIT_LIST_HEAD(&p->buffers_free);
   INIT_LIST_HEAD(&p->buffers_busy);
+  p->nr_pending = 0;
+  INIT_LIST_HEAD(&p->buffers_pending);
+  p->nr_busy = 0;
   INIT_LIST_HEAD(&p->buffers_in_process);
 
   return SUCCESS;
@@ -2572,7 +2580,7 @@ static int vc_sm_cma_vchi_import(struct vchiq_service_common *mems_service,
 }
 
 static int vc_sm_cma_import_dmabuf(struct vchiq_service_common *mems_service,
-  struct mmal_buffer *b, void **vcsm_handle)
+  struct mmal_buffer *b, uint32_t *vcsm_handle)
 {
   int err;
   struct vc_sm_import import;
@@ -2595,7 +2603,7 @@ static int vc_sm_cma_import_dmabuf(struct vchiq_service_common *mems_service,
     import.addr, import.size, cur_trans_id, result.trans_id,
     result.res_handle);
 
-  *vcsm_handle = (void*)(uint64_t)result.res_handle;
+  *vcsm_handle = result.res_handle;
 
   return SUCCESS;
 
@@ -2604,7 +2612,8 @@ out_err:
 }
 
 static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
-  struct vchiq_mmal_port *p, void *dma_buf, size_t dma_buf_size)
+  struct vchiq_mmal_port *p, void *dma_buf, size_t dma_buf_size,
+  uint32_t user_handle)
 {
   int err;
   struct mmal_buffer *buf;
@@ -2617,6 +2626,7 @@ static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
 
   buf->buffer = dma_buf;
   buf->buffer_size = dma_buf_size;
+  buf->user_handle = user_handle;
 
   if (p->zero_copy) {
     printf("zero copy\r\n");
@@ -2651,7 +2661,7 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
       return ERR_RESOURCE;
     }
 
-    err = mmal_port_add_buffer(mems_service, p, dma_buf, dma_buf_size);
+    err = mmal_port_add_buffer(mems_service, p, dma_buf, dma_buf_size, 0);
     CHECK_ERR("failed to import dmabuf");
   }
 
@@ -2681,12 +2691,12 @@ static int mmal_port_buffer_send_all(struct vchiq_mmal_port *p)
     b = container_of(node, struct mmal_buffer, list);
     list_del(node);
     list_add_tail(node, &p->buffers_busy);
+    p->nr_busy++;
   }
   restore_irq_flags(irqflags);
 
   list_for_each_entry(b, &p->buffers_busy, list) {
-    MMAL_DEBUG("Submitting buffer %08x to port:%s",
-      (uint32_t)(uint64_t)b->vcsm_handle, p->name);
+    MMAL_DEBUG("Submitting buffer %08x to port:%s", b->vcsm_handle, p->name);
     err = vchiq_mmal_buffer_from_host(p, b);
     CHECK_ERR("failed to submit port buffer to VC");
   }
@@ -2726,23 +2736,25 @@ out_err:
   return err;
 }
 
-static int mmal_apply_ext_buffer(struct vchiq_service_common *mems_service,
-  struct vchiq_mmal_port *p, void *dma_buf_a, void *dma_buf_b,
-  size_t dma_buf_size)
+static int mmal_apply_display_buffers(
+  struct vchiq_service_common *mems_service,
+  struct vchiq_mmal_port *p, struct ili9341_buffer_info *buffers,
+  size_t num_buffers)
 {
+  size_t i;
   int err;
 
-  err = mmal_port_add_buffer(mems_service, p, dma_buf_a, dma_buf_size);
-  CHECK_ERR("Failed to import external dmabuf");
-
-  err = mmal_port_add_buffer(mems_service, p, dma_buf_b, dma_buf_size);
-  CHECK_ERR("Failed to import external dmabuf");
-
-  MMAL_INFO("mmal_apply_ext_buffer: %s: port buf alloc: nr:1, size:%d"
-    " at %08x, port_enabled:%s", p->name,
-    dma_buf_size,
-    dma_buf_a,
-    p->enabled ? "yes" : "no");
+  for (i = 0; i < num_buffers; ++i) {
+    err = mmal_port_add_buffer(mems_service, p, buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle);
+    CHECK_ERR("Failed to import display buffer #%d", i);
+    MMAL_INFO("mmal_apply_display_buffers: port:%s, ptr:%08x, size:%d"
+      " handle:%d, port_enabled:%s",
+      p->name,
+      buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle,
+      p->enabled ? "yes" : "no");
+  }
 
   err = mmal_port_buffer_send_all(p);
   CHECK_ERR("Failed to send buffers to port");
@@ -2786,14 +2798,24 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
     height, 0, 25000000);
 
-  encoder->output[0].current_buffer.num = 16;
-  encoder->output[0].current_buffer.size = encoder->output[0].minimum_buffer.size;
+  size_t requested_buf_size = 256 * 1024;
+  size_t requested_num_buffers = 128;
+
+  encoder->output[0].current_buffer.num = requested_num_buffers;
+  encoder->output[0].current_buffer.size = requested_buf_size;
 
   err = mmal_port_set_format(&encoder->output[0]);
   CHECK_ERR("Failed to set format for preview capture port");
-  if (encoder->output[0].current_buffer.num != 16 ||
-    encoder->output[0].current_buffer.size != encoder->output[0].minimum_buffer.size) {
-    MMAL_ERR("Failed to set encoder buffers to required sizes");
+
+  if (encoder->output[0].current_buffer.num != requested_num_buffers)
+  {
+    MMAL_ERR("Backend refused to set number of buffers to %d, (got %d)",
+      requested_num_buffers, encoder->output[0].current_buffer.num);
+    return ERR_GENERIC;
+  }
+  if (encoder->output[0].current_buffer.size != requested_buf_size) {
+    MMAL_ERR("Backend refused to set number of buffers to %d, (got %d)",
+      requested_buf_size, encoder->output[0].current_buffer.size);
     return ERR_GENERIC;
   }
 
@@ -3021,18 +3043,13 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to retrieve supported encodings from port");
 
   mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
-    MMAL_ENCODING_I420, frame_width, frame_height, 25, 0);
+    MMAL_ENCODING_I420, frame_width, frame_height, 30, 0);
 
   err = mmal_port_set_format(preview);
   CHECK_ERR("Failed to set format for preview capture port");
 
-#if 0
-  err = mmal_port_set_zero_copy(video);
-  CHECK_ERR("Failed to set zero copy param for camera port");
-#endif
-
   mmal_format_set(&video->format, MMAL_ENCODING_OPAQUE,
-    0, frame_width, frame_height, 25, 0);
+    0, frame_width, frame_height, 30, 0);
 
   err = mmal_port_set_format(video);
   CHECK_ERR("Failed to set format for video capture port");
@@ -3053,6 +3070,15 @@ out_err:
   return err;
 }
 
+static inline void debug_display_buffers(const struct ili9341_buffer_info *b,
+  size_t num_buffers)
+{
+  for (size_t i = 0; i < num_buffers; ++i)
+    MMAL_INFO("display buffer: %08x(size %ld),handle:%d", b[i].buffer,
+      b[i].buffer_size,
+      b[i].handle);
+}
+
 static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_service_common *mems_service,
   int frame_width, int frame_height)
@@ -3062,26 +3088,20 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *cam_preview, *cam_video, *cam_still;
   struct vchiq_mmal_port *encoder_in, *encoder_out;
   struct vchiq_mmal_port *resizer_in, *resizer_out;
-  uint8_t *display_dma_buf_a;
-  uint8_t *display_dma_buf_b;
-  size_t display_dma_buf_size;
+  struct ili9341_buffer_info display_buffers[2];
 
+  // printf("Startup camera\r\n");
   cam.io_buffers[0] = dma_alloc(H264BUF_SIZE, 0);
   cam.io_buffers[1] = dma_alloc(H264BUF_SIZE, 0);
 
   err = ili9341_nonstop_refresh_init(mmal_cb_on_buffer_done_irq);
   CHECK_ERR("Failed to init display in non-stop refresh mode");
-  err = ili9341_nonstop_refresh_get_dma_buffer(&display_dma_buf_a,
-    &display_dma_buf_b,
-    &display_dma_buf_size);
-  CHECK_ERR("Failed to get dma buffer for display refresh");
-  MMAL_INFO("Received dma buffer %08x(size %ld) from display",
-    display_dma_buf_a,
-    display_dma_buf_b,
-    display_dma_buf_size);
 
-  err = ili9341_nonstop_refresh_start();
-  CHECK_ERR("Failed to start nonstop refresh");
+  err = ili9341_nonstop_refresh_get_buffers(display_buffers,
+    ARRAY_SIZE(display_buffers));
+  CHECK_ERR("Failed to get display dma buffers");
+
+  debug_display_buffers(display_buffers, ARRAY_SIZE(display_buffers));
 
   cam.current_buf = cam.io_buffers[0];
   cam.current_buf_ptr = cam.current_buf;
@@ -3136,6 +3156,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   /* Enable encoder ports */
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
+  port_to_sdcard = encoder_out;
 
   err = vchiq_mmal_port_enable(encoder_in);
   CHECK_ERR("Failed to enable encoder.IN");
@@ -3155,9 +3176,10 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to enable preview.OUT");
   MMAL_INFO("Preview port enabled %p", cam_preview);
 
-  err = mmal_apply_ext_buffer(mems_service, resizer_out, display_dma_buf_a,
-    display_dma_buf_b, display_dma_buf_size);
-  CHECK_ERR("Failed to add buffers to resizer output");
+  err = mmal_apply_display_buffers(mems_service, resizer_out, display_buffers,
+    ARRAY_SIZE(display_buffers));
+
+  CHECK_ERR("Failed to add display buffers");
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");
@@ -3220,7 +3242,7 @@ static void vchiq_handmade(struct vchiq_state *s, struct vchiq_slot_zero *z)
   smem_service = vchiq_open_smem_service(s);
   BUG_IF(!smem_service, "failed at open smem service");
 
-  err = vchiq_startup_camera(mmal_service, smem_service, 1280, 1024);
+  err = vchiq_startup_camera(mmal_service, smem_service, 1920, 1080);
   BUG_IF(err != SUCCESS, "failed to run camera");
 }
 
