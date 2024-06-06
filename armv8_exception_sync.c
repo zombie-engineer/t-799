@@ -153,12 +153,12 @@ static inline void dump_exception_context(const char *exception)
 
 SYNC_HANDLER(inst_abrt_lo_el)
 {
-  dump_exception_context("intruction abort lower EL");
+  dump_exception_context("instruction abort lower EL");
 }
 
 SYNC_HANDLER(inst_abrt_eq_el)
 {
-  dump_exception_context("intruction abort same EL");
+  dump_exception_context("instruction abort same EL");
 }
 
 SYNC_HANDLER(inst_alignment)
