@@ -39,6 +39,7 @@ OBJS := \
   fs/fs \
   fs/fat32 \
   kmalloc \
+  logger \
   mbox/mbox_routines \
   mbox/mbox \
   mbox/mbox_props \

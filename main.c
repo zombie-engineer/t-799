@@ -96,6 +96,8 @@ char sdcard_buf[2048] = { 0 };
 
 static void kernel_init(void)
 {
+  int err;
+
   uart_pl011_init(115200);
   clear_reboot_request();
   kmalloc_init();
@@ -110,6 +112,9 @@ static void kernel_init(void)
   bcm2835_dma_init();
   bcm2835_emmc_init();
   blockdev_scheduler_init();
+  err = logger_init();
+  if (err != SUCCESS)
+    printf("Failed to init logger, err: %d\r\n", err);
 }
 
 atomic_t test_atomic;
