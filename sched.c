@@ -6,7 +6,10 @@
 #include <bcm2835/bcm2835_systimer.h>
 #include "armv8_cpuctx.h"
 #if 0
+#define SCHED_PRINTF(__fmt, ...) printf(__fmt, #__VA_ARGS__)
 #include <printf.h>
+#else
+#define SCHED_PRINTF(__fmt, ...) ;
 #endif
 
 #define SCHED_MS_PER_TICK 20
@@ -161,8 +164,10 @@ done:
 
 static void __schedule(void)
 {
+  SCHED_PRINTF("__schedule, task:%s\r\n", sched.current->name);
   scheduler_drop_current();
   scheduler_select_next();
+  SCHED_PRINTF("__schedule end, new task:%s\r\n", sched.current->name);
 }
 
 static void sched_timer_irq_cb(void *arg)

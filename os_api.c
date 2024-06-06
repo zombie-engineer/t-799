@@ -4,6 +4,12 @@
 #include "armv8_cpuctx.h"
 #include <common.h>
 
+#if 0
+#include <printf.h>
+#define OSAPI_PUTS(__msg) puts(__msg)
+#else
+#define OSAPI_PUTS(__msg) ;
+#endif
 #define SVC_WAIT 0
 #define SVC_YIELD 1
 #define SVC_WAIT_EVENT 2
@@ -29,7 +35,9 @@ void os_event_init(struct event *ev)
 
 void os_event_clear(struct event *ev)
 {
+  OSAPI_PUTS("[os_event_clear]\r\n");
   ev->ev = 0;
+  OSAPI_PUTS("[os_event_clear end]\r\n");
 }
 
 void os_schedule_task(struct task *t)
@@ -51,17 +59,23 @@ void os_exit_current_task(void)
 
 void os_event_wait(struct event *ev)
 {
+  OSAPI_PUTS("[os_event_wait]\r\n");
   struct task *t = sched_get_current_task();
-  if (ev->ev == 1)
+  if (ev->ev == 1) {
+    OSAPI_PUTS("[os_event_wait end fast]\r\n");
     return;
+  }
 
   asm inline volatile("mov x0, %0\r\nsvc %1"
     :: "r"(ev), "i"(SVC_WAIT_EVENT));
+  OSAPI_PUTS("[os_event_wait end slow]\r\n");
 }
 
 void os_event_notify(struct event *ev)
 {
+  OSAPI_PUTS("[os_event_notify]\r\n");
   sched_event_notify(ev);
+  OSAPI_PUTS("[os_event_notify end]\r\n");
 }
 
 
