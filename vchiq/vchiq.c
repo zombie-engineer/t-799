@@ -889,6 +889,7 @@ static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
       err = vchiq_parse_msg_data(s, localport, remoteport, h);
       break;
     default:
+      // printf("---\r\n");
       err = ERR_INVAL;
       break;
   }
@@ -3183,7 +3184,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");
-  printf("Started video capture, err = %d\r\n", err);
+  MMAL_INFO("Started video capture, err = %d", err);
 
   while(1)
     asm volatile ("wfe");
@@ -3276,7 +3277,7 @@ void vchiq_init(void)
   slot_mem = dma_alloc(slot_mem_size + frag_mem_size, 1);
   slot_phys = (uint32_t)(uint64_t)slot_mem;
   if (!slot_mem) {
-    printf("failed to allocate DMA memory");
+    MMAL_ERR("failed to allocate DMA memory");
     return;
   }
 

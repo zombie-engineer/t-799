@@ -1,5 +1,5 @@
 #pragma once
-#include <printf.h>
+#include <logger.h>
 
 #define LOG_LEVEL_NONE   0
 #define LOG_LEVEL_CRIT   1
@@ -22,6 +22,6 @@
 #define LOG(__log_filter, __log_level, __unit_tag, __fmt, ...) \
   do { \
     if (__log_filter >= LOG_LEVEL_ ## __log_level) \
-      printf(__LOG_PREFIX(__unit_tag, \
+      os_log(__LOG_PREFIX(__unit_tag, \
         __log_level) __fmt __endline, ##__VA_ARGS__); \
   } while(0)

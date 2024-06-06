@@ -433,7 +433,7 @@ int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t))
   size_t i;
 
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
-    printf("WARN: tried to initialized nonstop refresh twice\r\n");
+    os_log("WARN: tried to initialized nonstop refresh twice\r\n");
     return ERR_GENERIC;
   }
 
@@ -730,7 +730,7 @@ static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf)
   uint8_t *b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
 
   if (!b) {
-    printf("Failed to allocate DMA buffer #%d for ili9341\r\n", i);
+    os_log("Failed to allocate DMA buffer #%d for ili9341\r\n", i);
     return ERR_RESOURCE;
   }
 
@@ -757,7 +757,7 @@ static int ili9341_setup_dma(void)
 
   err = ili9341_setup_spi_dma_headers();
   if (err != SUCCESS) {
-    printf("Failed to setup SPI DMA headers, err: %d\r\n", err);
+    os_log("Failed to setup SPI DMA headers, err: %d\r\n", err);
     return err;
   }
 
@@ -835,7 +835,7 @@ int ili9341_init(void)
   os_wait_ms(120);
   err = ili9341_setup_dma();
   if (err != SUCCESS) {
-    printf("ili9341: failed to initialize DMA, err: %d\r\n", err);
+    os_log("ili9341: failed to initialize DMA, err: %d\r\n", err);
     return err;
   }
 

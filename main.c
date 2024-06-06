@@ -127,7 +127,7 @@ static void vchiq_main(void)
   int err;
   struct block_device *bd;
 
-  os_log("vchiq_start");
+  os_log("vchiq_start\r\n");
 
   err = fs_init(&bd);
   if (err != SUCCESS) {

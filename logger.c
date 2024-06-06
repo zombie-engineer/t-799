@@ -78,6 +78,7 @@ struct logger {
   size_t nr_dropped;
   size_t nr_dropped_takes;
   size_t offset;
+  bool thread_active;
 };
 
 static struct logger logger = { 0 };
@@ -153,13 +154,23 @@ static void logger_mark_ready(struct logger_entry *e)
 
 void __os_log(const char *fmt, __builtin_va_list *args)
 {
-  struct logger_entry *e = logger_take();
+  int irqflags;
+  struct logger_entry *e;
+
+  if (!logger.thread_active) {
+    disable_irq_save_flags(irqflags);
+    vsnprintf(printfbuf, printfbuf_size, fmt, args);
+    uart_pl011_send(printfbuf, 0);
+    restore_irq_flags(irqflags);
+    return;
+  }
+
+  e = logger_take();
   if (e) {
     vsnprintf(e->buf, sizeof(e->buf), fmt, args);
     logger_mark_ready(e);
   }
 }
-
 
 static struct logger_entry *logger_pop_next_ready(void)
 {
@@ -220,6 +231,7 @@ static struct logger_entry logger_entries[LOG_ENTRIES_COUNT];
 static void logger_thread(void)
 {
   struct logger_entry *e;
+  logger.thread_active = true;
 
   while(1) {
     e = logger_pop_next_ready();
@@ -233,7 +245,6 @@ static void logger_thread(void)
     }
 
     puts(e->buf);
-    puts("\r\n");
     logger_mark_free(e);
   }
 }
@@ -249,6 +260,7 @@ int logger_init(void)
   logger.nr_dropped_takes = 0;
   logger.nr_busy = 0;
   logger.nr_ready = 0;
+  logger.thread_active = false;
 
   t = task_create(logger_thread, "logger");
   if (!t) {

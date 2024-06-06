@@ -143,7 +143,7 @@ static inline struct dma_mem_area *chunk_area_get_by_sz(int sz)
     logsz = 5;
 
   if ((logsz - 5) > ARRAY_SIZE(logsize_to_area_idx)) {
-    printf("chunk_area_get_by_sz: size too big, size:%d,"
+    os_log("chunk_area_get_by_sz: size too big, size:%d,"
       "biggest_log: %d, array_len: %d"__endline, sz, logsz,
       ARRAY_SIZE(logsize_to_area_idx));
 
@@ -168,11 +168,11 @@ void *dma_alloc(size_t sz, bool zero)
   struct dma_mem_header *c;
   struct dma_mem_area *a;
   a = chunk_area_get_by_sz(sz);
-  printf("dma_alloc: %d, area: %016lx, log:%d\r\n", sz, a, a->chunk_sz_log);
+  os_log("dma_alloc: %d, area: %016lx, log:%d\r\n", sz, a, a->chunk_sz_log);
   BUG_IF(!a, "dma_alloc: size too big");
   if (list_empty(&a->free_list))
   {
-    printf("Failed to allocate dma chunk with size %ld bytes, "
+    os_log("Failed to allocate dma chunk with size %ld bytes, "
       "no free chunks\r\n", sz);
     return NULL;
   }
@@ -232,5 +232,5 @@ void OPTIMIZED dma_memory_init(void)
     }
   }
   t = get_boottime_msec() - t;
-  printf("dma_memory_init complete. took %lldms"__endline, t);
+  os_log("dma_memory_init complete. took %lldms"__endline, t);
 }
