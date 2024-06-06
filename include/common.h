@@ -4,6 +4,7 @@
 #define ASSERT(__a) {}
 #define MAX(__a, __b) (((__a) > (__b)) ? (__a) : (__b))
 #define MIN(__a, __b) (__a) < (__b) ? (__a) : (__b)
+#define ROUND_UP (__v, __to) (((__v) + (__to) - 1)/ (__to))
 
 
 void clear_reboot_request(void);
