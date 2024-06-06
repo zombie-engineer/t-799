@@ -24,6 +24,7 @@
 #include <errcode.h>
 #include <fs/fs.h>
 #include <fs/fat32.h>
+#include <logger.h>
 
 static struct block_device *fs_blockdev;
 
@@ -125,6 +126,9 @@ static void vchiq_main(void)
 {
   int err;
   struct block_device *bd;
+
+  os_log("vchiq_start");
+
   err = fs_init(&bd);
   if (err != SUCCESS) {
     printf("Failed to init fs block device, err: %d\r\n", err);
@@ -188,7 +192,6 @@ static void kernel_run(void)
 #endif
   // test_dma();
 
-  printf("Hello %d\r\n", myvar);
   t = task_create(vchiq_main, "vchiq_main");
   sched_run_task_isr(t);
   t = task_create(blockdev_scheduler_fn, "block-sched");
