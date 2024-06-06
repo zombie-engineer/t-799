@@ -163,7 +163,7 @@ SYNC_HANDLER(inst_abrt_eq_el)
 
 SYNC_HANDLER(inst_alignment)
 {
-  dump_exception_context("intruction alignment");
+  dump_exception_context("instruction alignment");
   while(1) { }
 }
 
