@@ -4,7 +4,7 @@
 
 static uint32_t tasks_busymask = 0;
 
-#define NUM_STACK_WORDS 256
+#define NUM_STACK_WORDS 512
 struct stack {
   uint64_t data[NUM_STACK_WORDS];
 };
