@@ -238,7 +238,7 @@ void bcm2835_emmc_irq_handler(void)
   ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR) {
-    printf(",CMD_ERR");
+    BCM2835_EMMC_LOG(",CMD_ERR");
     bcm2835_emmc.io.err = ERR_GENERIC;
     cmd_done = true;
   }
@@ -416,7 +416,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
   }
 
   if (emmc_should_log)
-    printf("CMD%d: writing to CMDTM: %08x\r\n",
+    BCM2835_EMMC_LOG("CMD%d: writing to CMDTM: %08x\r\n",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), cmdreg);
 
   ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
@@ -467,7 +467,7 @@ static inline int bcm2835_emmc_cmd_polled(struct bcm2835_emmc_cmd *c,
     | BCM2835_EMMC_INTERRUPT_MASK_ERR;
 
   if (irq_is_enabled()) {
-    printf("bcm2835_emmc runs in polled mode and "
+    BCM2835_EMMC_LOG("bcm2835_emmc runs in polled mode and "
     "interrups enabled");
     return ERR_GENERIC;
   }
@@ -545,7 +545,7 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
   emmc_should_log = true;
   if (emmc_should_log)
   {
-    printf("CMD%d, arg:%d,blocking:%d, cmdreg:%08x,irq_enabled:%d\r\n",
+    BCM2835_EMMC_LOG("CMD%d, arg:%d,blocking:%d, cmdreg:%08x,irq_enabled:%d",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
       c->arg, polling, cmdreg, irq_is_enabled());
   }
@@ -557,8 +557,8 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
     status = ioreg32_read(BCM2835_EMMC_STATUS);
     if (!(status & mask))
       break;
-    printf("CMD%d wait inhibit\r\n", BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg));
-    delay_us(100);
+    BCM2835_EMMC_LOG("CMD%d wait inhibit",
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg)); delay_us(100);
   }
 
   bcm2835_emmc.io.c = c;

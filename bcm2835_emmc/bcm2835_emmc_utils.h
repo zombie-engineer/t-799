@@ -88,7 +88,7 @@ static inline int bcm2835_emmc_wait_cmd_dat_ready(void)
     delay_us(6);
   }
   if (i == 1000) {
-    printf("emmc_wait_cmd_dat_ready: timeout\r\n");
+    BCM2835_EMMC_CRIT("emmc_wait_cmd_dat_ready: timeout");
     return -1;
   }
   return 0;

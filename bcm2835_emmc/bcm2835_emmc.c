@@ -43,7 +43,7 @@ static inline void bcm2835_emmc_debug_registers(void)
 {
 #define DUMP_REG(__reg_suffix) \
   do { \
-    printf("BCM2835_EMMC_" #__reg_suffix "          : %08x\r\n",\
+    BCM2835_EMMC_LOG("BCM2835_EMMC_" #__reg_suffix "          : %08x\r\n",\
       ioreg32_read(BCM2835_EMMC_ ## __reg_suffix)); \
   } while(0)
 
