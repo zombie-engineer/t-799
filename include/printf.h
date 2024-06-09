@@ -12,9 +12,10 @@ static inline const char * _printf(const char* fmt, ...)
 
   const char *res = fmt;
 
-  disable_irq_save_flags(irqflags);
   __builtin_va_list args;
   __builtin_va_start(args, fmt);
+
+  disable_irq_save_flags(irqflags);
   vsnprintf(printfbuf, printfbuf_size, fmt, &args);
   uart_pl011_send(printfbuf, 0);
   restore_irq_flags(irqflags);
