@@ -2824,13 +2824,6 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_format(&encoder->input[0]);
   CHECK_ERR("Failed to set format for preview capture port");
 
-  video_profile.profile = MMAL_VIDEO_PROFILE_H264_HIGH;
-  video_profile.level = MMAL_VIDEO_LEVEL_H264_4;
-
-  err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-    MMAL_PARAMETER_PROFILE, &video_profile, sizeof(video_profile));
-  CHECK_ERR("Failed to set h264 MMAL_PARAMETER_PROFILE param");
-
   if (p.quantization) {
     uint32_arg = p.quantization;
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
@@ -2843,9 +2836,16 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
 
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-      MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT, &bool_arg, sizeof(bool_arg));
-    CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_IMMUTABLE_INPUT param");
+      MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT, &uint32_arg, sizeof(uint32_arg));
+    CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT param");
   }
+
+  video_profile.profile = MMAL_VIDEO_PROFILE_H264_HIGH;
+  video_profile.level = MMAL_VIDEO_LEVEL_H264_4;
+
+  err = vchiq_mmal_port_parameter_set(&encoder->output[0],
+    MMAL_PARAMETER_PROFILE, &video_profile, sizeof(video_profile));
+  CHECK_ERR("Failed to set h264 MMAL_PARAMETER_PROFILE param");
 
 #if 0
   bool_arg = false;
