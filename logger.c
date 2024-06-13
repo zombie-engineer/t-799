@@ -152,6 +152,7 @@ static void logger_mark_ready(struct logger_entry *e)
   restore_irq_flags(irqflag);
 }
 
+#define STACK_CANARY 0xff112277
 void __os_log(const char *fmt, __builtin_va_list *args)
 {
   int irqflags;
@@ -176,6 +177,7 @@ static struct logger_entry *logger_pop_next_ready(void)
 {
   struct logger_entry *e;
   int irqflag;
+  volatile int canary = STACK_CANARY;
 
   disable_irq_save_flags(irqflag);
   LOGGER_PUTS("[logger_pop_next_ready]\r\n");
@@ -204,6 +206,10 @@ static struct logger_entry *logger_pop_next_ready(void)
   logger.nr_busy++;
   e->state = LOGGER_ENT_STATE_BUSY;
   LOGGER_PUTS("[logger_pop_next_ready end]\r\n");
+  if (canary != STACK_CANARY) {
+    printf("!!!%p,%p,%p\r\n", logger.array, logger.array_end, e);
+    while(1);
+  }
   restore_irq_flags(irqflag);
   return e;
 }
