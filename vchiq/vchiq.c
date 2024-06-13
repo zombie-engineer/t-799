@@ -967,7 +967,8 @@ static void vchiq_event_wait(struct event *ev,
  */
 static void vchiq_process_free_queue(struct vchiq_state *s)
 {
-  int slot_queue_available, pos, slot_index;
+  int slot_queue_available, slot_index;
+  uint16_t pos, old_pos;
   char *slots;
   struct vchiq_header *h;
 
@@ -985,9 +986,16 @@ static void vchiq_process_free_queue(struct vchiq_state *s)
     pos = 0;
     while (pos < VCHIQ_SLOT_SIZE) {
       h = (struct vchiq_header *)(slots + pos);
+      // printf("pos: %d, sz:%d, msgid:%08x\r\n", pos, h->size, h->msgid);
 
+      old_pos = pos;
       pos += VCHIQ_MSG_TOTAL_SIZE(h->size);
-      BUG_IF(pos > VCHIQ_SLOT_SIZE, "some");
+      if (pos > VCHIQ_SLOT_SIZE) {
+        printf("Found corrupted vchiq header why recycling\r\n");
+        printf("  pos: %d, size: %d, msgid: %08x\r\n", old_pos, h->size,
+          h->msgid);
+        BUG_IF(1, "vchiq slot recycle failure\r\n");
+      }
     }
 
     mb();
