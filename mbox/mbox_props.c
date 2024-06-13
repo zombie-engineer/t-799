@@ -344,6 +344,7 @@ bool mbox_set_clock_rate(uint32_t clock_id, uint32_t *clock_rate,
 {
   int ret;
 
+  *clock_rate = 0;
   DECL_MBOX_MSG(set_clock_rate, MBOX_TAG_SET_CLOCK_RATE);
   m->tag.u.req.clock_id = clock_id;
   m->tag.u.req.rate_hz = *clock_rate;
