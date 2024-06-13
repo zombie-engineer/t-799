@@ -1509,9 +1509,8 @@ struct mmal_port_param_core_stats {
    uint32_t max_delay;           /**< Max delay (us) between buffers, ignoring first few frames */
 };
 
-static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_component *c,
-  struct vchiq_mmal_port *port, int parameter_id, void *value,
-  uint32_t *value_size);
+static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_port *port,
+  int parameter_id, void *value, uint32_t *value_size);
 
 static int mmal_port_get_systime(struct vchiq_mmal_port *p, uint64_t *time)
 {
@@ -1520,7 +1519,7 @@ static int mmal_port_get_systime(struct vchiq_mmal_port *p, uint64_t *time)
   uint32_t size;
 
   size = sizeof(systime);
-  err = vchiq_mmal_port_parameter_get(p->component, p,
+  err = vchiq_mmal_port_parameter_get(p,
     MMAL_PARAMETER_SYSTEM_TIME, &systime, &size);
   CHECK_ERR("Failed to get port systime");
   *time = systime;
@@ -1541,7 +1540,7 @@ static int mmal_port_get_stats(struct vchiq_mmal_port *p)
   uint32_t pool_mem_alloc_size;
 
   size = sizeof(stats);
-  err = vchiq_mmal_port_parameter_get(p->component, p,
+  err = vchiq_mmal_port_parameter_get(p,
     MMAL_PARAMETER_STATISTICS, &stats, &size);
   CHECK_ERR("Failed to get port stats");
 
@@ -2136,15 +2135,14 @@ static inline struct vchiq_mmal_component *vchiq_mmal_create_camera_info(
   return component_create(mmal_service, "camera_info");
 }
 
-static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_component *c,
-  struct vchiq_mmal_port *port, int parameter_id, void *value,
-  uint32_t *value_size)
+static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_port *p,
+  int parameter_id, void *value, uint32_t *value_size)
 {
-  VCHIQ_MMAL_MSG_DECL(c->ms, PORT_PARAMETER_GET, port_parameter_get,
+  VCHIQ_MMAL_MSG_DECL(p->component->ms, PORT_PARAMETER_GET, port_parameter_get,
     port_parameter_get_reply);
 
-  m->component_handle = c->handle;
-  m->port_handle = port->handle;
+  m->component_handle = p->component->handle;
+  m->port_handle = p->handle;
   m->id = parameter_id;
   m->size = 2 * sizeof(uint32_t) + *value_size;
 
@@ -2162,7 +2160,7 @@ static inline int vchiq_mmal_get_camera_info(struct vchiq_service_common *ms,
   uint32_t param_size;
 
   param_size = sizeof(*cam_info);
-  err = vchiq_mmal_port_parameter_get(c, &c->control,
+  err = vchiq_mmal_port_parameter_get(&c->control,
     MMAL_PARAMETER_CAMERA_INFO, cam_info, &param_size);
   return err;
 }
@@ -2273,7 +2271,7 @@ static int mmal_set_camera_parameters(struct vchiq_mmal_component *c,
     MMAL_PARAMETER_CAMERA_CONFIG, &config, sizeof(config));
 
   config_size = sizeof(new_config);
-  ret = vchiq_mmal_port_parameter_get(c, &c->control,
+  ret = vchiq_mmal_port_parameter_get(&c->control,
     MMAL_PARAMETER_CAMERA_CONFIG, &new_config, &config_size);
   return ret;
 }
@@ -2300,8 +2298,9 @@ static int mmal_port_get_supp_encodings(struct vchiq_mmal_port *p,
   uint32_t param_size;
 
   param_size = max_encodings * sizeof(*encodings);
-  err = vchiq_mmal_port_parameter_get(p->component, p,
-    MMAL_PARAMETER_SUPPORTED_ENCODINGS, encodings, &param_size);
+  err = vchiq_mmal_port_parameter_get(p, MMAL_PARAMETER_SUPPORTED_ENCODINGS,
+    encodings, &param_size);
+
   CHECK_ERR("Failed to get supported_encodings");
   *num_encodings = param_size / sizeof(*encodings);
   mmal_print_supported_encodings(encodings, *num_encodings);
