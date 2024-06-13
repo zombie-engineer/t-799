@@ -3,7 +3,9 @@
 #include <errcode.h>
 #include <cpu.h>
 #include <os_api.h>
+#include <log.h>
 #include <common.h>
+#include <sched.h>
 
 struct blockdev_scheduler {
   struct blockdev_io io_entries[64];
@@ -56,6 +58,7 @@ static inline void blockdev_scheduler_run_io(struct blockdev_io *io)
 
 void blockdev_scheduler_fn(void)
 {
+  uint64_t ts1, ts2;
   struct blockdev_io *io;
   int next_req = 0;
 
@@ -78,7 +81,10 @@ void blockdev_scheduler_fn(void)
       next_req % ARRAY_SIZE(blockdev_sched.io_entries)];
 
     irq_enable();
+    ts1 = sched_get_time_us();
     blockdev_scheduler_run_io(io);
+    ts2 = sched_get_time_us();
+    os_log("sdcard write end: %ld us\r\n", (ts2 - ts1));
 
     irq_disable();
     blockdev_sched.nr_done++;
