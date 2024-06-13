@@ -3002,7 +3002,7 @@ out_err:
 
 
 static int create_camera_component(struct vchiq_service_common *mmal_service,
-  int frame_width ,int frame_height,
+  int frame_width ,int frame_height, int frame_rate,
   struct mmal_parameter_camera_info_camera_t *cam_info,
   struct vchiq_mmal_port **out_preview, struct vchiq_mmal_port **out_video,
   struct vchiq_mmal_port **out_still)
@@ -3043,13 +3043,13 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to retrieve supported encodings from port");
 
   mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
-    MMAL_ENCODING_I420, frame_width, frame_height, 30, 0);
+    MMAL_ENCODING_I420, frame_width, frame_height, frame_rate, 0);
 
   err = mmal_port_set_format(preview);
   CHECK_ERR("Failed to set format for preview capture port");
 
   mmal_format_set(&video->format, MMAL_ENCODING_OPAQUE,
-    0, frame_width, frame_height, 30, 0);
+    0, frame_width, frame_height, frame_rate, 0);
 
   err = mmal_port_set_format(video);
   CHECK_ERR("Failed to set format for video capture port");
@@ -3113,6 +3113,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   CHECK_ERR("Failed to get num cameras");
 
   err = create_camera_component(mmal_service, frame_width, frame_height,
+    24,
     &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
   CHECK_ERR("Failed to create camera component");
 
