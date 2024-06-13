@@ -1490,7 +1490,7 @@ static int vchiq_mmal_buffer_from_host(struct vchiq_mmal_port *p,
     m->buffer_header.dts = b->dts;
   }
 
-  mmal_buffer_print_meta(p->nr_busy, &m->buffer_header, "from_host");
+  // mmal_buffer_print_meta(p->nr_busy, &m->buffer_header, "from_host");
   memset(&m->buffer_header_type_specific, 0,
     sizeof(m->buffer_header_type_specific));
   m->payload_in_message = 0;
@@ -1625,7 +1625,7 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-#define IO_MIN_SECTORS (8192)
+#define IO_MIN_SECTORS 64
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
 
 struct camera {
@@ -2231,7 +2231,7 @@ static int vchiq_mmal_get_cam_info(struct vchiq_service_common *ms,
   int err;
   struct vchiq_mmal_component *camera_info;
   struct vchiq_mmal_component *cam;
-  struct mmal_parameter_logging l = { .set = 0x1, .clear = 0 };
+  struct mmal_parameter_logging l = { .set = 0x3, .clear = 0 };
 
   camera_info = vchiq_mmal_create_camera_info(ms);
 
@@ -2636,9 +2636,11 @@ static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
   buf->buffer_size = dma_buf_size;
   buf->user_handle = user_handle;
 
+#if 0
   if (p->zero_copy) {
     printf("zero copy\r\n");
   }
+#endif
   err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
   CHECK_ERR("failed to import dmabuf");
   list_add_tail(&buf->list, &p->buffers_free);
@@ -2784,7 +2786,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_component *encoder;
   struct mmal_parameter_video_profile video_profile;
   struct encoder_h264_params p = {
-    .quantization = 0
+    .quantization = 20
   };
  
   encoder = component_create(mmal_service, "ril.video_encode");
@@ -2804,7 +2806,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("failed to enable control port");
 
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
-    height, 0, 25000000);
+    height, 0, 0);
 
   size_t requested_buf_size = 256 * 1024;
   size_t requested_num_buffers = 128;
