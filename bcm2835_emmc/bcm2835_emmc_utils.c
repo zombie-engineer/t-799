@@ -7,21 +7,7 @@
 
 static inline uint32_t bcm2835_emmc_get_clock_div(uint32_t target_clock)
 {
-  uint32_t base_clock;
-
-  if (!mbox_get_clock_rate(MBOX_CLOCK_ID_EMMC, &base_clock))
-    return -1;
-
-  if (base_clock == 200000000) {
-    if (target_clock == BCM2835_EMMC_CLOCK_HZ_SETUP) {
-      return 64;
-    }
-    if (target_clock == BCM2835_EMMC_CLOCK_HZ_NORMAL) {
-      return 4;
-    }
-  }
-
-  return 0;
+  return target_clock == BCM2835_EMMC_CLOCK_HZ_SETUP ? 64 : 4;
 }
 
 static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
@@ -42,11 +28,6 @@ int bcm2835_emmc_set_clock(int target_hz)
 
   div = bcm2835_emmc_get_clock_div(target_hz);
 
-  if (div == 0) {
-    BCM2835_EMMC_ERR("emmc_set_clock: failed to deduce clock divisor");
-    return ERR_GENERIC;
-  }
-
   if (bcm2835_emmc_wait_cmd_dat_ready())
     return ERR_GENERIC;
 
@@ -54,9 +35,15 @@ int bcm2835_emmc_set_clock(int target_hz)
     bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS));
 
   control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+
+  /* Timeout = CLK x 2^(13+bitsvalue).= CLK x 2^(13 + 0xb) = CLK x 2^24 */
   BCM2835_EMMC_CONTROL1_CLR_SET_DATA_TOUNIT(control1, 0xb);
+
+  /* Enable internal clock */
   BCM2835_EMMC_CONTROL1_CLR_SET_CLK_INTLEN(control1, 1);
-  control1 |= div << 8;
+  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_FREQ8(control1, div);
+  /* Clear and set SD clock base divider */
+
   BCM2835_EMMC_LOG("emmc_set_clock: control1: %08x", control1);
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
   delay_us(6);
