@@ -342,11 +342,14 @@ DECL_MBOX_1TAG_MSG_T(set_clock_rate);
 bool mbox_set_clock_rate(uint32_t clock_id, uint32_t *clock_rate,
   uint32_t skip_turbo)
 {
+  int ret;
+
   DECL_MBOX_MSG(set_clock_rate, MBOX_TAG_SET_CLOCK_RATE);
   m->tag.u.req.clock_id = clock_id;
   m->tag.u.req.rate_hz = *clock_rate;
   m->tag.u.req.skip_turbo = skip_turbo;
-  if (mbox_prop_call(MBOX_CH_PROP) && MBOX_GET_RSP(clock_id) == clock_id) {
+  ret = mbox_prop_call(MBOX_CH_PROP);
+  if (!ret && MBOX_GET_RSP(clock_id) == clock_id) {
     *clock_rate = MBOX_GET_RSP(rate_hz);
     return true;
   }
