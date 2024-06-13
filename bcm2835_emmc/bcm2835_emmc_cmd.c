@@ -288,9 +288,12 @@ static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
 static inline int bcm2835_emmc_report_interrupt_error(const char *tag,
   uint32_t intval)
 {
-  char buf[256];
+  char buf[256] = { 0 };
+
   bcm2835_emmc_interrupt_bitmask_to_string(buf, sizeof(buf), intval);
-  BCM2835_EMMC_ERR("%s: error bits in INTERRUPT register: %08x %s", intval, buf);
+  BCM2835_EMMC_ERR("%s: error bits in INTERRUPT register: %08x '%s'", intval,
+    buf);
+
   return ERR_GENERIC;
 }
 

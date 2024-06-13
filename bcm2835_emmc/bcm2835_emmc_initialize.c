@@ -319,9 +319,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
     delay_us(500000);
   }
 
-  /*
-   * Set normal clock
-   */
+  /* Set normal clock */
   err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_NORMAL);
   BCM2835_EMMC_CHECK_ERR("failed to set clock to %d Hz",
     BCM2835_EMMC_CLOCK_HZ_NORMAL);
