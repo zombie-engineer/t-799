@@ -1,6 +1,7 @@
 #include <bitops.h>
 #include <stringlib.h>
 #include <bcm2835/bcm2835_emmc.h>
+#include <bcm2835/bcm2835_systimer.h>
 #include "bcm2835_emmc_priv.h"
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
@@ -9,7 +10,10 @@
 #include <bcm2835_dma.h>
 #include <memory_map.h>
 #include <os_api.h>
+#include <sched.h>
 #include <cpu.h>
+
+extern uint64_t ts2;
 
 /* P1 Physical Layer Simplified Specification.  * 4.9 Responces */
 
@@ -58,7 +62,7 @@ static uint32_t sd_commands[] = {
   CMDTM_GEN(3,  R6,      1, NA, 0, 0),
   CMDTM_GEN(4,  NA,      0, NA, 0, 0),
   CMDTM_GEN(5,  R1b,     0, NA, 0, 0),
-  CMDTM_GEN(6,  NA,      0, NA, 0, 0),
+  CMDTM_GEN(6,  R1,      0, CARD_TO_HOST, 1, 0),
   CMDTM_GEN(7,  R1b,     1, NA, 0, 0),
   CMDTM_GEN(8,  R7,      1, NA, 0, 0),
   CMDTM_GEN(9,  R2,      0, NA, 0, 0),
@@ -183,7 +187,8 @@ extern struct bcm2835_emmc bcm2835_emmc;
 
 void bcm2835_emmc_dma_irq_callback(void)
 {
-  // printf("dma_irq cb\r\n");
+  int ts3 = bcm2835_systimer_get_time_us();
+  os_log("dma_irq at %ld\r\n", ts3);
   ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
 }
 
@@ -258,8 +263,11 @@ void bcm2835_emmc_irq_handler(void)
     cmd_done = true;
   }
 
-  if (cmd_done)
+  if (cmd_done) {
+    ts2 = bcm2835_systimer_get_time_us();
+    os_log("cmd_done at %ld\r\n", ts2);
     os_event_notify(&bcm2835_emmc_event);
+  }
 
 #if 0
   if (emmc_should_log)
@@ -418,9 +426,11 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
     ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3 | (1<<15));
   }
 
+#if 0
   if (emmc_should_log)
     BCM2835_EMMC_LOG("CMD%d: writing to CMDTM: %08x\r\n",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), cmdreg);
+#endif
 
   ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
 
@@ -545,6 +555,7 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
   uint32_t status;
 
   int i;
+#if 0
   emmc_should_log = true;
   if (emmc_should_log)
   {
@@ -552,6 +563,8 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
       c->arg, polling, cmdreg, irq_is_enabled());
   }
+#endif
+
 
   const uint32_t mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
     BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;

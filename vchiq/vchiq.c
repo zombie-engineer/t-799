@@ -1666,8 +1666,10 @@ static inline void camera_io_on_buffer_filled(void)
   os_event_wait(&cam.next_buf_avail);
   os_event_clear(&cam.next_buf_avail);
 
+#if 0
   MMAL_INFO("wr_req#%d, from:%ld,num:%ld", sdcard_io_count,
     cam.write_sector_offset, IO_MIN_SECTORS);
+#endif
 
   sdcard_io_count++;
   blockdev_scheduler_push_io(&io);
@@ -3117,6 +3119,10 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   cam.current_buf_ptr = cam.current_buf;
   os_event_init(&cam.next_buf_avail);
   os_event_notify(&cam.next_buf_avail);
+  while(1) {
+    camera_io_on_buffer_filled();
+    os_wait_ms(1000);
+  }
 
   cam.write_sector_offset = 0;
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);

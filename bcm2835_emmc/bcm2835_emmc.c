@@ -14,8 +14,13 @@
 #include <gpio.h>
 #include <bcm2835_dma.h>
 #include <bcm2835/bcm2835_ic.h>
+#include <bcm2835/bcm2835_systimer.h>
 #include <irq.h>
 #include <sched.h>
+#include <printf.h>
+
+uint64_t ts1;
+uint64_t ts2;
 
 struct bcm2835_emmc bcm2835_emmc = { 0 };
 int bcm2835_emmc_log_level;
@@ -133,6 +138,8 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
 {
   int cmd_err;
 
+  ts1 = bcm2835_systimer_get_time_us();
+  os_log("sdcard write start at: %ld us\r\n", ts1);
   if (num_blocks > 1) {
     if (io_type ==BCM2835_EMMC_IO_WRITE)
       emmc_should_log = true;
@@ -154,18 +161,8 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   } else if (io_type == BCM2835_EMMC_IO_WRITE) {
     /* WRITE_BLOCK */
     if (num_blocks > 1) {
-      uint64_t t1, t2, delta;
-
-      t1 = sched_get_time_us();
-      // printf("\r\n%ld: CMD25\r\n", t1);
-
       cmd_err = bcm2835_emmc_cmd25(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
-
-      t2 = sched_get_time_us();
-      delta = t2 - t1;
-
-      // printf("\r\n%ld, CMD25 done(d=%d.%d)\r\n", t2, delta / 1000, delta % 1000);
     } else {
       cmd_err = bcm2835_emmc_cmd24(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
@@ -176,6 +173,8 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
     BCM2835_EMMC_ERR("bcm2835_emmc_data_io: unknown io type: %d", io_type);
     return -1;
   }
+
+  os_log("sdcard write stop at: %ld (%ld us)\r\n", ts2, (ts2 - ts1));
 
   return 0;
 }
@@ -192,6 +191,29 @@ int bcm2835_emmc_write_stream_open(
     return err;
 
   return bcm2835_emmc_cmd25_nonstop(start_sector);
+}
+
+int bcm2835_emmc_block_erase(
+  struct block_device *b,
+  size_t start_sector, size_t num_sectors)
+{
+  int err;
+  err = bcm2835_emmc_cmd32(start_sector, bcm2835_emmc.is_blocking_mode);
+  if (err != SUCCESS) {
+    printf("cmd32 failed\r\n");
+    return err;
+  }
+  err = bcm2835_emmc_cmd33(start_sector + num_sectors, bcm2835_emmc.is_blocking_mode);
+  if (err != SUCCESS) {
+    printf("cmd33 failed\r\n");
+    return err;
+  }
+  err = bcm2835_emmc_cmd38(0, bcm2835_emmc.is_blocking_mode);
+  if (err != SUCCESS) {
+    printf("cmd38 failed\r\n");
+    return err;
+  }
+  return err;
 }
 
 int bcm2835_emmc_write_stream_write(
@@ -244,4 +266,5 @@ int bcm2835_emmc_block_device_init(struct block_device *bdev)
   bdev->ops.write = bcm2835_emmc_write;
   bdev->ops.write_stream_open = bcm2835_emmc_write_stream_open;
   bdev->ops.write_stream_write = bcm2835_emmc_write_stream_write;
+  bdev->ops.block_erase = bcm2835_emmc_block_erase;
 }

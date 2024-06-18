@@ -20,6 +20,9 @@ struct block_device_ops {
 
   int (*write_stream_write)(struct block_device *,
     struct block_dev_write_stream *, const void *data, size_t num_bytes);
+
+  int (*block_erase)(struct block_device *,
+    size_t start_sector, size_t num_sectors);
 };
 
 struct block_device {

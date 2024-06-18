@@ -275,10 +275,10 @@ void scheduler_yield_isr(void)
 
 uint64_t sched_get_time_us(void)
 {
-  uint64_t result;
+  uint64_t result = 0;
   int flags;
   disable_irq_save_flags(flags);
-  result = MS_TO_US(sched.ticks * SCHED_MS_PER_TICK);
+  // result = MS_TO_US(sched.ticks * SCHED_MS_PER_TICK);
   result =+ bcm2835_systimer_get_time_us_locked();
   restore_irq_flags(flags);
   return result;
