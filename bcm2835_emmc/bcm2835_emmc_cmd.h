@@ -156,30 +156,31 @@ static inline int bcm2835_emmc_cmd3(uint32_t *out_rca, bool blocking)
 
 #define CMD6_MODE_CHECK 0
 #define CMD6_MODE_SWITCH 1
+
 #define CMD6_ARG_ACCESS_MODE_SDR12  0
 #define CMD6_ARG_ACCESS_MODE_SDR25  1
 #define CMD6_ARG_ACCESS_MODE_SDR50  2
 #define CMD6_ARG_ACCESS_MODE_SDR104 3
 #define CMD6_ARG_ACCESS_MODE_DDR50  4
-#define CMD6_ARG_ACCESS_MODE_DEFAULT CMD6_ARG_ACCESS_MODE_SDR12
+#define CMD6_ARG_ACCESS_MODE_DEFAULT 0xf
 
-#define CMD6_ARG_CMD_SYSTEM_DEFAULT 0
 #define CMD6_ARG_CMD_SYSTEM_EC      1
 #define CMD6_ARG_CMD_SYSTEM_OTP     3
 #define CMD6_ARG_CMD_SYSTEM_ASSD    4
+#define CMD6_ARG_CMD_SYSTEM_DEFAULT 0xf
 
 #define CMD6_ARG_DRIVER_STRENGTH_TYPE_B 0
 #define CMD6_ARG_DRIVER_STRENGTH_TYPE_A 1
 #define CMD6_ARG_DRIVER_STRENGTH_TYPE_C 2
 #define CMD6_ARG_DRIVER_STRENGTH_TYPE_D 3
-#define CMD6_ARG_DRIVER_STRENGTH_DEFAULT CMD6_ARG_DRIVER_STRENGTH_TYPE_B
+#define CMD6_ARG_DRIVER_STRENGTH_DEFAULT 0xf
 
 #define CMD6_ARG_POWER_LIMIT_0_72W 0
 #define CMD6_ARG_POWER_LIMIT_1_44W 1
 #define CMD6_ARG_POWER_LIMIT_2_16W 2
 #define CMD6_ARG_POWER_LIMIT_2_88W 3
 #define CMD6_ARG_POWER_LIMIT_1_80W 4
-#define CMD6_ARG_POWER_LIMIT_DEFAULT CMD6_ARG_POWER_LIMIT_0_72W
+#define CMD6_ARG_POWER_LIMIT_DEFAULT 0xf
 
 static inline int bcm2835_emmc_cmd6(int mode, int access_mode,
   int command_system, int driver_strength, int power_limit, char *dstbuf,
@@ -192,28 +193,36 @@ static inline int bcm2835_emmc_cmd6(int mode, int access_mode,
   arg |= (command_system & 0xf) << 4;
   arg |= (driver_strength & 0xf) << 8;
   arg |= (power_limit & 0xf) << 12;
+
+  /*
+   * Set reserved groups to default according to spec
+   * Physical Layer Simplified Specification Version 9.10,
+   * Chapter 4.3.10.2
+   */
+  arg |= (0xf << 16) | (0xf << 20);
+
   arg |= (mode & 1) << 31;
-  arg |= 0xff;
-  printf("cmd6: arg:%08x\r\n", arg);
-  arg = 0xfffffff0;
+  // arg = 0x00fffff1;
+  // printf("cmd6: arg:%08x\r\n", arg);
 
   bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD6, arg);
 
   c.databuf = dstbuf;
   c.num_blocks = 1;
-  c.block_size = 512;
+  c.block_size = 64;
 
   err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
-  printf("CMD6: ret %d\r\n", err);
 
   if (err != SUCCESS)
     return err;
 
+#if 0
   printf("cmd6: resp:%08x,%08x,%08x,%08x\r\n",
     c.resp0,
     c.resp1,
     c.resp2,
     c.resp3);
+#endif
   return SUCCESS;
 }
 

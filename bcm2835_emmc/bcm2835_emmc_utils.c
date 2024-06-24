@@ -20,13 +20,13 @@ static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
     NULL);
 }
 
-int bcm2835_emmc_set_clock(int target_hz)
+int bcm2835_emmc_set_clock(uint32_t div)
 {
   int err;
   uint32_t control1;
-  uint32_t div;
+  // uint32_t div;
 
-  div = bcm2835_emmc_get_clock_div(target_hz);
+  // div = bcm2835_emmc_get_clock_div(target_hz);
 
   if (bcm2835_emmc_wait_cmd_dat_ready())
     return ERR_GENERIC;

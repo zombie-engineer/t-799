@@ -127,4 +127,4 @@ static inline int bcm2835_emmc_wait_dat_inhibit(void)
 #define BCM2835_EMMC_CLOCK_HZ_SETUP 400000
 #define BCM2835_EMMC_CLOCK_HZ_NORMAL 25000000
 
-int bcm2835_emmc_set_clock(int target_hz);
+//int bcm2835_emmc_set_clock(int target_hz);

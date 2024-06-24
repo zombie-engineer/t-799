@@ -185,11 +185,14 @@ static struct event bcm2835_emmc_event;
 
 extern struct bcm2835_emmc bcm2835_emmc;
 
+bool dma_done;
+
 void bcm2835_emmc_dma_irq_callback(void)
 {
-  int ts3 = bcm2835_systimer_get_time_us();
-  os_log("dma_irq at %ld\r\n", ts3);
+  ts2 = bcm2835_systimer_get_time_us();
+  // os_log("dma_irq at %ld\r\n", ts2);
   ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
+  dma_done = true;
 }
 
 static void bcm2835_emmc_setup_dma_transfer(int dma_channel, int control_block,
@@ -265,7 +268,7 @@ void bcm2835_emmc_irq_handler(void)
 
   if (cmd_done) {
     ts2 = bcm2835_systimer_get_time_us();
-    os_log("cmd_done at %ld\r\n", ts2);
+    // os_log("cmd_done at %ld\r\n", ts2);
     os_event_notify(&bcm2835_emmc_event);
   }
 
@@ -434,11 +437,18 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
 
   ioreg32_write(BCM2835_EMMC_CMDTM, cmdreg);
 
-  if (is_data)
+  if (is_data) {
+    dma_done = false;
     bcm2835_dma_activate(bcm2835_emmc.io.dma_channel);
+  }
 
   os_event_wait(&bcm2835_emmc_event);
   os_event_clear(&bcm2835_emmc_event);
+  if (is_data) {
+    while(!dma_done)
+      asm volatile ("wfe");
+    dma_done = false;
+  }
 
   return bcm2835_emmc.io.err;
 }
@@ -640,6 +650,7 @@ int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
     mode_polling);
 }
 
+#if 0
 int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx)
 {
   uint32_t cmd = sd_commands[BCM2835_EMMC_CMD25];
@@ -657,6 +668,7 @@ int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx)
 
   return SUCCESS;
 }
+#endif
 
 int bcm2835_emmc_reset_cmd(bool mode_polling)
 {

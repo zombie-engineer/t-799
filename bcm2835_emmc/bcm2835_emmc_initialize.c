@@ -140,11 +140,73 @@ static void bcm2835_emmc_set_high_speed(void)
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
 }
 
+static void custom_cmd6(void)
+{
+  int status;
+  uint32_t mask;
+
+  printf("custom_cmd6\r\n");
+  mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
+    BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
+
+  while(1) {
+    status = ioreg32_read(BCM2835_EMMC_STATUS);
+    if (!(status & mask))
+      break;
+
+    BCM2835_EMMC_LOG("CMD6 wait inhibit");
+    delay_us(100);
+  }
+
+  printf("before: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
+    ioreg32_read(BCM2835_EMMC_RESP0),
+    ioreg32_read(BCM2835_EMMC_RESP1),
+    ioreg32_read(BCM2835_EMMC_RESP2),
+    ioreg32_read(BCM2835_EMMC_RESP3),
+    ioreg32_read(BCM2835_EMMC_STATUS));
+
+  uint32_t ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
+  printf("data:%08x intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
+
+  uint32_t arg = 0x00fffff1;
+  ioreg32_write(BCM2835_EMMC_BLKSIZECNT, 64| (1 << 16));
+  ioreg32_write(BCM2835_EMMC_ARG1, arg);
+
+  printf("before cmdtm: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
+    ioreg32_read(BCM2835_EMMC_RESP0),
+    ioreg32_read(BCM2835_EMMC_RESP1),
+    ioreg32_read(BCM2835_EMMC_RESP2),
+    ioreg32_read(BCM2835_EMMC_RESP3),
+    ioreg32_read(BCM2835_EMMC_STATUS));
+  ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
+  printf("data:%08x intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
+
+  ioreg32_write(BCM2835_EMMC_CMDTM, (6<<24) | (1<<21) | (2<<16) | (1<<4));
+  delay_us(50000);
+
+  while(!(ioreg32_read(BCM2835_EMMC_STATUS) & (1<<9)))
+    printf("Wait bit read ready bit\r\n");
+
+  for (int i = 0 ; i < 20; ++i) {
+    ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
+    ioreg32_write(BCM2835_EMMC_INTERRUPT, ival);
+    printf("data:%08x,intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
+    printf("after: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
+      ioreg32_read(BCM2835_EMMC_RESP0),
+      ioreg32_read(BCM2835_EMMC_RESP1),
+      ioreg32_read(BCM2835_EMMC_RESP2),
+      ioreg32_read(BCM2835_EMMC_RESP3),
+      ioreg32_read(BCM2835_EMMC_STATUS));
+  }
+  while(1) {}
+}
 static inline int bcm2835_emmc_process_sd_scr(uint32_t rca, uint64_t scr,
   bool blocking)
 {
   int sd_spec_ver_maj;
   int sd_spec_ver_min;
+
+  struct sd_cmd6_response_raw r = { 0 };
 
   int err;
   bool buswidth4_supported = sd_scr_bus_width4_supported(scr);
@@ -159,36 +221,58 @@ static inline int bcm2835_emmc_process_sd_scr(uint32_t rca, uint64_t scr,
     buswidth4_supported ? "supported" : "not_supp"
   );
 
-#if 0
   if (buswidth4_supported) {
     err = bcm2835_emmc_set_bus_width4(rca, blocking);
     if (err != SUCCESS)
       return err;
   }
+
+#if 0
+  custom_cmd6();
 #endif
 
-  char buf[512] = { 0 };
+  BCM2835_EMMC_LOG("Running CMD6 to switch to SDR25\r\n");
 
-  printf("CMD6 start\r\n");
   err = bcm2835_emmc_cmd6(CMD6_MODE_CHECK,
-      CMD6_ARG_ACCESS_MODE_DEFAULT,
-      CMD6_ARG_CMD_SYSTEM_DEFAULT,
-      CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
-      CMD6_ARG_POWER_LIMIT_DEFAULT,
-      buf,
-      blocking);
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    r.data,
+    blocking);
 
-  printf("CMD6 status: %d\r\n", err);
   if (err != SUCCESS)
     return err;
 
-  for (int i = 0; i < 512; ++i) {
-    printf("%02x\r\n", buf[i]);
+  BCM2835_EMMC_LOG("CMD6 result: max_current:%d, fns(%04x,%04x,%04x,%04x)\r\n",
+    sd_cmd6_mode_0_resp_get_max_current(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_1(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_2(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_3(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_4(&r));
+
+  if (!sd_cmd6_mode_0_resp_is_sdr25_supported(&r)) {
+    BCM2835_EMMC_LOG("Switching to SDR25 not supported, skipping...\r\n");
+    return SUCCESS;
   }
+
+  BCM2835_EMMC_LOG("Switching to SDR25 is supported, switching...\r\n");
+
+  err = bcm2835_emmc_cmd6(CMD6_MODE_SWITCH,
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    r.data,
+    blocking);
+
+  if (err != SUCCESS)
+    return err;
 
   bcm2835_emmc_set_high_speed();
 
   bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, 0xffffffff);
+  BCM2835_EMMC_LOG("Switched to SDR25: 50MHz clock, 25 megabytes/sec\r\n");
   return SUCCESS;
 }
 
@@ -305,7 +389,7 @@ static int bcm2835_emmc_reset_step0(bool blocking)
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL2, 0);
 
   /* Slow down clock to setup commands */
-  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_SETUP);
+  err = bcm2835_emmc_set_clock(/*BCM2835_EMMC_CLOCK_HZ_SETUP*/64);
   if (err != SUCCESS) {
     BCM2835_EMMC_ERR("failed to set clock to %d Hz",
       BCM2835_EMMC_CLOCK_HZ_SETUP);
@@ -418,7 +502,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
     return err;
 
   /* Set normal clock */
-  err = bcm2835_emmc_set_clock(BCM2835_EMMC_CLOCK_HZ_NORMAL);
+  err = bcm2835_emmc_set_clock(/* BCM2835_EMMC_CLOCK_HZ_NORMAL */4);
   BCM2835_EMMC_CHECK_ERR("failed to set clock to %d Hz",
     BCM2835_EMMC_CLOCK_HZ_NORMAL);
 
@@ -435,6 +519,7 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
 
   err = bcm2835_emmc_cmd7(*rca, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD7 (SELECT_CARD) step");
+  // custom_cmd6();
 
   err = bcm2835_emmc_cmd13(*rca, &bcm2835_emmc_status, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");

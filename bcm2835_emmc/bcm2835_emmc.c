@@ -186,11 +186,14 @@ int bcm2835_emmc_write_stream_open(
 {
   int err;
 
+#if 0
   err = bcm2835_emmc_cmd23(0xffff, bcm2835_emmc.is_blocking_mode);
   if (err)
     return err;
 
   return bcm2835_emmc_cmd25_nonstop(start_sector);
+#endif
+  return SUCCESS;
 }
 
 int bcm2835_emmc_block_erase(
