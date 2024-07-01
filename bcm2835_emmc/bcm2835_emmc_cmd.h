@@ -2,8 +2,10 @@
 #include <stringlib.h>
 #include <errcode.h>
 #include <stdbool.h>
+#include "bcm2835_emmc_regs.h"
 #include <printf.h>
 #include <bitops.h>
+#include <log.h>
 
 /* GO_IDLE */
 #define BCM2835_EMMC_CMD0                 0x00000000
@@ -19,7 +21,8 @@
 #define BCM2835_EMMC_CMD7                 0x00000007
 /* SEND_IF_COND */
 #define BCM2835_EMMC_CMD8                 0x00000008
-
+/* SEND_CSD */
+#define BCM2835_EMMC_CMD9                 0x00000009
 #define BCM2835_EMMC_CMD11                0x0000000b
 /* STOP_TRANSMISSION */
 #define BCM2835_EMMC_CMD12                0x0000000c
@@ -43,6 +46,8 @@
 #define BCM2835_EMMC_CMD38                0x00000026
 /* APP_CMD */
 #define BCM2835_EMMC_CMD55                0x00000037
+/* READ_OCR */
+#define BCM2835_EMMC_CMD58                0x0000003a
 
 #define ACMD_BIT 31
 #define ACMD(__idx) ((1<<ACMD_BIT) | __idx)
@@ -269,6 +274,20 @@ static inline int bcm2835_emmc_cmd8(bool blocking)
   return SUCCESS;
 }
 
+static inline int bcm2835_emmc_cmd9(uint32_t rca, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD9, rca << 16);
+  int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+  printf("CSD:%08x %08x %08x %08x\r\n",
+    ioreg32_read(BCM2835_EMMC_RESP0),
+    ioreg32_read(BCM2835_EMMC_RESP1),
+    ioreg32_read(BCM2835_EMMC_RESP2),
+    ioreg32_read(BCM2835_EMMC_RESP3));
+  return err;
+}
+
 
 static inline int bcm2835_emmc_cmd13(uint32_t rca, uint32_t *out_status,
   bool blocking)
@@ -355,7 +374,9 @@ static inline int bcm2835_emmc_cmd25(uint32_t block_idx, size_t num_blocks,
   c.num_blocks = num_blocks;
   c.block_size = 512;
 
-  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+  int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+  printf("CMD25 done with err:%d\r\n", err);
+  return err;
 }
 
 static inline int bcm2835_emmc_cmd32(uint32_t block_idx, bool blocking)
@@ -380,6 +401,16 @@ static inline int bcm2835_emmc_cmd38(uint32_t arg, bool blocking)
 
   bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD38, arg);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+static inline int bcm2835_emmc_cmd58(uint32_t rca, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD58, rca << 16);
+  int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+  printf("OCR:%08x %08x %08x %08x\r\n", c.resp0, c.resp1, c.resp2, c.resp3);
+  return err;
 }
 
 void bcm2835_emmc_irq_handler(void);

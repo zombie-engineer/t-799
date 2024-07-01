@@ -124,6 +124,8 @@ atomic_t test_atomic;
 
 struct event test_ev;
 
+char *readbuf;
+
 static void vchiq_main(void)
 {
   int err;
@@ -131,18 +133,17 @@ static void vchiq_main(void)
 
   os_log("vchiq_start\r\n");
 
+  os_wait_ms(100);
   err = fs_init(&bd);
   if (err != SUCCESS) {
-    printf("Failed to init fs block device, err: %d\r\n", err);
+    os_log("Failed to init fs block device, err: %d\r\n", err);
     goto out;
   }
-#if 0
-  err = fat32_fs_open(fs_blockdev, &fat32fs);
-  if (err != SUCCESS)
-    goto out;
-  fat32_ls(&fat32fs, "/");
-#endif
-  // err = fat32_create(&fat32fs, "/test", true, false);
+
+  readbuf = dma_alloc(32768, 0);
+  memset(readbuf, 0x11, 32768);
+  err = bd->ops.read(bd, readbuf, 0, 1);
+  printf("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
   vchiq_set_blockdev(bd);
 
   err = ili9341_init();

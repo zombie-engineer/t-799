@@ -31,9 +31,6 @@ int bcm2835_emmc_set_clock(uint32_t div)
   if (bcm2835_emmc_wait_cmd_dat_ready())
     return ERR_GENERIC;
 
-  BCM2835_EMMC_LOG("emmc_set_clock: status: %08x",
-    bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS));
-
   control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
 
   /* Timeout = CLK x 2^(13+bitsvalue).= CLK x 2^(13 + 0xb) = CLK x 2^24 */
@@ -44,7 +41,9 @@ int bcm2835_emmc_set_clock(uint32_t div)
   BCM2835_EMMC_CONTROL1_CLR_SET_CLK_FREQ8(control1, div);
   /* Clear and set SD clock base divider */
 
-  BCM2835_EMMC_LOG("emmc_set_clock: control1: %08x", control1);
+#if 0
+  BCM2835_EMMC_DEBUG("emmc_set_clock: control1: %08x", control1);
+#endif
   bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
   delay_us(6);
 
@@ -53,6 +52,7 @@ int bcm2835_emmc_set_clock(uint32_t div)
     BCM2835_EMMC_LOG("emmc_set_clock: failed to stabilize clock, err: %d");
     return err;
   }
+  BCM2835_EMMC_LOG("bcm2835_emmc clock_div set to %d\n", div);
 
   return SUCCESS;
 }

@@ -44,3 +44,4 @@ struct blockdev_io {
 
 void blockdev_scheduler_push_io(struct blockdev_io *io);
 void blockdev_scheduler_init(void);
+void blockdev_scheduler_set_part_dev(struct block_device *bdev);

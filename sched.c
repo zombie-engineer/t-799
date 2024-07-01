@@ -12,7 +12,7 @@
 #define SCHED_PRINTF(__fmt, ...) ;
 #endif
 
-#define SCHED_MS_PER_TICK 100
+#define SCHED_MS_PER_TICK 10
 #define MS_TO_US(__ms) (__ms * 1000)
 #define MS_TO_TICKS(__ms) ((__ms) / (SCHED_MS_PER_TICK))
 

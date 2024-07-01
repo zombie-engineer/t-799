@@ -114,7 +114,7 @@ static uint32_t sd_commands[] = {
   CMDTM_GEN(55, R1,      1, NA, 0, 0),
   CMDTM_GEN(56, R1,      1, NA, 0, 0),
   CMDTM_GEN(57, NA,    0, NA, 0, 0),
-  CMDTM_GEN(58, NA,    0, NA, 0, 0),
+  CMDTM_GEN(58, R3,    0, NA, 0, 0),
   CMDTM_GEN(59, NA,    0, NA, 0, 0)
 };
 
@@ -190,7 +190,7 @@ bool dma_done;
 void bcm2835_emmc_dma_irq_callback(void)
 {
   ts2 = bcm2835_systimer_get_time_us();
-  // os_log("dma_irq at %ld\r\n", ts2);
+  os_log("dma_irq at %ld\r\n", ts2);
   ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 2);
   dma_done = true;
 }
@@ -236,7 +236,7 @@ void bcm2835_emmc_irq_handler(void)
 
   r = ioreg32_read(BCM2835_EMMC_INTERRUPT);
 
-#if 0
+#if 1
   if (emmc_should_log) {
     printf("bcm2835_emmc_irq_handler: CMD%d(%08x),i:%d,r:%08x\r\n",
       CUR_CMD_IDX, CUR_CMD_REG, bcm2835_emmc.io.num_irqs, r);
@@ -246,7 +246,13 @@ void bcm2835_emmc_irq_handler(void)
   ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR) {
-    BCM2835_EMMC_LOG(",CMD_ERR");
+  printf("before: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
+    ioreg32_read(BCM2835_EMMC_RESP0),
+    ioreg32_read(BCM2835_EMMC_RESP1),
+    ioreg32_read(BCM2835_EMMC_RESP2),
+    ioreg32_read(BCM2835_EMMC_RESP3),
+    ioreg32_read(BCM2835_EMMC_STATUS));
+    BCM2835_EMMC_LOG("bcm2835_emmc_irq_handler: CMD_ERR,%08x\r\n", r);
     bcm2835_emmc.io.err = ERR_GENERIC;
     cmd_done = true;
   }
@@ -268,7 +274,7 @@ void bcm2835_emmc_irq_handler(void)
 
   if (cmd_done) {
     ts2 = bcm2835_systimer_get_time_us();
-    // os_log("cmd_done at %ld\r\n", ts2);
+    os_log("cmd_done at %ld\r\n", ts2);
     os_event_notify(&bcm2835_emmc_event);
   }
 
@@ -429,7 +435,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
     ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3 | (1<<15));
   }
 
-#if 0
+#if 1
   if (emmc_should_log)
     BCM2835_EMMC_LOG("CMD%d: writing to CMDTM: %08x\r\n",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), cmdreg);
@@ -450,6 +456,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
     dma_done = false;
   }
 
+  printf("ret:%d\r\n",bcm2835_emmc.io.err);
   return bcm2835_emmc.io.err;
 }
 

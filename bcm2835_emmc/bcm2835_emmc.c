@@ -136,47 +136,45 @@ typedef enum {
 static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   char *buf, size_t start_sector, size_t num_blocks)
 {
-  int cmd_err;
+  int err;
 
   ts1 = bcm2835_systimer_get_time_us();
-  os_log("sdcard write start at: %ld us\r\n", ts1);
   if (num_blocks > 1) {
-    if (io_type ==BCM2835_EMMC_IO_WRITE)
+    if (io_type == BCM2835_EMMC_IO_WRITE)
       emmc_should_log = true;
 
-    cmd_err = bcm2835_emmc_cmd23(num_blocks, bcm2835_emmc.is_blocking_mode);
+    err = bcm2835_emmc_cmd23(num_blocks, bcm2835_emmc.is_blocking_mode);
   }
 
   if (io_type == BCM2835_EMMC_IO_READ) {
     /* READ_SINGLE_BLOCK */
     if (num_blocks > 1) {
-      cmd_err = bcm2835_emmc_cmd18(start_sector, num_blocks, buf,
+      err = bcm2835_emmc_cmd18(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
     } else {
-      cmd_err = bcm2835_emmc_cmd17(start_sector, buf,
+      err = bcm2835_emmc_cmd17(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
     }
-    if (cmd_err)
+    if (err)
       return -1;
+
   } else if (io_type == BCM2835_EMMC_IO_WRITE) {
     /* WRITE_BLOCK */
     if (num_blocks > 1) {
-      cmd_err = bcm2835_emmc_cmd25(start_sector, num_blocks, buf,
+      err = bcm2835_emmc_cmd25(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
     } else {
-      cmd_err = bcm2835_emmc_cmd24(start_sector, buf,
+      err = bcm2835_emmc_cmd24(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
     }
-    if (cmd_err)
+    if (err)
       return -1;
   } else {
     BCM2835_EMMC_ERR("bcm2835_emmc_data_io: unknown io type: %d", io_type);
     return -1;
   }
 
-  os_log("sdcard write stop at: %ld (%ld us)\r\n", ts2, (ts2 - ts1));
-
-  return 0;
+  return SUCCESS;
 }
 
 int bcm2835_emmc_write_stream_open(
