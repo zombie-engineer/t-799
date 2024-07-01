@@ -61,7 +61,7 @@ static uint32_t sd_commands[] = {
   CMDTM_GEN(6,  NA,      0, NA, 0, 0),
   CMDTM_GEN(7,  R1b,     1, NA, 0, 0),
   CMDTM_GEN(8,  R7,      1, NA, 0, 0),
-  CMDTM_GEN(9,  R2,      0, NA, 0, 0),
+  CMDTM_GEN(9,  R1,      1, NA, 0, 0),
   CMDTM_GEN(10, R2,      0, NA, 0, 0),
   CMDTM_GEN(11, R1,      1, NA, 0, 0),
   CMDTM_GEN(12, R1b,     1, NA, 0, 0),
@@ -545,7 +545,7 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
   emmc_should_log = true;
   if (emmc_should_log)
   {
-    BCM2835_EMMC_LOG("CMD%d, arg:%d,blocking:%d, cmdreg:%08x,irq_enabled:%d",
+    BCM2835_EMMC_LOG("CMD%d, arg:%08x,blocking:%d, cmdreg:%08x,irq_enabled:%d",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
       c->arg, polling, cmdreg, irq_is_enabled());
   }

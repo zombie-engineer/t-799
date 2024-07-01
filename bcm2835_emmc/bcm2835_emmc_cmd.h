@@ -13,10 +13,14 @@
 #define BCM2835_EMMC_CMD5                 0x00000005
 /* SELECT_CARD */
 #define BCM2835_EMMC_CMD7                 0x00000007
+/*  */
+#define BCM2835_EMMC_CMD9                 0x00000009
 /* SEND_IF_COND */
 #define BCM2835_EMMC_CMD8                 0x00000008
 #define BCM2835_EMMC_CMD8_ARG             0x000001aa
 #define BCM2835_EMMC_CMD8_VALID_RESP      BCM2835_EMMC_CMD8_ARG
+/* STOP_TRANSMISSION */
+#define BCM2835_EMMC_CMD10                0x0000000a
 /* STOP_TRANSMISSION */
 #define BCM2835_EMMC_CMD12                0x0000000c
 /* SEND_STATUS */
@@ -83,6 +87,22 @@ static inline int bcm2835_emmc_cmd7(uint32_t rca, bool blocking)
   struct bcm2835_emmc_cmd c;
 
   bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD7, rca << 16);
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+static inline int bcm2835_emmc_cmd9(uint32_t rca, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD9, rca << 16);
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+static inline int bcm2835_emmc_cmd10(uint32_t rca, bool blocking)
+{
+  struct bcm2835_emmc_cmd c;
+
+  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD10, rca << 16);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 

@@ -11,6 +11,7 @@
 #include <bcm2835/bcm2835_emmc.h>
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
+#include <printf.h>
 
 #define BCM2835_EMMC_CHECK_ERR(__fmt, ...)\
   do {\
@@ -183,6 +184,7 @@ static inline int bcm2835_emmc_reset_handle_scr(uint32_t rca, uint32_t *scr,
   int sd_specx  = BITS_EXTRACT32(scr_le32, (38-32), 4);
   int bus_width = BITS_EXTRACT32(scr_le32, (48-32), 4);
 
+
   BCM2835_EMMC_LOG("SCR: sd_spec:%d, sd_spec3:%d, sd_spec4:%d, sd_specx:%d",
     sd_spec, sd_spec3, sd_spec4, sd_specx);
   if (bus_width & 4) {
@@ -340,6 +342,18 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   err = bcm2835_emmc_cmd7(*rca, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD7 (SELECT_CARD) step");
 
+  err = bcm2835_emmc_cmd9(*rca, blocking);
+  printf("CMD9, err: %d\r\n", err);
+  while(1) {
+    asm volatile("wfe");
+  }
+
+  err = bcm2835_emmc_cmd9(*rca, blocking);
+  printf("CMD9, err: %d\r\n");
+  while(1) {
+    asm volatile("wfe");
+  }
+
   err = bcm2835_emmc_cmd13(*rca, &bcm2835_emmc_status, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
 
@@ -363,6 +377,8 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   BCM2835_EMMC_CHECK_ERR("failed at SCR handling step");
 
   BCM2835_EMMC_LOG("bcm2835_emmc_reset: completed successfully");
+
+
 
   return SUCCESS;
 }
