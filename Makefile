@@ -23,6 +23,7 @@ OBJS := \
   armv8_exception_vector \
   atomic \
   bcm2835_systimer \
+  bcm2835_pll \
   bcm2835_emmc/bcm2835_emmc \
   bcm2835_emmc/bcm2835_emmc_cmd \
   bcm2835_emmc/bcm2835_emmc_priv \

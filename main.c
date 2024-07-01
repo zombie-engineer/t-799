@@ -4,6 +4,7 @@
 #include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include <bcm2835/bcm2835_emmc.h>
+#include <bcm2835/bcm2835_pll.h>
 #include <bcm2835_dma.h>
 #include <common.h>
 #include <debug_led.h>
@@ -104,6 +105,7 @@ static void kernel_init(void)
   kmalloc_init();
   dma_memory_init();
   print_mbox_props();
+  bcm2835_report_clocks();
   irq_init();
   bcm2835_systimer_init();
   irq_disable();
