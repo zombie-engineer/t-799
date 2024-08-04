@@ -75,25 +75,6 @@ static inline int bcm2835_emmc_interrupt_wait_done_or_err(
     timeout_usec, intval);
 }
 
-static inline int bcm2835_emmc_wait_cmd_dat_ready(void)
-{
-  int i;
-  uint32_t reg;
-
-  for (i = 0; i < 1000; ++i) {
-    reg = bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS);
-    if (!(BCM2835_EMMC_STATUS_GET_CMD_INHIBIT(reg) ||
-      BCM2835_EMMC_STATUS_GET_DAT_INHIBIT(reg)))
-      break;
-    delay_us(6);
-  }
-  if (i == 1000) {
-    BCM2835_EMMC_CRIT("emmc_wait_cmd_dat_ready: timeout");
-    return -1;
-  }
-  return 0;
-}
-
 static inline int bcm2835_emmc_wait_cmd_inhibit(void)
 {
   int i;

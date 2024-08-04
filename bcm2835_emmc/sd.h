@@ -1,6 +1,19 @@
 #pragma once
 #include <stdint.h>
 
+typedef enum {
+  SD_CARD_STATE_IDLE    = 0,
+  SD_CARD_STATE_READY   = 1,
+  SD_CARD_STATE_IDENT   = 2,
+  SD_CARD_STATE_STANDBY = 3,
+  SD_CARD_STATE_TRAN    = 4,
+  SD_CARD_STATE_DATA    = 5,
+  SD_CARD_STATE_RECV    = 5,
+  SD_CARD_STATE_PROG    = 6,
+  SD_CARD_STATE_DISCARD = 7,
+  SD_CARD_STATE_UNKNOWN = 0xff
+} sd_card_state_t;
+
 static inline int sd_scr_get_scr_version(uint64_t scr)
 {
   return (scr >> 60) & 0xf;

@@ -5,11 +5,6 @@
 #include <mbox_props.h>
 #include "bcm2835_emmc_utils.h"
 
-static inline uint32_t bcm2835_emmc_get_clock_div(uint32_t target_clock)
-{
-  return target_clock == BCM2835_EMMC_CLOCK_HZ_SETUP ? 64 : 4;
-}
-
 static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
 {
   return bcm2835_emmc_wait_reg_value(
@@ -18,43 +13,6 @@ static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
     BCM2835_EMMC_CONTROL1_MASK_CLK_STABLE,
     timeout_usec,
     NULL);
-}
-
-int bcm2835_emmc_set_clock(uint32_t div)
-{
-  int err;
-  uint32_t control1;
-  // uint32_t div;
-
-  // div = bcm2835_emmc_get_clock_div(target_hz);
-
-  if (bcm2835_emmc_wait_cmd_dat_ready())
-    return ERR_GENERIC;
-
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-
-  /* Timeout = CLK x 2^(13+bitsvalue).= CLK x 2^(13 + 0xb) = CLK x 2^24 */
-  BCM2835_EMMC_CONTROL1_CLR_SET_DATA_TOUNIT(control1, 0xb);
-
-  /* Enable internal clock */
-  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_INTLEN(control1, 1);
-  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_FREQ8(control1, div);
-  /* Clear and set SD clock base divider */
-
-#if 0
-  BCM2835_EMMC_DEBUG("emmc_set_clock: control1: %08x", control1);
-#endif
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
-  delay_us(6);
-
-  err = bcm2835_emmc_wait_clock_stabilized(1000);
-  if (err) {
-    BCM2835_EMMC_LOG("emmc_set_clock: failed to stabilize clock, err: %d");
-    return err;
-  }
-  BCM2835_EMMC_LOG("bcm2835_emmc clock_div set to %d\n", div);
-
-  return SUCCESS;
 }
 
 const char *bcm2835_emmc_reg_address_to_name(ioreg32_t reg)

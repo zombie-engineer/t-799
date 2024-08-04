@@ -24,6 +24,7 @@
   } while(0)
 
 
+#if 0
 /* SEND_RELATIVE_ADDR */
 static inline int bcm2835_emmc_cmd5(bool blocking)
 {
@@ -32,6 +33,7 @@ static inline int bcm2835_emmc_cmd5(bool blocking)
   bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD5, 0);
   return bcm2835_emmc_cmd(&c, 2000, blocking);
 }
+#endif
 
 static inline int bcm2835_emmc_acmd6(uint32_t rca, uint32_t bus_width_bit,
   bool blocking)
@@ -95,128 +97,26 @@ static inline void bcm2835_emmc_set_block_size(uint32_t block_size)
   bcm2835_emmc_write_reg(BCM2835_EMMC_BLKSIZECNT, regval);
 }
 
-static int bcm2835_emmc_set_bus_width4(uint32_t rca, bool blocking)
+static inline void bcm2835_sdhc_set_bus_width4(void)
 {
-  uint32_t control0;
-  int err;
-  err = bcm2835_emmc_acmd6(rca, BCM2835_EMMC_BUS_WIDTH_4BITS, blocking);
-
-  printf("%08x\r\n", *(volatile uint32_t *)(0x3f30003c));
-
-  BCM2835_EMMC_CHECK_ERR("failed to set bus to 4 bits");
-
-  control0 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL0);
-  BCM2835_EMMC_CONTROL0_CLR_SET_HCTL_DWIDTH(control0, 1);
-  BCM2835_EMMC_LOG("Enable bus width 4: setting CONTROL0 reg to %08x",
-    control0);
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, control0);
-
-  return SUCCESS;
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL0);
+  BCM2835_EMMC_CONTROL0_CLR_SET_HCTL_DWIDTH(v, 1);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, v);
 }
 
 static void bcm2835_emmc_set_high_speed(void)
 {
-  uint32_t control1;
-  uint32_t control0;
-  uint32_t caps0 = bcm2835_emmc_read_reg(BCM2835_EMMC_CAPABILITIES_0);
-  uint32_t caps1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CAPABILITIES_1);
-  uint32_t control2 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL2);
-  uint64_t allcaps = ((uint64_t)caps1 << 32) | caps0;
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-  BCM2835_EMMC_CONTROL1_CLR_CLK_EN(control1);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
-
-  BCM2835_EMMC_LOG("CAPS: %016x, %08x\r\n", allcaps, control2);
-  control0 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL0);
-  BCM2835_EMMC_CONTROL0_CLR_SET_HCTL_HS_EN(control0, 1);
-  BCM2835_EMMC_LOG("Enable high speed: setting CONTROL0 reg to %08x",
-    control0);
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, control0);
-
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_EN(control1, 1);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL0);
+  BCM2835_EMMC_CONTROL0_CLR_SET_HCTL_HS_EN(v, 1);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, v);
 }
 
-static void custom_cmd9(int rca)
-{
-  int status;
-  uint32_t mask;
-
-  printf("custom_cmd9, rca:%04x\r\n", rca);
-  mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
-    BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
-
-  while(1) {
-    status = ioreg32_read(BCM2835_EMMC_STATUS);
-    if (!(status & mask))
-      break;
-
-    BCM2835_EMMC_LOG("CMD9 wait inhibit");
-    delay_us(100);
-  }
-
-  printf("before: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
-    ioreg32_read(BCM2835_EMMC_RESP0),
-    ioreg32_read(BCM2835_EMMC_RESP1),
-    ioreg32_read(BCM2835_EMMC_RESP2),
-    ioreg32_read(BCM2835_EMMC_RESP3),
-    ioreg32_read(BCM2835_EMMC_STATUS));
-
-  uint32_t ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
-  printf("data:%08x intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
-
-  uint32_t arg = rca << 16;
-  // ioreg32_write(BCM2835_EMMC_BLKSIZECNT, 64| (1 << 16));
-  ioreg32_write(BCM2835_EMMC_ARG1, arg);
-
-  printf("before cmdtm: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
-    ioreg32_read(BCM2835_EMMC_RESP0),
-    ioreg32_read(BCM2835_EMMC_RESP1),
-    ioreg32_read(BCM2835_EMMC_RESP2),
-    ioreg32_read(BCM2835_EMMC_RESP3),
-    ioreg32_read(BCM2835_EMMC_STATUS));
-
-  ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
-  printf("data:%08x intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
-
-  ioreg32_write(BCM2835_EMMC_CMDTM,
-      (9<<24) | /*  CMD9   */
-      (0<<21) | /* NO DATA */
-      (1<<20) | /* Check response with same idx */
-      (1<<19) | /* Check CRC */
-      (1<<16) | /* Response type is R2, 136bits */
-      (0<<5)  | /* Not a multiblock */
-      (1<<4)  | /* Direction of data from card to host */
-      (0<<2)  | /* No autocommand */
-      (0<<1)    /* No block counting */
-  );
-
-  while(!(ioreg32_read(BCM2835_EMMC_STATUS) & (1<<9)))
-    printf("Wait bit read ready bit\r\n");
-
-  for (int i = 0 ; i < 20; ++i) {
-    ival = ioreg32_read(BCM2835_EMMC_INTERRUPT);
-    ioreg32_write(BCM2835_EMMC_INTERRUPT, ival);
-    printf("data:%08x,intr:%08x\r\n", ioreg32_read(BCM2835_EMMC_DATA), ival);
-    printf("after: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
-      ioreg32_read(BCM2835_EMMC_RESP0),
-      ioreg32_read(BCM2835_EMMC_RESP1),
-      ioreg32_read(BCM2835_EMMC_RESP2),
-      ioreg32_read(BCM2835_EMMC_RESP3),
-      ioreg32_read(BCM2835_EMMC_STATUS));
-  }
-  while(1) {}
-}
-static inline int bcm2835_emmc_process_sd_scr(uint32_t rca, uint64_t scr,
-  bool blocking)
+#if 0
+static inline int bcm2835_sd_parse_scr(uint64_t scr, bool *data_width4)
 {
   int sd_spec_ver_maj;
   int sd_spec_ver_min;
 
-  struct sd_cmd6_response_raw r = { 0 };
 
   int err;
   bool buswidth4_supported = sd_scr_bus_width4_supported(scr);
@@ -231,55 +131,8 @@ static inline int bcm2835_emmc_process_sd_scr(uint32_t rca, uint64_t scr,
     buswidth4_supported ? "supported" : "not_supp"
   );
 
-  if (buswidth4_supported) {
-    err = bcm2835_emmc_set_bus_width4(rca, blocking);
-    if (err != SUCCESS)
-      return err;
-  }
+  *data_width4 = buswidth4_supported;
 
-#if 0
-  custom_cmd6();
-#endif
-
-  BCM2835_EMMC_LOG("Running CMD6 to switch to SDR25\r\n");
-
-  err = bcm2835_emmc_cmd6(CMD6_MODE_CHECK,
-    CMD6_ARG_ACCESS_MODE_SDR25,
-    CMD6_ARG_CMD_SYSTEM_DEFAULT,
-    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
-    CMD6_ARG_POWER_LIMIT_DEFAULT,
-    r.data,
-    blocking);
-
-  if (err != SUCCESS)
-    return err;
-
-  BCM2835_EMMC_LOG("CMD6 result: max_current:%d, fns(%04x,%04x,%04x,%04x)\r\n",
-    sd_cmd6_mode_0_resp_get_max_current(&r),
-    sd_cmd6_mode_0_resp_get_supp_fns_1(&r),
-    sd_cmd6_mode_0_resp_get_supp_fns_2(&r),
-    sd_cmd6_mode_0_resp_get_supp_fns_3(&r),
-    sd_cmd6_mode_0_resp_get_supp_fns_4(&r));
-
-  if (!sd_cmd6_mode_0_resp_is_sdr25_supported(&r)) {
-    BCM2835_EMMC_LOG("Switching to SDR25 not supported, skipping...\r\n");
-    return SUCCESS;
-  }
-
-  BCM2835_EMMC_LOG("Switching to SDR25 is supported, switching...\r\n");
-
-  err = bcm2835_emmc_cmd6(CMD6_MODE_SWITCH,
-    CMD6_ARG_ACCESS_MODE_SDR25,
-    CMD6_ARG_CMD_SYSTEM_DEFAULT,
-    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
-    CMD6_ARG_POWER_LIMIT_DEFAULT,
-    r.data,
-    blocking);
-
-  if (err != SUCCESS)
-    return err;
-
-  bcm2835_emmc_set_high_speed();
 #if 0
   printf("Tuning CONTROL2, interrupt:%08x\r\n", ioreg32_read(BCM2835_EMMC_INTERRUPT));
 
@@ -307,8 +160,9 @@ static inline int bcm2835_emmc_process_sd_scr(uint32_t rca, uint64_t scr,
   BCM2835_EMMC_LOG("Switched to SDR25: 50MHz clock, 25 megabytes/sec\r\n");
   return SUCCESS;
 }
+#endif
 
-static void bcm2835_emmc_get_mbox_info(void)
+static void bcm2835_emmc_dump_mbox_info(void)
 {
   uint32_t powered_on = 0;
   uint32_t exists = 0;
@@ -334,68 +188,6 @@ static void bcm2835_emmc_get_mbox_info(void)
     max_clock_rate);
 }
 
-static int bcm2835_emmc_control1_reset(void)
-{
-  int i;
-  uint32_t control1;
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, 0);
-  //ioreg32_write16(BCM2835_EMMC_CONTROL2, 0);
-  // volatile uint16_t *r = 0x3f300000;
-
-#if 0
-  printf("%08x %08x %016x %08x %08x\r\n",
-    *(volatile uint32_t *)(0x3f300040),
-    *(volatile uint32_t *)(0x3f300044),
-    *(volatile uint64_t *)(0x3f300040),
-    *(volatile uint32_t *)(0x3f30003c),
-    *(volatile uint16_t *)(0x3f30003e));
-
-  *(volatile uint16_t *)(0x3f30003e) = 0xffff;
-  printf("%08x\r\n", *(volatile uint16_t *)(0x3f30003e));
-
-  *(volatile uint32_t *)(0x3f30003c) = 0xffffffff;
-  printf("%08x\r\n", *(volatile uint32_t *)(0x3f30003c));
-#endif
-
-
-  /* Disable and re-set clock */
-  /* Reset circuit and disable clock */
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-  BCM2835_EMMC_CONTROL1_CLR_SET_SRST_HC(control1, 1);
-  BCM2835_EMMC_CONTROL1_CLR_CLK_INTLEN(control1);
-  BCM2835_EMMC_CONTROL1_CLR_CLK_EN(control1);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
-
-  for(i = 0; i < 1000; ++i) {
-    delay_us(6);
-    control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-    if (!BCM2835_EMMC_CONTROL1_GET_SRST_HC(control1))
-      break;
-  }
-
-  if (i == 1000) {
-    BCM2835_EMMC_ERR("SRST_HC timeout");
-    return ERR_TIMEOUT;
-  }
-
-  BCM2835_EMMC_LOG("bcm2835_emmc_reset: after SRST_HC: control1: %08x",
-    control1);
-
-  return SUCCESS;
-}
-
-static void bcm2835_emmc_clock_enable(void)
-{
-  uint32_t control1;
-  BCM2835_EMMC_LOG("Enabling SD clock");
-  delay_us(2000);
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_EN(control1, 1);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
-  delay_us(2000);
-}
-
 static void bcm2835_emmc_interrupt_initialize(void)
 {
   uint32_t intmsk;
@@ -408,140 +200,197 @@ static void bcm2835_emmc_interrupt_initialize(void)
   delay_us(2000);
 }
 
-static int bcm2835_emmc_reset_step0(bool blocking)
+static void bcm2835_sdhc_full_reset(void)
 {
-  uint32_t acmd41_resp;
-  uint32_t status;
+  /* Set bit 24 to reset CMD and DATA state machines */
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_CLR_SET_SRST_HC(v, 1);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+
+  while(1) {
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+    if (!BCM2835_EMMC_CONTROL1_GET_SRST_HC(v))
+      break;
+  }
+}
+
+/* Wait until commincation with card is over */
+static void bcm2835_sdhc_wait_card_busy(void)
+{
+  uint32_t v;
+  uint32_t mask = 0;
+
+  /* Prepare mask that indicates CMD and DATA lines are busy */
+  BCM2835_EMMC_STATUS_CLR_SET_CMD_INHIBIT(mask, 1);
+  BCM2835_EMMC_STATUS_CLR_SET_DAT_INHIBIT(mask, 1);
+  v = mask;
+
+  while (v & mask)
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS);
+}
+
+static void bcm2835_sdhc_sd_clk_stop(void)
+{
+  uint32_t v;
+  bcm2835_sdhc_wait_card_busy();
+  v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_GET_CLK_EN(v);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+}
+
+static void bcm2835_sdhc_sd_clk_start(void)
+{
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_GET_CLK_EN(v);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+  while(1) {
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+    if (BCM2835_EMMC_CONTROL1_GET_CLK_STABLE(v))
+      break;
+  }
+}
+
+static void bcm2835_sdhc_internal_clk_stop(void)
+{
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_CLR_CLK_INTLEN(v);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+
+  while(1) {
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+    if (!BCM2835_EMMC_CONTROL1_GET_CLK_STABLE(v))
+      break;
+  }
+}
+
+static void bcm2835_sdhc_internal_clk_start(void)
+{
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_INTLEN(v, 1);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+
+  while(1) {
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+    if (BCM2835_EMMC_CONTROL1_GET_CLK_STABLE(v))
+      break;
+  }
+}
+
+static int bcm2835_sdhc_run_acmd41(bool blocking)
+{
   int err;
-
-  bcm2835_emmc_get_mbox_info();
-
-  err = bcm2835_emmc_control1_reset();
-  if (err != SUCCESS)
-    return err;
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL2, 0);
-
-  /* Slow down clock to setup commands */
-  err = bcm2835_emmc_set_clock(/*BCM2835_EMMC_CLOCK_HZ_SETUP*/64);
-  if (err != SUCCESS) {
-    BCM2835_EMMC_ERR("failed to set clock to %d Hz",
-      BCM2835_EMMC_CLOCK_HZ_SETUP);
-    return err;
-  }
-
-  status = bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS);
-  BCM2835_EMMC_LOG("STATUS: %08x", status);
-
-  bcm2835_emmc_clock_enable();
-  bcm2835_emmc_interrupt_initialize();
-
-  /* CMD0 - GO_IDLE_STATE - reset device to idle state, no response */
-  err = bcm2835_emmc_cmd0(blocking);
-  BCM2835_EMMC_CHECK_ERR("Failed at CMD0 (GO_TO_IDLE)");
-
-  /* CMD5 is CHECK_SDIO command, it will timeout for non-SDIO devices */
-  err = bcm2835_emmc_cmd5(blocking);
-  if (err == SUCCESS) {
-    BCM2835_EMMC_CRIT("Detected SDIO card. Not supported");
-    return ERR_GENERIC;
-  } 
-
-  if (err != ERR_TIMEOUT) {
-    BCM2835_EMMC_ERR("CMD5 failed with unexpected error %d", err);
-    return err;
-  }
-
-  /*
-   * After failed command (timeout) we should reset command state machine 
-   * to a known state.
-   */
-  err = bcm2835_emmc_reset_cmd(blocking);
-  BCM2835_EMMC_CHECK_ERR("failed to reset command after SDIO_CHECK");
-
-  BCM2835_EMMC_LOG("Detected SD card");
-
-  /* CMD8 -SEND_IF_COND - this checks if SD card supports our voltage */
-  err = bcm2835_emmc_cmd8(blocking);
-  BCM2835_EMMC_CHECK_ERR("CMD8 (SEND_IF_COND) failed");
+  uint32_t arg;
+  uint32_t resp = 0;
 
   /* Host supports HIGH CAPACITY (SDHC/SDXC) */
+  #define ACMD41_RESP_BUSY (1<<31)
+
   #define ACMD41_ARG_HCS  (1<<30)
   /* SDXC power saving - max performance enable */
   #define ACMD41_ARG_XPC  (1<<28)
   #define ACMD41_ARG_S18R (1<<24)
   #define ACMD41_ARG_VDD  0
 
-  err = bcm2835_emmc_acmd41(0, &acmd41_resp, blocking);
+  err = bcm2835_emmc_acmd41(0, &resp, blocking);
   BCM2835_EMMC_CHECK_ERR("ACMD41 (SD_SEND_OP_COND) failed");
-  BCM2835_EMMC_LOG("ACMD41: arg:%08x, resp:%08x", 0, acmd41_resp);
+  BCM2835_EMMC_LOG("ACMD41: arg:%08x, resp:%08x", 0, resp);
 
-  uint32_t acmd41_arg = acmd41_resp | ACMD41_ARG_HCS | ACMD41_ARG_XPC;
-  err = bcm2835_emmc_acmd41(acmd41_arg, &acmd41_resp, blocking);
+  arg = (resp & 0x00ff8000) | ACMD41_ARG_HCS;
+  err = bcm2835_emmc_acmd41(arg, &resp, blocking);
   BCM2835_EMMC_CHECK_ERR("ACMD41 (SD_SEND_OP_COND) failed");
 
-  while (BIT_IS_CLEAR(acmd41_resp, 31)) {
-    err = bcm2835_emmc_acmd41(acmd41_arg, &acmd41_resp, blocking);
-    BCM2835_EMMC_CHECK_ERR("ACMD41 (SD_SEND_OP_COND) failed");
-    BCM2835_EMMC_LOG("ACMD41: arg:%08x, resp:%08x", acmd41_arg, acmd41_resp);
+  arg = 0x40ff8000;
+  resp = 0;
+
+  while (!(resp & ACMD41_RESP_BUSY)) {
+    err = bcm2835_emmc_acmd41(arg, &resp, blocking);
+    BCM2835_EMMC_CHECK_ERR("ACMD41 (SD_SEND_OP_COND) failed 2");
   }
 
-  bool can_switch_to_1v8 = (acmd41_resp >> 24) & 1;
-  bool is_uhs2 = (acmd41_resp >> 29) & 1;
-  bool is_sdhc = (acmd41_resp >> 30) & 1;
-  bool is_busy = (acmd41_resp >> 31) & 1;
-
-  BCM2835_EMMC_LOG("ACMD41: arg:%08x, resp:%08x, 1v8:%d,UHS-II:%d,"
-    "SDHC/SDXC:%d,READY:%d",
-    acmd41_resp, acmd41_resp, can_switch_to_1v8, is_uhs2, is_sdhc,is_busy);
-
   return SUCCESS;
 }
 
-static int bcm2835_emmc_get_scr(uint32_t rca, bool blocking)
+#define LOW_FREQ false
+#define HIGH_FREQ true
+
+static void bcm2835_sdhc_set_timeout(void)
 {
-  int err;
-  char scrbuf[8] = { 0 };
-  char scrbuf_le[8] = { 0 };
-  uint64_t scr;
-
-  err = bcm2835_emmc_acmd51(rca, scrbuf, sizeof(scrbuf), blocking);
-  BCM2835_EMMC_CHECK_ERR("ACMD51 (SEND_SCR) failed");
-  for (int i = 0; i < 8; ++i)
-    scrbuf_le[i] = scrbuf[7 - i];
-
-  scr = *(const uint64_t *)scrbuf_le;
-
-  BCM2835_EMMC_LOG("bcm2835_emmc_reset: SCR: %016lx", scr);
-
-  err = bcm2835_emmc_process_sd_scr(rca, scr, blocking);
-  BCM2835_EMMC_CHECK_ERR("failed at SCR handling step");
-  return SUCCESS;
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  /* Timeout = CLK x 2^(13+bitsvalue).= CLK x 2^(13 + 0xb) = CLK x 2^24 */
+  BCM2835_EMMC_CONTROL1_CLR_SET_DATA_TOUNIT(v, 0xb);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
 }
 
-int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
+static void bcm2835_sdhc_set_clk_div(uint32_t div)
 {
+  uint32_t v = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
+  BCM2835_EMMC_CONTROL1_CLR_SET_CLK_FREQ8(v, div);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, v);
+}
+
+static void bcm2835_sdhc_clk_reconfigure(bool speed_normal)
+{
+  uint32_t div = speed_normal ? 4 : 64;
+
+  bcm2835_sdhc_sd_clk_stop();
+  bcm2835_sdhc_internal_clk_stop();
+  bcm2835_sdhc_set_timeout();
+  bcm2835_sdhc_set_clk_div(div);
+  bcm2835_sdhc_internal_clk_start();
+  bcm2835_sdhc_sd_clk_start();
+}
+
+static void bcm2835_sdhc_reset(void)
+{
+  bcm2835_sdhc_full_reset();
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL0, 0);
+  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL2, 0);
+
+  /*
+   * After reset SDHC clock speed should be low for capability with cards
+   * that might be slow on initial phase
+   */
+  bcm2835_sdhc_clk_reconfigure(LOW_FREQ);
+  bcm2835_emmc_interrupt_initialize();
+}
+
+static int bcm2835_sdhc_identification_mode(uint32_t *rca, bool blocking)
+{
+  /*
+   * Taken from "Physical Layer Simplified Specification Version 9.00"
+   * SD host at initialization is in identification mode to know which cards
+   * are available. In this mode it queries cards and knows their addresses
+   * During that SD cards transition states in a defined order.
+   * We want to set the card to STANDBY state and move SD host to data
+   * transfer state.
+   * For that we:
+   * 1. Reset SD card back to IDLE state CMD0.
+   * 2. Issue commands to traverse states:
+   *    CDM0->IDLE->CMD8,CMD41->READY->CMD2->IDENT->CMD3->STANDBY
+   */
   int err;
+  sd_card_state_t card_state;
   uint32_t bcm2835_emmc_status;
-  uint32_t bcm2835_emmc_state;
+  uint32_t device_id[4];
 
-  err = bcm2835_emmc_reset_step0(blocking);
+  err = bcm2835_emmc_cmd0(blocking);
+  BCM2835_EMMC_CHECK_ERR("Failed at CMD0 (GO_TO_IDLE)");
+  /* card_state = IDLE */
+
+  /* CMD8 -SEND_IF_COND - this checks if SD card supports our voltage */
+  err = bcm2835_emmc_cmd8(blocking);
+  BCM2835_EMMC_CHECK_ERR("CMD8 (SEND_IF_COND) failed");
+  /* card_state = IDLE */
+
+  err = bcm2835_sdhc_run_acmd41(blocking);
   if (err != SUCCESS)
     return err;
-
-  uint32_t caps0 = bcm2835_emmc_read_reg(BCM2835_EMMC_CAPABILITIES_0);
-  uint32_t caps1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CAPABILITIES_1);
-  printf("0:%08x, 1:%08x\r\n", caps0, caps1);
-
-
-  /* Set normal clock */
-  err = bcm2835_emmc_set_clock(/* BCM2835_EMMC_CLOCK_HZ_NORMAL */4);
-  BCM2835_EMMC_CHECK_ERR("failed to set clock to %d Hz",
-    BCM2835_EMMC_CLOCK_HZ_NORMAL);
+  /* card_state = READY */
 
   /* Get device id */
   err = bcm2835_emmc_cmd2(device_id, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD2 (SEND_ALL_CID) step");
+  /* card_state = IDENT */
 
   BCM2835_EMMC_LOG("bcm2835_emmc_reset: device_id: %08x.%08x.%08x.%08x",
     device_id[0], device_id[1], device_id[2], device_id[3]);
@@ -549,38 +398,108 @@ int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
   err = bcm2835_emmc_cmd3(rca, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD3 (SEND_RELATIVE_ADDR) step");
   BCM2835_EMMC_LOG("bcm2835_emmc_reset: RCA: %08x", *rca);
-
-  err = bcm2835_emmc_cmd7(*rca, blocking);
-  BCM2835_EMMC_CHECK_ERR("failed at CMD7 (SELECT_CARD) step");
-  custom_cmd9(*rca);
+  /* card_state = STANDBY */
 
   err = bcm2835_emmc_cmd13(*rca, &bcm2835_emmc_status, blocking);
   BCM2835_EMMC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
 
-  bcm2835_emmc_state = BCM2835_EMMC_CARD_STATUS_GET_CURRENT_STATE(
-    bcm2835_emmc_status);
+  card_state = (bcm2835_emmc_status >> 9) & 0xf;
+  if (card_state != SD_CARD_STATE_STANDBY) {
+    BCM2835_EMMC_ERR("Card not in STANDBY state after init");
+    return ERR_GENERIC;
+  }
 
-  BCM2835_EMMC_LOG("bcm2835_emmc_reset: status: %08x, curr state: %d(%s)",
-    bcm2835_emmc_status, bcm2835_emmc_state,
-    bcm2835_emmc_state_to_string(bcm2835_emmc_state));
+  return SUCCESS;
+}
 
-  bcm2835_emmc_set_block_size(BCM2835_EMMC_BLOCK_SIZE);
+static int bcm2835_sdhc_data_transfer_mode(uint32_t rca, bool blocking)
+{
+  int err;
+  bool data_width4_supported;
 
-  printf("CMD9\r\n");
-  err = bcm2835_emmc_cmd9(*rca, blocking);
-  printf("CMD9:%d\r\n", err);
-  // BCM2835_EMMC_CHECK_ERR("CMD9 (SEND_CSD) failed");
-  while(1);
-  // printf("CMD58\r\n");
-  // bcm2835_emmc_cmd58(*rca, blocking);
-  BCM2835_EMMC_CHECK_ERR("CMD58 (READ_OCR) failed");
-  while(1);
+  struct sd_cmd6_response_raw r = { 0 };
 
-  err = bcm2835_emmc_get_scr(*rca, blocking);
+  char scrbuf[8] = { 0 };
+  char scrbuf_le[8] = { 0 };
+  uint64_t scr;
+
+  err = bcm2835_emmc_cmd9(rca, blocking);
+  BCM2835_EMMC_CHECK_ERR("CMD9 (SEND_CSD) failed");
+
+  err = bcm2835_emmc_cmd7(rca, blocking);
+  BCM2835_EMMC_CHECK_ERR("CMD7 (SELECT_CARD) failed");
+  /* card_state = TRAN */
+
+  err = bcm2835_emmc_acmd51(rca, scrbuf, sizeof(scrbuf), blocking);
+  BCM2835_EMMC_CHECK_ERR("ACMD51 (SEND_SCR) failed");
+
+#if 0
+  for (int i = 0; i < 8; ++i)
+    scrbuf_le[i] = scrbuf[7 - i];
+
+  err = bcm2835_sd_parse_scr(rca, scr, blocking, &data_width4_supported);
+#endif
+
+  data_width4_supported = true;
+  if (data_width4_supported) {
+    err = bcm2835_emmc_acmd6(rca, BCM2835_EMMC_BUS_WIDTH_4BITS, blocking);
+    BCM2835_EMMC_CHECK_ERR("failed to set bus to 4 bits");
+    bcm2835_sdhc_set_bus_width4();
+    BCM2835_EMMC_LOG("SDHC configured for 4bit DAT");
+  }
+
+  err = bcm2835_emmc_cmd6(CMD6_MODE_CHECK,
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    r.data,
+    blocking);
+  BCM2835_EMMC_CHECK_ERR("CMD6");
+
+  BCM2835_EMMC_LOG("CMD6 result: max_current:%d, fns(%04x,%04x,%04x,%04x)\r\n",
+    sd_cmd6_mode_0_resp_get_max_current(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_1(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_2(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_3(&r),
+    sd_cmd6_mode_0_resp_get_supp_fns_4(&r));
+
+  if (!sd_cmd6_mode_0_resp_is_sdr25_supported(&r)) {
+    BCM2835_EMMC_LOG("Switching to SDR25 not supported, skipping...\r\n");
+    return SUCCESS;
+  }
+
+  BCM2835_EMMC_LOG("Switching to SDR25 ...\r\n");
+
+  err = bcm2835_emmc_cmd6(CMD6_MODE_SWITCH,
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    r.data,
+    blocking);
+  BCM2835_EMMC_CHECK_ERR("CMD6");
+
+  bcm2835_emmc_set_high_speed();
+  bcm2835_sdhc_clk_reconfigure(HIGH_FREQ);
+  return SUCCESS;
+}
+
+int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
+{
+  int err;
+  uint32_t bcm2835_emmc_state;
+
+  bcm2835_emmc_dump_mbox_info();
+  bcm2835_sdhc_reset();
+  err = bcm2835_sdhc_identification_mode(rca, blocking);
   if (err != SUCCESS)
     return err;
 
-  BCM2835_EMMC_LOG("bcm2835_emmc_reset: completed successfully");
-  err = bcm2835_emmc_set_clock(64);
+  err = bcm2835_sdhc_data_transfer_mode(*rca, blocking);
+  if (err != SUCCESS)
+    return err;
+
+  BCM2835_EMMC_LOG("bcm2835_emmc_reset done");
   return SUCCESS;
 }
