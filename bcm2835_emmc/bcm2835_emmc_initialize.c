@@ -24,23 +24,12 @@
   } while(0)
 
 
-#if 0
-/* SEND_RELATIVE_ADDR */
-static inline int bcm2835_emmc_cmd5(bool blocking)
-{
-  struct bcm2835_emmc_cmd c;
-
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD5, 0);
-  return bcm2835_emmc_cmd(&c, 2000, blocking);
-}
-#endif
-
 static inline int bcm2835_emmc_acmd6(uint32_t rca, uint32_t bus_width_bit,
   bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_ACMD6, bus_width_bit);
+  sd_cmd_init(&c, BCM2835_EMMC_ACMD6, bus_width_bit);
   c.rca = rca;
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
@@ -48,10 +37,10 @@ static inline int bcm2835_emmc_acmd6(uint32_t rca, uint32_t bus_width_bit,
 static inline int bcm2835_emmc_acmd41(uint32_t arg, uint32_t *resp,
   bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
   int cmd_ret;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_ACMD41, arg);
+  sd_cmd_init(&c, BCM2835_EMMC_ACMD41, arg);
   cmd_ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 
   BCM2835_EMMC_LOG("ACMD41 full response: %08x|%08x|%08x|%08x\r\n",
@@ -66,7 +55,7 @@ static inline int bcm2835_emmc_acmd41(uint32_t arg, uint32_t *resp,
 static inline int bcm2835_emmc_acmd51(uint32_t rca, char *scrbuf,
   int scrbuf_len, bool blocking)
 {
-  struct bcm2835_emmc_cmd c = { 0 };
+  struct sd_cmd c = { 0 };
 
   if (scrbuf_len < 8) {
     BCM2835_EMMC_CRIT("SRC buffer less than 8 bytes");
@@ -78,7 +67,7 @@ static inline int bcm2835_emmc_acmd51(uint32_t rca, char *scrbuf,
     return -1;
   }
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_ACMD51, 0);
+  sd_cmd_init(&c, BCM2835_EMMC_ACMD51, 0);
 
   c.block_size = 8;
   c.num_blocks = 1;

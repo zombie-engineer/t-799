@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-struct bcm2835_emmc_cmd;
+struct sd_cmd;
 
 typedef enum {
   BCM2835_EMMC_IO_WAIT_CMD_DONE,
@@ -11,7 +11,7 @@ typedef enum {
 } bcm2835_emmc_cmd_state_t;
 
 struct bcm2835_emmc_io {
-  struct bcm2835_emmc_cmd *c;
+  struct sd_cmd *c;
   uint32_t cmdreg;
   int err;
   uint32_t interrupt;

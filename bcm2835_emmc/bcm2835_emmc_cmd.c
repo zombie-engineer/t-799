@@ -334,7 +334,7 @@ static inline int bcm2835_emmc_wait_process_interrupts(const char *tag,
 }
 
 static inline int OPTIMIZED bcm2835_emmc_polling_data_io(
-  struct bcm2835_emmc_cmd *c,
+  struct sd_cmd *c,
   uint32_t cmdreg,
   uint64_t timeout_usec)
 {
@@ -410,7 +410,7 @@ static inline int OPTIMIZED bcm2835_emmc_polling_data_io(
     intbits, timeout_usec);
 }
 
-static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
+static inline int bcm2835_emmc_cmd_interrupt_based(struct sd_cmd *c)
 {
   uint32_t cmdreg = bcm2835_emmc.io.cmdreg;
 
@@ -460,7 +460,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct bcm2835_emmc_cmd *c)
   return bcm2835_emmc.io.err;
 }
 
-static inline void bcm2835_emmc_read_response(struct bcm2835_emmc_cmd *c,
+static inline void bcm2835_emmc_read_response(struct sd_cmd *c,
   struct bcm2835_emmc_io *io)
 {
   switch(BCM2835_EMMC_CMDTM_GET_CMD_RSPNS_TYPE(io->cmdreg)) {
@@ -481,7 +481,7 @@ static inline void bcm2835_emmc_read_response(struct bcm2835_emmc_cmd *c,
   }
 }
 
-static inline int bcm2835_emmc_cmd_polled(struct bcm2835_emmc_cmd *c,
+static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
   uint64_t timeout_usec)
 {
   int data_status;
@@ -565,7 +565,7 @@ static inline int bcm2835_emmc_cmd_polled(struct bcm2835_emmc_cmd *c,
   return SUCCESS;
 }
 
-static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
+static inline int bcm2835_emmc_run_cmd(struct sd_cmd *c,
   uint32_t cmdreg, uint64_t timeout_usec, bool polling)
 {
   uint32_t blksizecnt;
@@ -612,14 +612,14 @@ static inline int bcm2835_emmc_run_cmd(struct bcm2835_emmc_cmd *c,
   return bcm2835_emmc_cmd_interrupt_based(c);
 }
 
-static int bcm2835_emmc_run_acmd(struct bcm2835_emmc_cmd *c,
+static int bcm2835_emmc_run_acmd(struct sd_cmd *c,
   uint64_t timeout_usec, bool mode_polling)
 {
   int acmd_idx;
   int status;
-  struct bcm2835_emmc_cmd acmd;
+  struct sd_cmd acmd;
 
-  bcm2835_emmc_cmd_init(&acmd, BCM2835_EMMC_CMD55, c->rca << 16);
+  sd_cmd_init(&acmd, BCM2835_EMMC_CMD55, c->rca << 16);
 
   acmd.num_blocks = c->num_blocks;
   acmd.block_size = c->block_size;
@@ -635,7 +635,7 @@ static int bcm2835_emmc_run_acmd(struct bcm2835_emmc_cmd *c,
     mode_polling);
 }
 
-int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
+int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   bool mode_polling)
 {
   uint32_t intval;

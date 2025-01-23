@@ -62,7 +62,7 @@
 #define BCM2835_EMMC_ACMD41               0x80000029
 #define BCM2835_EMMC_ACMD51               0x80000033
 
-struct bcm2835_emmc_cmd {
+struct sd_cmd {
   uint32_t cmd_idx;
   uint32_t arg;
   uint32_t block_size;
@@ -76,7 +76,7 @@ struct bcm2835_emmc_cmd {
   char *databuf;
 };
 
-static inline void bcm2835_emmc_cmd_init(struct bcm2835_emmc_cmd *c,
+static inline void sd_cmd_init(struct sd_cmd *c,
   int cmd_idx, int arg)
 {
   memset(c, 0, sizeof(*c));
@@ -84,7 +84,7 @@ static inline void bcm2835_emmc_cmd_init(struct bcm2835_emmc_cmd *c,
   c->arg = arg;
 }
 
-int bcm2835_emmc_cmd(struct bcm2835_emmc_cmd *c, uint64_t timeout_usec,
+int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   bool blocking);
 
 /*
@@ -94,9 +94,9 @@ int bcm2835_emmc_reset_cmd(bool blocking);
 
 static inline int bcm2835_emmc_cmd0(bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD0, 0);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD0, 0);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
@@ -104,9 +104,9 @@ static inline int bcm2835_emmc_cmd0(bool blocking)
 static inline int bcm2835_emmc_cmd2(uint32_t *device_id, bool blocking)
 {
   int cmd_ret;
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD2, 0);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD2, 0);
   cmd_ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 
   if (cmd_ret != SUCCESS)
@@ -130,9 +130,9 @@ static inline int bcm2835_emmc_cmd3(uint32_t *out_rca, bool blocking)
   bool ready;
 
   int cmd_ret;
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD3, 0);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD3, 0);
   cmd_ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 
   if (cmd_ret != SUCCESS)
@@ -192,7 +192,7 @@ static inline int bcm2835_emmc_cmd6(int mode, int access_mode,
   bool blocking)
 {
   int err;
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
   uint32_t arg = access_mode & 0xf;
 
   arg |= (command_system & 0xf) << 4;
@@ -210,7 +210,7 @@ static inline int bcm2835_emmc_cmd6(int mode, int access_mode,
   // arg = 0x00fffff1;
   // printf("cmd6: arg:%08x\r\n", arg);
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD6, arg);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD6, arg);
 
   c.databuf = dstbuf;
   c.num_blocks = 1;
@@ -235,16 +235,16 @@ static inline int bcm2835_emmc_cmd6(int mode, int access_mode,
 /* Select card */
 static inline int bcm2835_emmc_cmd7(uint32_t rca, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD7, rca << 16);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD7, rca << 16);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
 static inline int bcm2835_emmc_cmd8(bool blocking)
 {
   int ret;
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
   /*
    * CMD8 Send Interface condition command
@@ -263,7 +263,7 @@ static inline int bcm2835_emmc_cmd8(bool blocking)
 #define CMD8_ARG ((CMD8_ARG_VOLTAGE_3V3 << 8) | CMD8_ARG_PATTERN)
 #define CMD8_EXPECTED_RESPONSE CMD8_ARG
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD8, CMD8_ARG);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD8, CMD8_ARG);
   ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
   if (ret != SUCCESS)
     return ret;
@@ -276,9 +276,9 @@ static inline int bcm2835_emmc_cmd8(bool blocking)
 
 static inline int bcm2835_emmc_cmd9(uint32_t rca, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD9, rca << 16);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD9, rca << 16);
   int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
   printf("CSD:%08x %08x %08x %08x\r\n",
     ioreg32_read(BCM2835_EMMC_RESP0),
@@ -292,10 +292,10 @@ static inline int bcm2835_emmc_cmd9(uint32_t rca, bool blocking)
 static inline int bcm2835_emmc_cmd13(uint32_t rca, uint32_t *out_status,
   bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
   int cmd_ret;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD13, rca << 16);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD13, rca << 16);
   cmd_ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 
   if (cmd_ret != SUCCESS)
@@ -310,9 +310,9 @@ static inline int bcm2835_emmc_cmd13(uint32_t rca, uint32_t *out_status,
 static inline int bcm2835_emmc_cmd17(uint32_t block_idx, char *dstbuf,
   bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD17, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD17, block_idx);
   c.databuf = dstbuf;
   c.num_blocks = 1;
   c.block_size = 512;
@@ -324,9 +324,9 @@ static inline int bcm2835_emmc_cmd17(uint32_t block_idx, char *dstbuf,
 static inline int bcm2835_emmc_cmd18(uint32_t block_idx, size_t num_blocks,
   char *dstbuf, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD18, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD18, block_idx);
   c.databuf = dstbuf;
   c.num_blocks = num_blocks;
   c.block_size = 512;
@@ -338,9 +338,9 @@ extern bool emmc_should_log;
 
 static inline int bcm2835_emmc_cmd23(size_t num_blocks, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD23, num_blocks);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD23, num_blocks);
   c.databuf = NULL;
   c.num_blocks = 0;
   c.block_size = 0;
@@ -352,9 +352,9 @@ static inline int bcm2835_emmc_cmd23(size_t num_blocks, bool blocking)
 static inline int bcm2835_emmc_cmd24(uint32_t block_idx, char *srcbuf,
   bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD24, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD24, block_idx);
   c.databuf = srcbuf;
   c.num_blocks = 1;
   c.block_size = 512;
@@ -367,9 +367,9 @@ int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx);
 static inline int bcm2835_emmc_cmd25(uint32_t block_idx, size_t num_blocks,
   char *srcbuf, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD25, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD25, block_idx);
   c.databuf = srcbuf;
   c.num_blocks = num_blocks;
   c.block_size = 512;
@@ -381,33 +381,33 @@ static inline int bcm2835_emmc_cmd25(uint32_t block_idx, size_t num_blocks,
 
 static inline int bcm2835_emmc_cmd32(uint32_t block_idx, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD32, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD32, block_idx);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
 static inline int bcm2835_emmc_cmd33(uint32_t block_idx, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD33, block_idx);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD33, block_idx);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
 static inline int bcm2835_emmc_cmd38(uint32_t arg, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD38, arg);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD38, arg);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
 static inline int bcm2835_emmc_cmd58(uint32_t rca, bool blocking)
 {
-  struct bcm2835_emmc_cmd c;
+  struct sd_cmd c;
 
-  bcm2835_emmc_cmd_init(&c, BCM2835_EMMC_CMD58, rca << 16);
+  sd_cmd_init(&c, BCM2835_EMMC_CMD58, rca << 16);
   int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
   printf("OCR:%08x %08x %08x %08x\r\n", c.resp0, c.resp1, c.resp2, c.resp3);
   return err;
