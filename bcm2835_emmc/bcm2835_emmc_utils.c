@@ -5,16 +5,6 @@
 #include <mbox_props.h>
 #include "bcm2835_emmc_utils.h"
 
-static inline int bcm2835_emmc_wait_clock_stabilized(uint64_t timeout_usec)
-{
-  return bcm2835_emmc_wait_reg_value(
-    BCM2835_EMMC_CONTROL1,
-    BCM2835_EMMC_CONTROL1_MASK_CLK_STABLE,
-    BCM2835_EMMC_CONTROL1_MASK_CLK_STABLE,
-    timeout_usec,
-    NULL);
-}
-
 const char *bcm2835_emmc_reg_address_to_name(ioreg32_t reg)
 {
   if (reg == BCM2835_EMMC_ARG2) return "BCM2835_EMMC_ARG2";

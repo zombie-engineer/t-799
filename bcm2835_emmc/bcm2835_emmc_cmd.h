@@ -76,6 +76,12 @@ struct sd_cmd {
   char *databuf;
 };
 
+#define SD_CMD_INIT(__idx, __arg, __rca) { \
+  .cmd_idx = __idx, \
+  .arg     = __arg, \
+  .rca     = __rca, \
+}
+
 static inline void sd_cmd_init(struct sd_cmd *c,
   int cmd_idx, int arg)
 {
@@ -87,30 +93,21 @@ static inline void sd_cmd_init(struct sd_cmd *c,
 int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   bool blocking);
 
-/*
- * Reset state after a failed command
- */
-int bcm2835_emmc_reset_cmd(bool blocking);
-
 static inline int bcm2835_emmc_cmd0(bool blocking)
 {
-  struct sd_cmd c;
-
-  sd_cmd_init(&c, BCM2835_EMMC_CMD0, 0);
+  struct sd_cmd c = SD_CMD_INIT(0, 0, 0);
   return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 }
 
 /* SEND_ALL_CID */
 static inline int bcm2835_emmc_cmd2(uint32_t *device_id, bool blocking)
 {
-  int cmd_ret;
-  struct sd_cmd c;
+  int err;
+  struct sd_cmd c = SD_CMD_INIT(2, 0, 0);
+  err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
 
-  sd_cmd_init(&c, BCM2835_EMMC_CMD2, 0);
-  cmd_ret = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
-
-  if (cmd_ret != SUCCESS)
-    return cmd_ret;
+  if (err != SUCCESS)
+    return err;
 
   device_id[0] = c.resp0;
   device_id[1] = c.resp1;
@@ -144,12 +141,6 @@ static inline int bcm2835_emmc_cmd3(uint32_t *out_rca, bool blocking)
   status = BITS_EXTRACT32(c.resp0, 9, 1);
   ready = BITS_EXTRACT32(c.resp0, 8, 1);
   rca = BITS_EXTRACT32(c.resp0, 16, 16);
-
-#if 0
-  BCM2835_EMMC_LOG("bcm2835_emmc_cmd3 result: err: %d, crc_err: %d,"
-    " illegal_cmd: %d, status: %d, ready: %d, rca: %04x",
-    error, crc_error, illegal_cmd, status, ready, rca);
-#endif
 
   if (error)
     return ERR_GENERIC;
@@ -411,6 +402,52 @@ static inline int bcm2835_emmc_cmd58(uint32_t rca, bool blocking)
   int err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
   printf("OCR:%08x %08x %08x %08x\r\n", c.resp0, c.resp1, c.resp2, c.resp3);
   return err;
+}
+
+static inline int bcm2835_emmc_acmd6(uint32_t rca, uint32_t bus_width_bit,
+  bool blocking)
+{
+  struct sd_cmd c;
+
+  sd_cmd_init(&c, BCM2835_EMMC_ACMD6, bus_width_bit);
+  c.rca = rca;
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+}
+
+static inline int bcm2835_emmc_acmd41(uint32_t arg, uint32_t *resp,
+  bool blocking)
+{
+  int err;
+  struct sd_cmd c = SD_CMD_INIT(ACMD(41), arg, 0);
+  err = bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC, blocking);
+
+#if 0
+  BCM2835_EMMC_LOG("ACMD41 full response: %08x|%08x|%08x|%08x\r\n",
+    c.resp0, c.resp1, c.resp2, c.resp3);
+#endif
+
+  if (err == SUCCESS)
+    *resp = c.resp0;
+  return err;
+}
+
+/* SEND_SCR */
+static inline int bcm2835_emmc_acmd51(uint32_t rca, char *scrbuf,
+  int scrbuf_len, bool blocking)
+{
+  struct sd_cmd c = SD_CMD_INIT(ACMD(51), 0, rca);
+
+  if (scrbuf_len < 8)
+    return -1;
+
+  if ((uint64_t)scrbuf & 3)
+    return -1;
+
+  c.block_size = 8;
+  c.num_blocks = 1;
+  c.databuf = scrbuf;
+
+  return bcm2835_emmc_cmd(&c, BCM2835_EMMC_WAIT_TIMEOUT_USEC * 4, blocking);
 }
 
 void bcm2835_emmc_irq_handler(void);

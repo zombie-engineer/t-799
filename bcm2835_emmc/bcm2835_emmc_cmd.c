@@ -481,68 +481,90 @@ static inline void bcm2835_emmc_read_response(struct sd_cmd *c,
   }
 }
 
+#define BCM2835_EMMC_INTERRUPT_ALL_ERR \
+    ( BCM2835_EMMC_INTERRUPT_MASK_ERR      \
+    | BCM2835_EMMC_INTERRUPT_MASK_CTO_ERR  \
+    | BCM2835_EMMC_INTERRUPT_MASK_CCRC_ERR \
+    | BCM2835_EMMC_INTERRUPT_MASK_CEND_ERR \
+    | BCM2835_EMMC_INTERRUPT_MASK_CBAD_ERR \
+    | BCM2835_EMMC_INTERRUPT_MASK_DTO_ERR  \
+    | BCM2835_EMMC_INTERRUPT_MASK_DCRC_ERR \
+    | BCM2835_EMMC_INTERRUPT_MASK_DEND_ERR \
+    | BCM2835_EMMC_INTERRUPT_MASK_ACMD_ERR)
+
+static inline int bcm2835_emmc_polled_wait_cmd_done_or_err(
+  uint64_t timeout_us, uint32_t *out_interrupt_value)
+{
+  uint32_t v = 0;
+  const uint64_t dt = 100;
+  const uint32_t mask = BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE
+    | BCM2835_EMMC_INTERRUPT_ALL_ERR;
+
+  while (1) {
+    v = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
+    if (v & mask)
+      break;
+
+    bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS);
+    delay_us(dt);
+    if (timeout_us < dt)
+      return ERR_TIMEOUT;
+
+    timeout_us -= dt;
+  }
+
+  *out_interrupt_value = v;
+  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, v & mask);
+  if (v & BCM2835_EMMC_INTERRUPT_MASK_ERR)
+    return ERR_GENERIC;
+
+  return SUCCESS;
+}
+
+static inline int bcm2835_emmc_polled_exit_on_error(uint32_t interrupt)
+{
+  char intbuf[256];
+
+  if (interrupt & BCM2835_EMMC_INTERRUPT_MASK_CTO_ERR) {
+    BCM2835_EMMC_ERR("emmc_issue_cmd: exit by timeout");
+    return ERR_TIMEOUT;
+  }
+
+  bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf),
+    interrupt);
+  BCM2835_EMMC_ERR("emmc_issue_cmd: error in INTERRUPT register: %08x, %s",
+    interrupt, intbuf);
+  return ERR_GENERIC;
+}
+
 static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
-  uint64_t timeout_usec)
+  uint64_t timeout_us)
 {
   int data_status;
   int err;
   uint32_t intval, intval_cmp;
-  char intbuf[256];
   uint32_t cmdreg = bcm2835_emmc.io.cmdreg;
 
-  uint32_t r = 0;
-  uint64_t time_left_us = timeout_usec;
-  const uint64_t delay_time_us = 100;
-  uint32_t mask = BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE
-    | BCM2835_EMMC_INTERRUPT_MASK_ERR;
-
   if (irq_is_enabled()) {
-    BCM2835_EMMC_LOG("bcm2835_emmc runs in polled mode and "
-    "interrups enabled");
+    BCM2835_EMMC_LOG("bcm2835_emmc runs in polled mode and interrups enabled");
     return ERR_GENERIC;
   }
-
-  if (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg))
-    mask |= BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE;
 
   bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
 
-  while(time_left_us) {
-    r = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
-    if (r & mask)
-      break;
+  if (c->cmd_idx == 0)
+    return SUCCESS;
 
-    delay_us(delay_time_us);
-    time_left_us = (time_left_us > delay_time_us) ?
-      time_left_us - delay_time_us : 0;
-  }
+  bcm2835_emmc.io.err = bcm2835_emmc_polled_wait_cmd_done_or_err(timeout_us,
+    &bcm2835_emmc.io.interrupt);
 
-  if (!time_left_us)
-    return ERR_TIMEOUT;
-
-  bcm2835_emmc.io.err = r & BCM2835_EMMC_INTERRUPT_MASK_ERR ?
-    ERR_GENERIC : SUCCESS;
-
-  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, r);
-  bcm2835_emmc.io.interrupt = r;
-
-  if (bcm2835_emmc.io.err != SUCCESS) {
-    if (bcm2835_emmc.io.interrupt
-      & BCM2835_EMMC_INTERRUPT_MASK_CTO_ERR) {
-      BCM2835_EMMC_ERR("emmc_issue_cmd: exit by timeout");
-      return ERR_TIMEOUT;
-    }
-    bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf),
-      bcm2835_emmc.io.interrupt);
-    BCM2835_EMMC_ERR("emmc_issue_cmd: error in INTERRUPT register: %08x, %s",
-      bcm2835_emmc.io.interrupt, intbuf);
-    return ERR_GENERIC;
-  }
+  if (bcm2835_emmc.io.err != SUCCESS)
+    return bcm2835_emmc_polled_exit_on_error(bcm2835_emmc.io.interrupt);
 
   bcm2835_emmc_read_response(c, &bcm2835_emmc.io);
 
   if (BCM2835_EMMC_CMDTM_GET_CMD_ISDATA(cmdreg)) {
-    data_status = bcm2835_emmc_polling_data_io(c, cmdreg, timeout_usec);
+    data_status = bcm2835_emmc_polling_data_io(c, cmdreg, timeout_us);
 
     if (data_status != SUCCESS) {
       BCM2835_EMMC_ERR("emmc_issue_cmd: data_status: %d", data_status);
@@ -552,15 +574,15 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
 
   if (BCM2835_EMMC_CMDTM_GET_CMD_RSPNS_TYPE(cmdreg) ==
     BCM2835_EMMC_RESPONSE_TYPE_48_BITS_BUSY) {
-    if (!(r & BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE)) {
-      err = bcm2835_emmc_interrupt_wait_done_or_err(timeout_usec, 0, 1,
+    if (!(bcm2835_emmc.io.interrupt & BCM2835_EMMC_INTERRUPT_MASK_DATA_DONE)) {
+      err = bcm2835_emmc_interrupt_wait_done_or_err(timeout_us, 0, 1,
         &intval);
 
       if (err)
         return ERR_TIMEOUT;
     }
 
-    bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, 0xffff0002);
+    bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intval);
   }
   return SUCCESS;
 }
@@ -572,16 +594,15 @@ static inline int bcm2835_emmc_run_cmd(struct sd_cmd *c,
   uint32_t status;
 
   int i;
-#if 0
+#if 1
   emmc_should_log = true;
   if (emmc_should_log)
   {
-    BCM2835_EMMC_LOG("CMD%d, arg:%d,blocking:%d, cmdreg:%08x,irq_enabled:%d",
+    BCM2835_EMMC_LOG("CMD%d, arg:%d, blocking:%d, cmdreg:%08x, irq_enabled:%d",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
       c->arg, polling, cmdreg, irq_is_enabled());
   }
 #endif
-
 
   const uint32_t mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
     BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
@@ -641,56 +662,16 @@ int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   uint32_t intval;
   char intbuf[256];
 
-#if 1
   intval = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
   if (intval) {
     bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf), intval);
     BCM2835_EMMC_WARN("interrupts detected: %08x, %s", intval, intbuf);
     bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intval);
   }
-#endif
 
   if (BCM2835_EMMC_CMD_IS_ACMD(c->cmd_idx))
     return bcm2835_emmc_run_acmd(c, timeout_usec, mode_polling);
 
   return bcm2835_emmc_run_cmd(c, sd_commands[c->cmd_idx], timeout_usec,
     mode_polling);
-}
-
-#if 0
-int bcm2835_emmc_cmd25_nonstop(uint32_t block_idx)
-{
-  uint32_t cmd = sd_commands[BCM2835_EMMC_CMD25];
-  // BCM2835_EMMC_CMDTM_CLR_SET_TM_BLKCNT_EN(cmd, 1);
-  uint32_t blksizecnt = 0;
-
-  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKSIZE(blksizecnt, 512);
-  BCM2835_EMMC_BLKSIZECNT_CLR_SET_BLKCNT(blksizecnt, 0xffff);
-  ioreg32_write(BCM2835_EMMC_BLKSIZECNT, blksizecnt);
-  ioreg32_write(BCM2835_EMMC_ARG1, block_idx);
-  ioreg32_write(BCM2835_EMMC_CMDTM, cmd);
-
-  os_event_wait(&bcm2835_emmc_event);
-  os_event_clear(&bcm2835_emmc_event);
-
-  return SUCCESS;
-}
-#endif
-
-int bcm2835_emmc_reset_cmd(bool mode_polling)
-{
-  uint32_t control1;
-
-  control1 = bcm2835_emmc_read_reg(BCM2835_EMMC_CONTROL1);
-  BCM2835_EMMC_CONTROL1_CLR_SET_SRST_CMD(control1, 1);
-  bcm2835_emmc_write_reg(BCM2835_EMMC_CONTROL1, control1);
-
-  if (bcm2835_emmc_wait_reg_value(BCM2835_EMMC_CONTROL1,
-    BCM2835_EMMC_CONTROL1_MASK_SRST_CMD, 0, BCM2835_EMMC_WAIT_TIMEOUT_USEC,
-    NULL)) {
-    BCM2835_EMMC_ERR("emmc_reset_cmd: timeout");
-    return ERR_TIMEOUT;
-  }
-
-  return SUCCESS;
 }
