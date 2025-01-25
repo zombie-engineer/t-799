@@ -125,10 +125,11 @@ SYNC_HANDLER(granule_protect)
 {
 }
 
-static inline void dump_exception_context(const char *exception)
+static inline void dump_exception_context(bool dump_far, const char *exception)
 {
   uint64_t pc;
   uint64_t sp;
+  uint64_t far;
   size_t i;
 
   struct task *t = sched_get_current_task();
@@ -142,40 +143,53 @@ static inline void dump_exception_context(const char *exception)
   c = t->cpuctx;
   pc = c->pc;
   sp = c->sp;
-
   printf("aarch64 exception: '%s', task: %s, pc:%016lx, sp:%016lx\r\n",
     exception, t->name, pc, sp);
-
-  for (i = 0; i < 20; ++i) {
-    printf("  %016x: %016x\r\n", sp + i * 8, ((const uint64_t *)sp)[i]);
+  if (dump_far) {
+    aarch64_get_far_el1(far);
+    printf("far_el1: %016x\r\n", far);
   }
+
+  printf("Registers: \r\n");
+  for (i = 0; i < ARRAY_SIZE(c->gpregs); ++i) {
+    printf("x%d: %016x ", i, c->gpregs[i]);
+    if (((i + 1) % 3) == 0)
+      printf("\r\n");
+  }
+
+  if ((i + 1)  % 3)
+    printf("\r\n");
+
+  printf("Stack: \r\n");
+  for (i = 0; i < 32; ++i)
+    printf("  %016x: %016x\r\n", sp + i * 8, ((const uint64_t *)sp)[i]);
 }
 
 SYNC_HANDLER(inst_abrt_lo_el)
 {
-  dump_exception_context("instruction abort lower EL");
+  dump_exception_context(true, "instruction abort lower EL");
 }
 
 SYNC_HANDLER(inst_abrt_eq_el)
 {
-  dump_exception_context("instruction abort same EL");
+  dump_exception_context(true, "instruction abort same EL");
 }
 
 SYNC_HANDLER(inst_alignment)
 {
-  dump_exception_context("instruction alignment");
+  dump_exception_context(true, "instruction alignment");
   while(1) { }
 }
 
 SYNC_HANDLER(data_abrt_lo_el)
 {
-  dump_exception_context("data abort lower EL");
+  dump_exception_context(true, "data abort lower EL");
   while(1) { }
 }
 
 SYNC_HANDLER(data_abrt_eq_el)
 {
-  dump_exception_context("data abort same EL");
+  dump_exception_context(true, "data abort same EL");
   while(1);
 }
 

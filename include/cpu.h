@@ -60,6 +60,13 @@ static inline bool irq_is_enabled(void)
   );
 }
 
+#define aarch64_get_far_el1(__dst) \
+  asm volatile(\
+      "mrs %0, far_el1\n"\
+      : "=r"(__dst)\
+      :\
+      : "memory")
+
 #define disable_irq_save_flags(__flags)\
   asm volatile(\
       "mrs %0, daif\n"\
