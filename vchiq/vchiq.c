@@ -58,6 +58,7 @@ static inline void wmb(void)
 #define CHECK_ERR_PTR(__ptr, __fmt, ...) \
   if (!(__ptr)) { \
     MMAL_ERR("err: %d, " __fmt, err, ##__VA_ARGS__); \
+    err = ERR_GENERIC; \
     goto out_err; \
   }
 
@@ -2441,8 +2442,23 @@ static int vchiq_mmal_port_action_port(struct vchiq_mmal_component *c,
 static int vchiq_mmal_port_connect(struct vchiq_mmal_port *src,
   struct vchiq_mmal_port *dst)
 {
-  VCHIQ_MMAL_MSG_DECL(src->component->ms, PORT_ACTION, port_action_handle,
-    port_action_reply);
+  struct mmal_msg_context ctx = {
+    .u.sync = {
+      .msg_type = MMAL_MSG_TYPE_PORT_ACTION,
+      .rmsg = NULL
+    }
+  };
+
+  printf("src: %016x\r\n", src);
+  printf("component: %016x\r\n", src->component);
+  struct vchiq_service_common *const _ms = src->component->ms;
+  struct mmal_msg_port_action_reply *r;
+  struct mmal_msg msg;
+  struct mmal_msg_port_action_handle *const m = &msg.u.port_action_handle;
+
+  printf("x0\r\n");
+  memset(&msg, 0, sizeof(msg));
+  printf("x1\r\n");
   m->component_handle = src->component->handle;
   m->port_handle = src->handle;
   m->action = MMAL_MSG_PORT_ACTION_TYPE_CONNECT;
@@ -2475,6 +2491,7 @@ out_err:
   return err;
 }
 
+#if 0
 static int create_port_connection(struct vchiq_mmal_port *in,
   struct vchiq_mmal_port *out, struct vchiq_mmal_port *out2)
 {
@@ -2512,6 +2529,7 @@ static int create_port_connection(struct vchiq_mmal_port *in,
 out_err:
   return err;
 }
+#endif
 
 static struct mems_msg_context *mems_msg_context_alloc(void)
 {
@@ -3056,7 +3074,6 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
 
   mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
     MMAL_ENCODING_I420, frame_width, frame_height, frame_rate, 0);
-
   err = mmal_port_set_format(preview);
   CHECK_ERR("Failed to set format for preview capture port");
 
@@ -3097,12 +3114,14 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 {
   int err;
   struct mmal_cam_info cam_info = {0};
-  struct vchiq_mmal_port *cam_preview, *cam_video, *cam_still;
+  struct vchiq_mmal_port *cam_preview = NULL;
+  struct vchiq_mmal_port *cam_video   = NULL;
+  struct vchiq_mmal_port *cam_still   = NULL;
+
   struct vchiq_mmal_port *encoder_in, *encoder_out;
   struct vchiq_mmal_port *resizer_in, *resizer_out;
   struct ili9341_buffer_info display_buffers[2];
 
-  // printf("Startup camera\r\n");
   cam.io_buffers[0] = dma_alloc(H264BUF_SIZE, 0);
   cam.io_buffers[1] = dma_alloc(H264BUF_SIZE, 0);
 
@@ -3136,44 +3155,56 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = create_resizer_component(mmal_service, &resizer_in, &resizer_out,
     frame_width, frame_height, 320, 240);
 
+  printf("h1\r\n");
   err = vchiq_mmal_port_connect(cam_video, encoder_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
+  printf("h2\r\n");
   err = vchiq_mmal_port_connect(cam_preview, resizer_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
+  printf("h3\r\n");
   err = mmal_port_set_zero_copy(encoder_out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
 
+  printf("h4\r\n");
   err = mmal_port_set_zero_copy(encoder_in);
   CHECK_ERR("Failed to set zero copy to encoder.IN");
 
+  printf("h5\r\n");
   err = mmal_port_set_zero_copy(cam_video);
   CHECK_ERR("Failed to set zero copy to video.OUT");
 
+  printf("h6\r\n");
   err = mmal_port_set_zero_copy(cam_preview);
   CHECK_ERR("Failed to set zero copy to preview.OUT");
 
+  printf("h7\r\n");
   err = mmal_port_set_zero_copy(resizer_in);
   CHECK_ERR("Failed to set zero copy to resizer.IN");
 
+  printf("h8\r\n");
   err = mmal_port_set_zero_copy(resizer_out);
   CHECK_ERR("Failed to set zero copy to resizer.OUT");
 
   /* Enable resizer ports */
+  printf("h9\r\n");
   err = vchiq_mmal_port_enable(resizer_out);
   CHECK_ERR("Failed to enable resizer.OUT");
 
   port_to_display = resizer_out;
 
   /* Enable encoder ports */
+  printf("h10\r\n");
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
   port_to_sdcard = encoder_out;
 
+  printf("h11\r\n");
   err = vchiq_mmal_port_enable(encoder_in);
   CHECK_ERR("Failed to enable encoder.IN");
 
+  printf("h12\r\n");
   err = mmal_apply_buffers(mems_service, encoder_out, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
@@ -3188,11 +3219,13 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(cam_preview);
   CHECK_ERR("Failed to enable preview.OUT");
   MMAL_INFO("Preview port enabled %p", cam_preview);
+  printf("h13\r\n");
 
   err = mmal_apply_display_buffers(mems_service, resizer_out, display_buffers,
     ARRAY_SIZE(display_buffers));
 
   CHECK_ERR("Failed to add display buffers");
+  printf("h17\r\n");
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");

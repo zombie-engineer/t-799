@@ -266,7 +266,7 @@ static void bcm2835_sdhc_set_clk_div(uint32_t div)
 
 static void bcm2835_sdhc_clk_reconfigure(bool speed_normal)
 {
-  uint32_t div = speed_normal ? 4 : 64;
+  uint32_t div = speed_normal ? 5 : 64;
 
   bcm2835_sdhc_sd_clk_stop();
   bcm2835_sdhc_internal_clk_stop();
