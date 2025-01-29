@@ -113,7 +113,12 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
-  bcm2835_emmc_init();
+  err = bcm2835_emmc_init();
+  if (err != SUCCESS) {
+    printf("Failed to initialize SDHC, %d\r\n", err);
+    while(1)
+      asm volatile("wfe");
+  }
   blockdev_scheduler_init();
   err = logger_init();
   if (err != SUCCESS)
