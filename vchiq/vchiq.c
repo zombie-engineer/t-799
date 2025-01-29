@@ -3046,21 +3046,21 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
 
   struct vchiq_mmal_component *cam = component_create(mmal_service,
     "ril.camera");
-
-  CHECK_ERR_PTR(cam, "Failed to create component 'ril.camera'");
+  CHECK_ERR_PTR(cam, "'ril.camera': failed to create component");
 
   param = 0;
   err = vchiq_mmal_port_parameter_set(&cam->control, MMAL_PARAMETER_CAMERA_NUM,
     &param, sizeof(param));
+  CHECK_ERR("'ril.camera': failed to set param CAMERA_NUM");
 
   err = vchiq_mmal_port_parameter_set(&cam->control,
     MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, &param, sizeof(param));
+  CHECK_ERR("'ril.camera': failed to set param SENSOR_CONFIG ");
 
   err = vchiq_mmal_port_enable(&cam->control);
+  CHECK_ERR("'ril.camera': failed to enable port");
 
-  err = mmal_set_camera_parameters(cam, cam_info, frame_width,
-    frame_height);
-
+  err = mmal_set_camera_parameters(cam, cam_info, frame_width, frame_height);
   CHECK_ERR("Failed to set parameters to component 'ril.camera'");
 
   preview = &cam->output[CAM_PORT_PREVIEW];
@@ -3143,8 +3143,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 
-  err = create_camera_component(mmal_service, frame_width, frame_height,
-    24,
+  err = create_camera_component(mmal_service, frame_width, frame_height, 24,
     &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
   CHECK_ERR("Failed to create camera component");
 
