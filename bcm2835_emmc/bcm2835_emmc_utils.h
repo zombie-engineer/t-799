@@ -5,13 +5,13 @@
 #include "bcm2835_emmc_regs.h"
 #include "bcm2835_emmc_regs_bits.h"
 #include <common.h>
+#include <config.h>
 
 const char *bcm2835_emmc_reg_address_to_name(ioreg32_t reg);
 
-#define CONFIG_EMMC_DEBUG2 = 1
 static inline void OPTIMIZED bcm2835_emmc_write_reg(ioreg32_t reg, uint32_t val)
 {
-#ifdef CONFIG_EMMC_DEBUG2
+#ifdef CONFIG_BCM2835_SDHC_LOG_REG_IO
   BCM2835_EMMC_LOG("reg write: reg: %08x(%s), value:%08x", reg,
     bcm2835_emmc_reg_address_to_name(reg), val);
 #endif
@@ -22,7 +22,7 @@ static inline uint32_t OPTIMIZED bcm2835_emmc_read_reg(ioreg32_t reg)
 {
   uint32_t val;
   val = ioreg32_read(reg);
-#ifdef CONFIG_EMMC_DEBUG2
+#ifdef CONFIG_BCM2835_SDHC_LOG_REG_IO
   BCM2835_EMMC_LOG("reg read: reg: %08x(%s), value:%08x", reg,
     bcm2835_emmc_reg_address_to_name(reg), val);
 #endif
