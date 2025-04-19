@@ -322,6 +322,7 @@ static int bcm2835_sdhc_identification_mode(uint32_t *rca, bool blocking)
   BCM2835_EMMC_CHECK_ERR("CMD8 (SEND_IF_COND) failed");
   /* card_state = IDLE */
 
+  printf("will run ACMD41\r\n");
   err = bcm2835_sdhc_run_acmd41(blocking);
   if (err != SUCCESS)
     return err;

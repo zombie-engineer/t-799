@@ -259,8 +259,10 @@ static inline int bcm2835_emmc_cmd8(bool blocking)
   if (ret != SUCCESS)
     return ret;
 
-  if (c.resp0 != CMD8_EXPECTED_RESPONSE)
+  if (c.resp0 != CMD8_EXPECTED_RESPONSE) {
+    printf("CMD8:unexpected response: %08x\r\n", c.resp0);
     return ERR_GENERIC;
+  }
 
   return SUCCESS;
 }

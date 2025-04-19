@@ -519,6 +519,10 @@ static inline int bcm2835_emmc_interrupt_bitmask_to_string(char *buf, int bufsz,
     n += snprintf(buf + n, bufsz - n, "%sREAD_RDY", first ? "" : ",");
     first = 0;
   }
+  if (v & (1<<7)) {
+    n += snprintf(buf + n, bufsz - n, "%sCARD DETECT", first ? "" : ",");
+    first = 0;
+  }
   if (BCM2835_EMMC_INTERRUPT_GET_CARD(v)) {
     n += snprintf(buf + n, bufsz - n, "%sCARD", first ? "" : ",");
     first = 0;

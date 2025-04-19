@@ -47,6 +47,17 @@ extern uint64_t ts2;
 /* Transfer type card to host */
 #define BCM2835_EMMC_TRANS_TYPE_DATA_CARD_TO_HOST 1
 
+/*
+ * Check SD Host Controller's STATUS register if CMD and DAT lines are not
+ * used by controller and available for next commands
+ */
+#define __SDHC_STATUS_LINES_AVAIL_MASK \
+  (BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT | BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT)
+
+#define SDHC_STATUS_LINES_AVAILABLE(__status) \
+  (!(__status & __SDHC_STATUS_LINES_AVAIL_MASK))
+
+
 #define CMDTM_GEN(__n, __resp, __crc, __trans, __is_data, __multiblock)\
   ((__n << BCM2835_EMMC_CMDTM_SHIFT_CMD_INDEX) |\
   (RESP_TYPE_ ## __resp << BCM2835_EMMC_CMDTM_SHIFT_CMD_RSPNS_TYPE) |\
@@ -236,7 +247,7 @@ void bcm2835_emmc_irq_handler(void)
 
   r = ioreg32_read(BCM2835_EMMC_INTERRUPT);
 
-#if 1
+#if 0
   if (emmc_should_log) {
     printf("bcm2835_emmc_irq_handler: CMD%d(%08x),i:%d,r:%08x\r\n",
       CUR_CMD_IDX, CUR_CMD_REG, bcm2835_emmc.io.num_irqs, r);
@@ -246,7 +257,7 @@ void bcm2835_emmc_irq_handler(void)
   ioreg32_write(BCM2835_EMMC_INTERRUPT, r);
 
   if (r & BCM2835_EMMC_INTERRUPT_MASK_ERR) {
-  printf("before: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
+    printf("before: rsp:%08x,%08x,%08x,%08x,sta:%08x\r\n",
     ioreg32_read(BCM2835_EMMC_RESP0),
     ioreg32_read(BCM2835_EMMC_RESP1),
     ioreg32_read(BCM2835_EMMC_RESP2),
@@ -274,7 +285,7 @@ void bcm2835_emmc_irq_handler(void)
 
   if (cmd_done) {
     ts2 = bcm2835_systimer_get_time_us();
-    os_log("cmd_done at %ld\r\n", ts2);
+    // os_log("cmd_done at %ld\r\n", ts2);
     os_event_notify(&bcm2835_emmc_event);
   }
 
@@ -305,7 +316,7 @@ static inline void OPTIMIZED bcm2835_emmc_cmd_process_single_block(char *buf,
 static inline int bcm2835_emmc_report_interrupt_error(const char *tag,
   uint32_t intval)
 {
-  char buf[256] = { 0 };
+  char buf[512] = { 0 };
 
   bcm2835_emmc_interrupt_bitmask_to_string(buf, sizeof(buf), intval);
   BCM2835_EMMC_ERR("%s: error bits in INTERRUPT register: %08x '%s'", intval,
@@ -435,7 +446,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct sd_cmd *c)
     ioreg32_write(BCM2835_EMMC_IRPT_EN, 0x17f0000 | 3 | (1<<15));
   }
 
-#if 1
+#if 0
   if (emmc_should_log)
     BCM2835_EMMC_LOG("CMD%d: writing to CMDTM: %08x\r\n",
       BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), cmdreg);
@@ -456,7 +467,7 @@ static inline int bcm2835_emmc_cmd_interrupt_based(struct sd_cmd *c)
     dma_done = false;
   }
 
-  printf("ret:%d\r\n",bcm2835_emmc.io.err);
+  // printf("ret:%d\r\n",bcm2835_emmc.io.err);
   return bcm2835_emmc.io.err;
 }
 
@@ -495,14 +506,15 @@ static inline void bcm2835_emmc_read_response(struct sd_cmd *c,
 static inline int bcm2835_emmc_polled_wait_cmd_done_or_err(
   uint64_t timeout_us, uint32_t *out_interrupt_value)
 {
-  uint32_t v = 0;
+  uint32_t intr = 0;
+  uint32_t intr_test;
   const uint64_t dt = 100;
   const uint32_t mask = BCM2835_EMMC_INTERRUPT_MASK_CMD_DONE
     | BCM2835_EMMC_INTERRUPT_ALL_ERR;
 
   while (1) {
-    v = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
-    if (v & mask)
+    intr = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
+    if (intr & mask)
       break;
 
     bcm2835_emmc_read_reg(BCM2835_EMMC_STATUS);
@@ -513,15 +525,23 @@ static inline int bcm2835_emmc_polled_wait_cmd_done_or_err(
     timeout_us -= dt;
   }
 
-  *out_interrupt_value = v;
-  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, v & mask);
-  if (v & BCM2835_EMMC_INTERRUPT_MASK_ERR)
+  *out_interrupt_value = intr;
+  bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intr & mask);
+  if (intr & BCM2835_EMMC_INTERRUPT_MASK_ERR)
     return ERR_GENERIC;
+
+  intr_test = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
+  if (intr_test & mask) {
+    printf("Cleared INTR still pending w:%08x->r:%08x\r\n", intr & mask,
+      intr_test);
+    return ERR_GENERIC;
+  }
 
   return SUCCESS;
 }
 
-static inline int bcm2835_emmc_polled_exit_on_error(uint32_t interrupt)
+static inline int bcm2835_emmc_polled_exit_on_error(int cmd_idx,
+  uint32_t interrupt)
 {
   char intbuf[256];
 
@@ -532,8 +552,7 @@ static inline int bcm2835_emmc_polled_exit_on_error(uint32_t interrupt)
 
   bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf),
     interrupt);
-  BCM2835_EMMC_ERR("emmc_issue_cmd: error in INTERRUPT register: %08x, %s",
-    interrupt, intbuf);
+  BCM2835_EMMC_ERR("CMD%d INTERRUPT ERR bits: %08x", interrupt);
   return ERR_GENERIC;
 }
 
@@ -552,14 +571,18 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
 
   bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
 
-  if (c->cmd_idx == 0)
-    return SUCCESS;
 
   bcm2835_emmc.io.err = bcm2835_emmc_polled_wait_cmd_done_or_err(timeout_us,
     &bcm2835_emmc.io.interrupt);
 
+#if 0
+  if (c->cmd_idx == 8 || c->cmd_idx == 0 || 1)
+    printf("err:%08x intr:%08x\r\n", bcm2835_emmc.io.err, bcm2835_emmc.io.interrupt);
+#endif
+
   if (bcm2835_emmc.io.err != SUCCESS)
-    return bcm2835_emmc_polled_exit_on_error(bcm2835_emmc.io.interrupt);
+    return bcm2835_emmc_polled_exit_on_error(c->cmd_idx,
+      bcm2835_emmc.io.interrupt);
 
   bcm2835_emmc_read_response(c, &bcm2835_emmc.io);
 
@@ -587,33 +610,36 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
   return SUCCESS;
 }
 
-static inline int bcm2835_emmc_run_cmd(struct sd_cmd *c,
-  uint32_t cmdreg, uint64_t timeout_usec, bool polling)
+#define SDHC_WAIT_CMD_DAT_AVAIL() \
+  while (!SDHC_STATUS_LINES_AVAILABLE(ioreg32_read(BCM2835_EMMC_STATUS))) { \
+    BCM2835_EMMC_LOG("CMD%d wait inhibit", \
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg)); \
+    delay_us(100); \
+  }
+
+#if 0
+#define SDHC_LOG_CMD() \
+  emmc_should_log = true; \
+  if (emmc_should_log) \
+  { \
+    BCM2835_EMMC_LOG("CMD%d, arg:%d, blocking:%d, cmdreg:%08x, irq_enabled:%d", \
+      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg), \
+      c->arg, polling, cmdreg, irq_is_enabled()); \
+  }
+#else
+#define SDHC_LOG_CMD() ;
+#endif
+
+static inline int bcm2835_emmc_run_cmd(struct sd_cmd *c, uint32_t cmdreg,
+  uint64_t timeout_usec, bool polling)
 {
   uint32_t blksizecnt;
   uint32_t status;
 
   int i;
-#if 1
-  emmc_should_log = true;
-  if (emmc_should_log)
-  {
-    BCM2835_EMMC_LOG("CMD%d, arg:%d, blocking:%d, cmdreg:%08x, irq_enabled:%d",
-      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg),
-      c->arg, polling, cmdreg, irq_is_enabled());
-  }
-#endif
 
-  const uint32_t mask = BCM2835_EMMC_STATUS_MASK_CMD_INHIBIT |
-    BCM2835_EMMC_STATUS_MASK_DAT_INHIBIT;
-
-  while(1) {
-    status = ioreg32_read(BCM2835_EMMC_STATUS);
-    if (!(status & mask))
-      break;
-    BCM2835_EMMC_LOG("CMD%d wait inhibit",
-      BCM2835_EMMC_CMDTM_GET_CMD_INDEX(cmdreg)); delay_us(100);
-  }
+  SDHC_LOG_CMD();
+  SDHC_WAIT_CMD_DAT_AVAIL();
 
   bcm2835_emmc.io.c = c;
   bcm2835_emmc.io.num_irqs = 0;
@@ -640,6 +666,7 @@ static int bcm2835_emmc_run_acmd(struct sd_cmd *c,
   int status;
   struct sd_cmd acmd;
 
+  uint32_t cmd_idx = c->cmd_idx & (((uint32_t)1)<<31) - 1;
   sd_cmd_init(&acmd, BCM2835_EMMC_CMD55, c->rca << 16);
 
   acmd.num_blocks = c->num_blocks;
@@ -660,12 +687,14 @@ int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   bool mode_polling)
 {
   uint32_t intval;
-  char intbuf[256];
+
+  int is_acmd = (c->cmd_idx >> 31) & 1;
+  int cmd_idx = c->cmd_idx & (((uint32_t)1)<<31) - 1;
 
   intval = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
   if (intval) {
-    bcm2835_emmc_interrupt_bitmask_to_string(intbuf, sizeof(intbuf), intval);
-    BCM2835_EMMC_WARN("interrupts detected: %08x, %s", intval, intbuf);
+    BCM2835_EMMC_WARN("pre-%s%d: interrupts detected: %08x",
+      is_acmd ? "ACMD" : "CMD", cmd_idx, intval);
     bcm2835_emmc_write_reg(BCM2835_EMMC_INTERRUPT, intval);
   }
 
