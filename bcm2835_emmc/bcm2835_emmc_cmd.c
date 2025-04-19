@@ -571,7 +571,6 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
 
   bcm2835_emmc_write_reg(BCM2835_EMMC_CMDTM, cmdreg);
 
-
   bcm2835_emmc.io.err = bcm2835_emmc_polled_wait_cmd_done_or_err(timeout_us,
     &bcm2835_emmc.io.interrupt);
 
@@ -617,9 +616,8 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
     delay_us(100); \
   }
 
-#if 0
+#if 1
 #define SDHC_LOG_CMD() \
-  emmc_should_log = true; \
   if (emmc_should_log) \
   { \
     BCM2835_EMMC_LOG("CMD%d, arg:%d, blocking:%d, cmdreg:%08x, irq_enabled:%d", \

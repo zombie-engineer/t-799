@@ -19,6 +19,12 @@
 #include <sched.h>
 #include <printf.h>
 
+typedef enum {
+  BCM2835_EMMC_IO_READ = 0,
+  BCM2835_EMMC_IO_WRITE = 1
+} bcm2835_emmc_io_type_t;
+
+
 uint64_t ts1;
 uint64_t ts2;
 
@@ -83,8 +89,13 @@ static inline void bcm2835_emmc_debug_registers(void)
 #undef DUMP_REG
 }
 
+static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
+  char *buf, size_t start_sector, size_t num_blocks);
+
 int bcm2835_emmc_init(void)
 {
+  char buf[512];
+
   int err;
   if (bcm2835_emmc.is_initialized)
     return SUCCESS;
@@ -110,6 +121,16 @@ int bcm2835_emmc_init(void)
   BCM2835_EMMC_LOG("bcm2835_emmc_init successfull");
   // bcm2835_emmc_debug_registers();
   bcm2835_emmc.is_initialized = true;
+
+  err = bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, 0, 1);
+  if (err) {
+    printf("Failed to read block %d\n", err);
+  }
+  else {
+    for (int i = 0; i < 512; ++i) {
+      printf("block:%02x\n", buf[i]);
+    }
+  }
   return SUCCESS;
 }
 
@@ -127,11 +148,6 @@ void bcm2835_emmc_report(void)
   BCM2835_EMMC_LOG("version %08x, VENDOR: %04x, SD: %04x, clock: %d", ver,
     vendor, sdver, clock_rate);
 }
-
-typedef enum {
-  BCM2835_EMMC_IO_READ = 0,
-  BCM2835_EMMC_IO_WRITE = 1
-} bcm2835_emmc_io_type_t;
 
 static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   char *buf, size_t start_sector, size_t num_blocks)
@@ -152,6 +168,7 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
       err = bcm2835_emmc_cmd18(start_sector, num_blocks, buf,
         bcm2835_emmc.is_blocking_mode);
     } else {
+      emmc_should_log = true;
       err = bcm2835_emmc_cmd17(start_sector, buf,
         bcm2835_emmc.is_blocking_mode);
     }
@@ -248,6 +265,7 @@ static int bcm2835_emmc_write(struct block_device *b, const void *buf,
 
 int bcm2835_emmc_set_interrupt_mode(void)
 {
+  BCM2835_EMMC_LOG("Switching to interrupt mode");
   bcm2835_emmc.is_blocking_mode = false;
   irq_set(BCM2835_IRQNR_ARASAN_SDIO, bcm2835_emmc_irq_handler);
   bcm2835_ic_enable_irq(BCM2835_IRQNR_ARASAN_SDIO);

@@ -113,6 +113,7 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
+  err = ili9341_init();
   err = bcm2835_emmc_init();
   if (err != SUCCESS) {
     printf("Failed to initialize SDHC, %d\r\n", err);
