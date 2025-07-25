@@ -157,16 +157,19 @@ struct sd_host {
   bool blocking_mode;
   bool is_acmd_context;
   uint32_t rca;
+  uint64_t scr;
   uint32_t device_id[4];
   sd_card_capacity_t card_capacity;
   bool UHS_II_support;
   bool SDUC_support;
+  bool bus_width_4_supported;
   bool bus_width_4;
 };
 
 static struct sd_host sdhost = {
   .initialized = false,
   .blocking_mode = true,
+  .bus_width_4_supported = false,
   .bus_width_4 = false
 };
 
@@ -176,32 +179,30 @@ bool use_dma = false;
 
 static void bcm_sdhost_dump_regs(bool full)
 {
-  printf("cmd:0x%08x\r\n", ioreg32_read(SDHOST_CMD));
-  printf("hsts:0x%08x\r\n", ioreg32_read(SDHOST_HSTS));
+  BCM_SDHOST_LOG_INFO("cmd:0x%08x", ioreg32_read(SDHOST_CMD));
+  BCM_SDHOST_LOG_INFO("hsts:0x%08x", ioreg32_read(SDHOST_HSTS));
   if (!full)
     return;
 
-  printf("edm:0x%08x\r\n", ioreg32_read(SDHOST_EDM));
-  printf("tout:0x%08x\r\n", ioreg32_read(SDHOST_TOUT));
-  printf("cdiv:0x%08x\r\n", ioreg32_read(SDHOST_CDIV));
-  printf("cfg:0x%08x\r\n", ioreg32_read(SDHOST_HCFG));
-  printf("cnt:0x%08x\r\n", ioreg32_read(SDHOST_CNT));
-  printf("resp0:0x%08x\r\n", ioreg32_read(SDHOST_RESP0));
-  printf("resp1:0x%08x\r\n", ioreg32_read(SDHOST_RESP1));
-  printf("resp2:0x%08x\r\n", ioreg32_read(SDHOST_RESP2));
-  printf("resp3:0x%08x\r\n", ioreg32_read(SDHOST_RESP3));
+  BCM_SDHOST_LOG_INFO("edm:0x%08x", ioreg32_read(SDHOST_EDM));
+  BCM_SDHOST_LOG_INFO("tout:0x%08x", ioreg32_read(SDHOST_TOUT));
+  BCM_SDHOST_LOG_INFO("cdiv:0x%08x", ioreg32_read(SDHOST_CDIV));
+  BCM_SDHOST_LOG_INFO("cfg:0x%08x", ioreg32_read(SDHOST_HCFG));
+  BCM_SDHOST_LOG_INFO("cnt:0x%08x", ioreg32_read(SDHOST_CNT));
+  BCM_SDHOST_LOG_INFO("resp0:0x%08x", ioreg32_read(SDHOST_RESP0));
+  BCM_SDHOST_LOG_INFO("resp1:0x%08x", ioreg32_read(SDHOST_RESP1));
+  BCM_SDHOST_LOG_INFO("resp2:0x%08x", ioreg32_read(SDHOST_RESP2));
+  BCM_SDHOST_LOG_INFO("resp3:0x%08x", ioreg32_read(SDHOST_RESP3));
 }
 
 static void sdhost_on_dma_done(void)
 {
-
 }
 
 int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void))
 {
   io->dma_channel = bcm2835_dma_request_channel();
   io->dma_control_block_idx = bcm2835_dma_reserve_cb();
-  printf("sdhc_io_init: dma_channel:%d cb_idx:%d\r\n", io->dma_channel, io->dma_control_block_idx);
 
   if (io->dma_channel == -1 || io->dma_control_block_idx == -1)
     return ERR_GENERIC;
@@ -300,13 +301,15 @@ static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
   uint32_t hsts;
 
   if (is_write) {
-    printf("DMA write not supported yet\r\n");
+    BCM_SDHOST_LOG_ERR("DMA write not supported yet");
     return ERR_NOTSUPP;
   }
 
   while(1) {
     hsts = ioreg32_read(SDHOST_HSTS);
-    printf("data HSTS: %08x EDM:%08x\r\n", hsts, ioreg32_read(SDHOST_EDM));
+    BCM_SDHOST_LOG_DBG("data HSTS: %08x EDM:%08x", hsts,
+      ioreg32_read(SDHOST_EDM));
+
     if (hsts & SDHSTS_DATA_FLAG)
       break;
   }
@@ -345,7 +348,7 @@ static inline int bcm_sdhost_read_data_4bit_bus(uint32_t *out, bool log_edm)
       return ERR_IO;
 
     if (log_edm)
-      printf("EDM:%08x, num_words:%d\r\n", edm, num_words);
+      BCM_SDHOST_LOG_DBG("EDM:%08x, num_words:%d", edm, num_words);
     result |= (ioreg32_read(SDHOST_DATA) & 0xff) << (i * 8);
   }
   *out = result;
@@ -366,7 +369,7 @@ static inline int bcm_sdhost_write_data_4bit_bus(uint32_t data, bool log_edm)
       return ERR_IO;
 
     if (log_edm)
-      printf("EDM:%08x, num_words:%d\r\n", edm, num_words);
+      BCM_SDHOST_LOG_DBG("EDM:%08x, num_words:%d", edm, num_words);
     result = (result << 8) | ioreg32_read(SDHOST_DATA) & 0xff;
     num_bytes++;
   }
@@ -375,23 +378,20 @@ static inline int bcm_sdhost_write_data_4bit_bus(uint32_t data, bool log_edm)
 
 static int bcm_sdhost_data_write_sw(const uint32_t *ptr, const uint32_t *end)
 {
-  int ret;
+  int err;
 
   /* Wait for data ready flag */
-  bcm_sdhost_wait_data_ready_bit(/* log_hsts */ true);
+  bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
 
   while (ptr != end) {
     if (sdhost.bus_width_4) {
-      ret = bcm_sdhost_write_data_4bit_bus(*ptr++, /* log_edm */ true);
-      if (ret) {
-        printf("write on bus width4 error: %d\r\n", ret);
-        return ret;
-      }
+      err = bcm_sdhost_write_data_4bit_bus(*ptr++, /* log_edm */ true);
+      BCM_SDHOST_CHECK_ERR("Failed to write in 4bit bus mode");
     }
     else
       ioreg32_write(SDHOST_DATA, *ptr++);
 
-    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ true);
+    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
   }
 
   return SUCCESS;
@@ -399,23 +399,20 @@ static int bcm_sdhost_data_write_sw(const uint32_t *ptr, const uint32_t *end)
 
 static int bcm_sdhost_data_read_sw(uint32_t *ptr, uint32_t *end)
 {
-  int ret;
+  int err;
   uint32_t data;
 
   while (ptr != end) {
     /* Wait for data ready flag */
-    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ true);
+    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
 
     if (sdhost.bus_width_4) {
-      ret = bcm_sdhost_read_data_4bit_bus(&data, /* log_edm */ true);
-      if (ret) {
-        printf("reading on bus width4 error: %d\r\n", ret);
-        return ret;
-      }
+      err = bcm_sdhost_read_data_4bit_bus(&data, /* log_edm */ true);
+      BCM_SDHOST_CHECK_ERR("Failed to read in 4bit bus mode");
     }
     else
       data = ioreg32_read(SDHOST_DATA);
-    printf("data:%08x\r\n", data);
+    BCM_SDHOST_LOG_DBG2("data:%08x", data);
     *ptr++ = data;
   }
 
@@ -449,7 +446,6 @@ static void bcm_sdhost_cmd_prep_data(struct sd_cmd *c, bool is_write)
 
   memset(c->databuf, 0, c->block_size * c->num_blocks);
   sdhost.io.c = c;
-  printf("prep_data:is_write:%d\r\n", is_write);
 
   /* setup read DMA */
   bcm_sdhost_setup_dma_transfer(
@@ -461,7 +457,6 @@ static void bcm_sdhost_cmd_prep_data(struct sd_cmd *c, bool is_write)
   bcm2835_dma_set_cb(sdhost.io.dma_channel,
     sdhost.io.dma_control_block_idx);
 
-  printf("dma_activate:channel:%d\r\n", sdhost.io.dma_channel);
   bcm2835_dma_activate(sdhost.io.dma_channel);
 }
 
@@ -485,8 +480,8 @@ static int bcm_sdhost_cmd_blocking(struct sd_cmd *c, uint64_t timeout_usec)
     bcm_sdhost_cmd_prep_data(c, is_write);
   }
 
-  printf("CMD(new):0x%08x, ARG:0x%08x, CMD(current):0x%08x\r\n", cmd_reg,
-    ioreg32_read(SDHOST_ARG), ioreg32_read(SDHOST_CMD));
+  BCM_SDHOST_LOG_DBG("CMD(new):0x%08x, ARG:0x%08x, CMD(current):0x%08x\r\n",
+    cmd_reg, ioreg32_read(SDHOST_ARG), ioreg32_read(SDHOST_CMD));
   ioreg32_write(SDHOST_CMD, cmd_reg);
 
   /* Wait prev command completion */
@@ -512,8 +507,11 @@ static int bcm_sdhost_cmd_blocking(struct sd_cmd *c, uint64_t timeout_usec)
   c->resp3 = ioreg32_read(SDHOST_RESP3);
 
 out:
-  printf("CMD%d (ACMD:%d) done, ret:%d, HSTS:%08x,resp:%08x|%08x|%08x|%08x\r\n", c->cmd_idx,
-    sdhost.is_acmd_context, ret, ioreg32_read(SDHOST_HSTS), c->resp0, c->resp1, c->resp2, c->resp3);
+  BCM_SDHOST_LOG_DBG("CMD%d (ACMD:%d) done, ret:%d",
+    c->cmd_idx, sdhost.is_acmd_context, ret);
+
+  BCM_SDHOST_LOG_DBG("HSTS:%08x,resp:%08x|%08x|%08x|%08x",
+    ioreg32_read(SDHOST_HSTS), c->resp0, c->resp1, c->resp2, c->resp3);
 
   if (ret != SUCCESS)
     bcm_sdhost_dump_regs(false);
@@ -559,8 +557,8 @@ int sdhc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
 
   const bool is_acmd = c->cmd_idx & 0x80000000;
 
-  printf("CMD%d (is_acmd=%d) started %d/%d\r\n", c->cmd_idx & 0x7fffffff, is_acmd,
-    c->block_size, c->num_blocks);
+  BCM_SDHOST_LOG_DBG("CMD%d (is_acmd=%d) started %d/%d",
+    c->cmd_idx & 0x7fffffff, is_acmd, c->block_size, c->num_blocks);
 
   if (is_acmd)
     return bcm_sdhost_acmd(c, timeout_usec, blocking);
@@ -570,14 +568,12 @@ int sdhc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
     r = ioreg32_read(SDHOST_CMD);
     if (BIT_IS_CLEAR(r, SDHOST_CMD_BIT_NEW))
       break;
-
-    printf("CMD still busy\r\n");
   }
 
   /* Clear prev CMD errors */
   r = ioreg32_read(SDHOST_HSTS);
   if (r & SDHOST_HSTS_ERROR_MASK) {
-    printf("HSTS had errors: %08x\r\n", r);
+    BCM_SDHOST_LOG_WARN("HSTS had errors: %08x", r);
     ioreg32_write(SDHOST_HSTS, r);
   }
 
@@ -633,9 +629,6 @@ static void bcm_sdhost_reset_registers(void)
   r &= ~SDHOST_CFG_WIDE_EXT_BUS;
   ioreg32_write(SDHOST_HCFG, r);
 
-  // r |= SDHOST_CFG_WIDE_INT_BUS;
-  // r |= SDHOST_CFG_SLOW_CARD;
-  // ioreg32_write(SDHOST_HCFG, r);
   ioreg32_write(SDHOST_HCFG, SDHOST_CFG_WIDE_INT_BUS | SDHOST_CFG_SLOW_CARD);
   ioreg32_write(SDHOST_CDIV, SDHOST_MAX_CDIV);
 
@@ -664,7 +657,7 @@ static inline void bcm_sdhost_dump_fsm_state(void)
  * 2. Issue commands to traverse states:
  *    CDM0->IDLE->CMD8,CMD41->READY->CMD2->IDENT->CMD3->STANDBY
  */
-int sdhc_identification(uint32_t *rca, bool blocking)
+int sdhc_identification(bool blocking)
 {
   int err;
   sd_card_state_t card_state;
@@ -723,12 +716,12 @@ int sdhc_identification(uint32_t *rca, bool blocking)
   BCM_SDHOST_LOG_INFO("device_id: %08x.%08x.%08x.%08x",
     device_id[0], device_id[1], device_id[2], device_id[3]);
 
-  err = sdhc_cmd3(rca, SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
+  err = sdhc_cmd3(&sdhost.rca, SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
   BCM_SDHOST_CHECK_ERR("failed at CMD3 (SEND_RELATIVE_ADDR) step");
-  printf("RCA: %08x\r\n", *rca);
+  printf("RCA: %08x\r\n", sdhost.rca);
   /* card_state = STANDBY */
 
-  err = sdhc_cmd13(*rca, &sdcard_state, SD_HOST_TIMEOUT_USEC_DEFAULT,
+  err = sdhc_cmd13(sdhost.rca, &sdcard_state, SD_HOST_TIMEOUT_USEC_DEFAULT,
     blocking);
   BCM_SDHOST_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
 
@@ -744,12 +737,12 @@ int sdhc_identification(uint32_t *rca, bool blocking)
 
 static void bcm_sdhost_set_bus_width4(void)
 {
-  uint32_t r;
+  uint32_t hcfg;
   ioreg32_read(SDHOST_HCFG);
-  r |= SDHOST_CFG_WIDE_EXT_BUS;
-  ioreg32_write(SDHOST_HCFG, r);
+  hcfg |= SDHOST_CFG_WIDE_EXT_BUS;
+  ioreg32_write(SDHOST_HCFG, hcfg);
   sdhost.bus_width_4 = true;
-  printf("sdhost: set_bus_width4 done");
+  BCM_SDHOST_LOG_DBG("set_bus_width4 done");
 }
 
 static void bcm_sdhost_get_max_clock(void)
@@ -774,7 +767,7 @@ static int bcm_sdhost_set_high_speed(bool blocking)
   int err;
   struct sd_cmd6_response_raw cmd6_resp = { 0 };
 
-  printf("sdhost: set_high_speed start\r\n");
+  BCM_SDHOST_LOG_DBG("Switching to HIGH SPEED mode");
 
   err = sdhc_cmd6(CMD6_MODE_CHECK,
     CMD6_ARG_ACCESS_MODE_SDR25,
@@ -808,7 +801,8 @@ static int bcm_sdhost_set_high_speed(bool blocking)
     SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
   BCM_SDHOST_CHECK_ERR("CMD6 set");
 
-  printf("sdhost: set_high_speed done\r\n");
+  BCM_SDHOST_LOG_DBG("Switched to HIGH SPEED mode");
+  return SUCCESS;
 }
 
 static int csd_read_bits(const uint8_t *csd, int pos, int width)
@@ -834,11 +828,13 @@ static void sdhc_parse_csd(const uint8_t *csd)
   int erase_sector_size;
   int write_speed_factor;
   int max_wr_block_len;
+  char csdbuf[16 * 2 + 1];
 
-  printf("CSD:");
-  for (int i = 0; i < 4; ++i)
-    printf("%08x", csd[i]);
-  printf("\r\n");
+  int n = 0;
+  for (int i = 0; i < 16; ++i)
+    n += snprintf(csdbuf + n, sizeof(csdbuf) - n, "%02x", csd[i]);
+
+  BCM_SDHOST_LOG_INFO("CSD: %s", csdbuf);
 
   csd_ver = csd_read_bits(csd, 126, 2);
   taac = csd_read_bits(csd, 112, 8);
@@ -857,32 +853,77 @@ static void sdhc_parse_csd(const uint8_t *csd)
   write_speed_factor  = csd_read_bits(csd, 26, 3);
   max_wr_block_len   = csd_read_bits(csd, 22, 4);
 
-  printf("CSD ver: %d\r\n", csd_ver);
-  printf("CSD TAAC(read access time): %d / NSAC:%d clk\r\n", taac, nsac);
-  printf("CSD TRAN_SPEED:%d, CCC:0x%03x\r\n", tran_speed, ccc);
-  printf("CSD READ_BL_LEN:%d, READ_BL_PARTIAL:%d\r\n", read_bl_len,
+  BCM_SDHOST_LOG_INFO("CSD ver: %d", csd_ver);
+  BCM_SDHOST_LOG_INFO("CSD TAAC(read access time): %d / NSAC:%d clk", taac,
+    nsac);
+  BCM_SDHOST_LOG_INFO("CSD TRAN_SPEED:%d, CCC:0x%03x", tran_speed, ccc);
+  BCM_SDHOST_LOG_INFO("CSD READ_BL_LEN:%d, READ_BL_PARTIAL:%d", read_bl_len,
     read_bl_partial);
-  printf("CSD wr block misalignment:%d,rd block misalignment:%d\r\n",
+  BCM_SDHOST_LOG_INFO("CSD wr block misalignment:%d,rd block misalignment:%d",
     wr_block_misalignment, rd_block_misalignment);
-  printf("CSD DSR:%d, C_SIZE:%d, C_SIZE_MULT:%d\r\n", dsr, c_size,
+  BCM_SDHOST_LOG_INFO("CSD DSR:%d, C_SIZE:%d, C_SIZE_MULT:%d", dsr, c_size,
     c_size_mult);
-  printf("CSD erase_one_block_ena: %d, erase sector size:%d\r\n",
+  BCM_SDHOST_LOG_INFO("CSD erase_one_block_ena: %d, erase sector size:%d",
     erase_one_block_ena, erase_sector_size);
-  printf("CSD write speed factor: %d\r\n", write_speed_factor);
-  printf("CSD max write block len: %d\r\n", max_wr_block_len);
+  BCM_SDHOST_LOG_INFO("CSD write speed factor: %d", write_speed_factor);
+  BCM_SDHOST_LOG_INFO("CSD max write block len: %d", max_wr_block_len);
 }
 
-uint64_t reverse_bytes(uint64_t input) {
-    uint64_t output;
-    asm volatile (
-        "rev %0, %1\n\t"  // Reverse byte order of input into output
-        : "=r" (output)   // Output operand (output)
-        : "r" (input)     // Input operand
-    );
-    return output;
+static void bcm_sdhost_set_high_speed_clock()
+{
+  uint32_t hcfg;
+
+  ioreg32_write(SDHOST_CDIV, 5);
+  hcfg = ioreg32_read(SDHOST_HCFG);
+  hcfg &= ~SDHOST_CFG_SLOW_CARD;
+  ioreg32_write(SDHOST_HCFG, hcfg);
 }
 
-static int bcm_sdhost_to_data_transfer_mode(uint32_t rca, bool blocking)
+static int sdhc_read_scr_and_parse(bool blocking)
+{
+  int err;
+  int sd_spec_ver_maj;
+  int sd_spec_ver_min;
+  uint64_t scr;
+
+  /* ACMD51 SEND_SCR */
+  err = sdhc_acmd51(sdhost.rca, &sdhost.scr, sizeof(sdhost.scr),
+    SD_HOST_TIMEOUT_USEC_DEFAULT,
+    blocking);
+  BCM_SDHOST_CHECK_ERR("Failed at ACMD51 (SEND_SCR)");
+
+  sdhost.bus_width_4_supported = sd_scr_bus_width4_supported(sdhost.scr);
+
+  sd_scr_get_sd_spec_version(sdhost.scr, &sd_spec_ver_maj, &sd_spec_ver_min);
+
+  BCM_SDHOST_LOG_INFO("SCR %016llx: sd spec version: %d.%d"
+    "bus_width1: %s, buswidth4:%s\r\n",
+    sdhost.scr,
+    sd_spec_ver_maj,
+    sd_spec_ver_min,
+    sd_scr_bus_width1_supported(sdhost.scr) ? "supported" : "not_supp",
+    sdhost.bus_width_4_supported ? "supported" : "not_supp"
+  );
+}
+
+static int sdhc_read_card_state(bool blocking)
+{
+  int err;
+
+  uint32_t sdcard_state;
+  uint32_t card_state;
+  err = sdhc_cmd13(sdhost.rca, &sdcard_state, SD_HOST_TIMEOUT_USEC_DEFAULT,
+    blocking);
+  BCM_SDHOST_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+
+  card_state = (sdcard_state >> 9) & 0xf;
+  BCM_SDHOST_LOG_INFO("sdcard_state:%08x, card_state:%d", sdcard_state,
+    card_state);
+
+  return SUCCESS;
+}
+
+static int bcm_sdhost_to_data_transfer_mode(bool blocking)
 {
   uint64_t scr;
   uint32_t csd[4];
@@ -892,100 +933,67 @@ static int bcm_sdhost_to_data_transfer_mode(uint32_t rca, bool blocking)
    * Guide card through data transfer mode states into 'tran' state
    * CMD9 SEND_CSD to get and parse CSD registers
    */
-  err = sdhc_cmd9(rca, csd, SD_HOST_TIMEOUT_USEC_DEFAULT,
+  err = sdhc_cmd9(sdhost.rca, csd, SD_HOST_TIMEOUT_USEC_DEFAULT,
     blocking);
   BCM_SDHOST_CHECK_ERR("Failed at CMD9 (SEND_CSD)");
 
   sdhc_parse_csd((uint8_t *)csd);
+
   /* CMD7 SELECT_CARD to select card, making it to 'tran' statew */
-  err = sdhc_cmd7(rca, SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
+  err = sdhc_cmd7(sdhost.rca, SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
   BCM_SDHOST_CHECK_ERR("Failed at CMD7 (SELECT_CARD)");
 
-  /* ACMD51 SEND_SCR */
   use_dma = false;
-  err = sdhc_acmd51(rca, &scr, sizeof(scr), SD_HOST_TIMEOUT_USEC_DEFAULT,
-    blocking);
-  BCM_SDHOST_CHECK_ERR("Failed at ACMD51 (SEND_SCR)");
-  ioreg32_write(SDHOST_CDIV, 5);
+  sdhc_read_scr_and_parse(blocking);
+  BCM_SDHOST_CHECK_ERR("Failed to read / parse SCR");
 
-  uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
-  hcfg &= ~SDHOST_CFG_SLOW_CARD;
-  ioreg32_write(SDHOST_HCFG, hcfg);
-  sdhost.bus_width_4 = true;
-
-  scr = reverse_bytes(scr);
-
-  bool buswidth4_supported = sd_scr_bus_width4_supported(scr);
-  int sd_spec_ver_maj;
-  int sd_spec_ver_min;
-
-  sd_scr_get_sd_spec_version(scr, &sd_spec_ver_maj, &sd_spec_ver_min);
-
-  printf("SCR %016llx: sd spec version: %d.%d\r\n"
-    "bus_width1: %s, buswidth4:%s\r\n",
-    scr,
-    sd_spec_ver_maj,
-    sd_spec_ver_min,
-    sd_scr_bus_width1_supported(scr) ? "supported" : "not_supp",
-    buswidth4_supported ? "supported" : "not_supp"
-  );
-
-  if (buswidth4_supported) {
-    err = sdhc_acmd6(rca, SDHC_ACMD6_ARG_BUS_WIDTH_4,
+  if (sdhost.bus_width_4_supported) {
+    err = sdhc_acmd6(sdhost.rca, SDHC_ACMD6_ARG_BUS_WIDTH_4,
       SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
     BCM_SDHOST_CHECK_ERR("Failed at ACMD6 (SET_BUS_WIDTH)");
-    delay_us(1 * 1000 * 1000);
     bcm_sdhost_set_bus_width4();
-    printf("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\r\n");
-    delay_us(1 * 1000 * 1000);
-    printf("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\r\n");
+    bcm_sdhost_set_high_speed_clock();
   }
 
-  uint32_t sdcard_state;
-  uint32_t card_state;
-  err = sdhc_cmd13(rca, &sdcard_state, SD_HOST_TIMEOUT_USEC_DEFAULT,
-    blocking);
-  BCM_SDHOST_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+  err = sdhc_read_card_state(blocking);
+  BCM_SDHOST_CHECK_ERR("Failed to read card state");
 
-  card_state = (sdcard_state >> 9) & 0xf;
-  printf("sdcard_state:%08x, card_state:%d\r\n", sdcard_state, card_state);
-
-  /* ACMD51 SEND_SCR */
-  use_dma = false;
-  err = sdhc_acmd51(rca, &scr, sizeof(scr), SD_HOST_TIMEOUT_USEC_DEFAULT,
-    blocking);
+  err = sdhc_acmd51(sdhost.rca, &scr, sizeof(scr),
+    SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
   BCM_SDHOST_CHECK_ERR("Failed at ACMD51 (SEND_SCR)");
-  printf("scr after 4bit bus: %016llx\r\n", reverse_bytes(scr));
+  if (scr != sdhost.scr) {
+    BCM_SDHOST_LOG_DBG("SCR mismatch after switch to 4bit bus: %016llx",
+      scr);
+    return ERR_IO;
+  }
 
   bcm_sdhost_set_high_speed(blocking);
   bcm_sdhost_dump_fsm_state();
   return 0;
 }
 
-static int bcm_sdhost_read(uint8_t *buf, uint32_t from_sector, uint32_t num_sectors,
-  bool blocking)
+static int bcm_sdhost_read(uint8_t *buf, uint32_t from_sector,
+  uint32_t num_sectors, bool blocking)
 {
   return sdhc_cmd17(from_sector, buf, SD_HOST_TIMEOUT_USEC_DEFAULT, blocking);
 }
 
-static int bcm_sdhost_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
+static int bcm_sdhost_reset(bool blocking, uint32_t *device_id)
 {
   int err;
   uint8_t readbuf[512];
 
   bcm_sdhost_get_max_clock();
   bcm_sdhost_reset_registers();
-  err = sdhc_identification(rca, blocking);
+  err = sdhc_identification(blocking);
   if (err != SUCCESS)
     return err;
 
-  err = bcm_sdhost_to_data_transfer_mode(*rca, blocking);
+  err = bcm_sdhost_to_data_transfer_mode(blocking);
   if (err != SUCCESS)
     return err;
 
   bcm_sdhost_read(readbuf, 0, 1, blocking);
-  printf("bcm_sdhost_reset done");
-  while(1);
   return SUCCESS;
 }
 
@@ -1003,50 +1011,18 @@ int bcm_sdhost_init(void)
   int err;
 
   sdhost.bus_width_4 = false;
+  sdhost.bus_width_4_supported = false;
   err = sdhc_io_init(&sdhost.io, sdhost_on_dma_done);
-  if (err) {
-    printf("sdhc_io_init failed, err:%d\r\n", err);
-    return err;
-  }
+  BCM_SDHOST_CHECK_ERR("Failed to init sdhost io");
+
   bcm_sdhost_log_level = LOG_LEVEL_DEBUG2;
-  // char buf[512];
-
-#if 0
-  if (sdhost.initialized)
-    return SUCCESS;
-
-  bcm2835_emmc_log_level = LOG_LEVEL_DEBUG2;
-  bcm2835_emmc.is_blocking_mode = true;
-  bcm2835_emmc.num_inhibit_waits = 0;
-  err = bcm2835_emmc_io_init(&bcm2835_emmc.io, bcm2835_emmc_dma_irq_callback);
-  if (err != SUCCESS) {
-    BCM2835_EMMC_ERR("bcm2835_emmc_init failed at io: %d", err);
-    return err;
-  }
-#endif
 
   bcm_sdhost_init_gpio();
   sdhost.blocking_mode = true;
-  err = bcm_sdhost_reset(sdhost.blocking_mode, &sdhost.rca,
-    sdhost.device_id);
-
-  if (err != SUCCESS) {
-    printf("sd host reset failed: %d", err);
-    return err;
-  }
+  err = bcm_sdhost_reset(sdhost.blocking_mode, sdhost.device_id);
+  BCM_SDHOST_CHECK_ERR("Failed to reset sdhost");
 
   sdhost.initialized = true;
-
-#if 0
-  err = _emmc_data_io(BCM2835_EMMC_IO_READ, buf, 0, 1);
-  if (err) {
-    printf("Failed to read block %d\n", err);
-  }
-  else {
-    for (int i = 0; i < 512; ++i) {
-      printf("block:%02x\n", buf[i]);
-    }
-  }
-#endif
+  BCM_SDHOST_LOG_INFO("initialized");
   return SUCCESS;
 }

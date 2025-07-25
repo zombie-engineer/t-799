@@ -1,6 +1,7 @@
 #pragma once
 #include <string.h>
 #include <printf.h>
+#include <common.h>
 
 /* GO_IDLE */
 #define SDHC_CMD0                 0x00000000
@@ -423,24 +424,29 @@ static inline int sdhc_acmd41(uint32_t arg, uint32_t rca, uint32_t *resp,
 }
 
 /* SEND_SCR */
-static inline int sdhc_acmd51(uint32_t rca, void *scrbuf,
-  int scrbuf_len, uint64_t timeout_usec, bool blocking)
+static inline int sdhc_acmd51(uint32_t rca, void *dst,
+  int dst_size, uint64_t timeout_usec, bool blocking)
 {
   int ret;
+  uint64_t scr;
 
   struct sd_cmd c = SD_CMD_INIT(ACMD(51), 0, rca);
 
-  if (scrbuf_len < 8)
+  if (dst_size < sizeof(uint64_t))
     return -1;
 
-  if ((uint64_t)scrbuf & 3)
+  if ((uint64_t)dst & 3)
     return -1;
 
   c.block_size = 8;
   c.num_blocks = 1;
-  c.databuf = scrbuf;
+  c.databuf = (void *)&scr;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  ret = sdhc_cmd(&c, timeout_usec, blocking);
+  if (ret == SUCCESS)
+    *(uint64_t *)dst = reverse_bytes64(scr);
+
+  return ret;
 }
 
 static inline int sdhc_acmd51x4(uint32_t rca, void *scrbuf,
