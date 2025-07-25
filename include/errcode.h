@@ -11,3 +11,4 @@
 #define ERR_IO -8
 #define ERR_OUT_OF_RANGE -9
 #define ERR_EXISTS -10
+#define ERR_NOTSUPP -11

@@ -14,6 +14,12 @@ typedef enum {
   SD_CARD_STATE_UNKNOWN = 0xff
 } sd_card_state_t;
 
+typedef enum {
+  SD_CARD_CAPACITY_UNKNOWN = 0,
+  SD_CARD_CAPACITY_SDSC = 1,
+  SD_CARD_CAPACITY_SDHC = 2
+} sd_card_capacity_t;
+
 static inline int sd_scr_get_scr_version(uint64_t scr)
 {
   return (scr >> 60) & 0xf;

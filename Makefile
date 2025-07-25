@@ -24,11 +24,13 @@ OBJS := \
   atomic \
   bcm2835_systimer \
   bcm2835_pll \
+  bcm_cm \
   bcm2835_emmc/bcm2835_emmc \
   bcm2835_emmc/bcm2835_emmc_cmd \
   bcm2835_emmc/bcm2835_emmc_priv \
   bcm2835_emmc/bcm2835_emmc_initialize \
   bcm2835_emmc/bcm2835_emmc_utils \
+  bcm_sdhost/bcm_sdhost \
   bcm2835_dma \
   bcm2835_ic \
   blockdev \

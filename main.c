@@ -5,6 +5,7 @@
 #include <bcm2835/bcm2835_systimer.h>
 #include <bcm2835/bcm2835_emmc.h>
 #include <bcm2835/bcm2835_pll.h>
+#include <bcm2835/bcm_sdhost.h>
 #include <bcm2835_dma.h>
 #include <common.h>
 #include <debug_led.h>
@@ -100,7 +101,7 @@ static void kernel_init(void)
 {
   int err;
 
-  uart_pl011_init(115200 * 2);
+  uart_pl011_init(115200);
   clear_reboot_request();
   kmalloc_init();
   dma_memory_init();
@@ -113,8 +114,9 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
+  err = bcm_sdhost_init();
   err = ili9341_init();
-  err = bcm2835_emmc_init();
+  // err = bcm2835_emmc_init();
   if (err != SUCCESS) {
     printf("Failed to initialize SDHC, %d\r\n", err);
     while(1)

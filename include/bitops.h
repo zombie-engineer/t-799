@@ -3,13 +3,16 @@
 
 #define TO_64(__v) ((uint64_t)(__v))
 #define TO_32(__v) ((uint32_t)(__v))
+#define TO_8(__v) ((uint8_t)(__v))
 
 
 #define BIT(__n) (1 << (__n))
 #define BITS(__n, __bits) ((__bits) << (__n))
 #define BIT_ENABLED(__value, __n) ((__value) & BIT(__n))
-#define WIDTH_TO_MASK64(__width) ((TO_64(1) << (__width)) - 1)
+
+#define WIDTH_TO_MASK8(__width) TO_8(WIDTH_TO_MASK64(__width))
 #define WIDTH_TO_MASK32(__width) TO_32(WIDTH_TO_MASK64(__width))
+#define WIDTH_TO_MASK64(__width) ((TO_64(1) << (__width)) - 1)
 
 #define BIT_IS_SET(__val, __pos) (__val & BIT(__pos))
 
@@ -17,6 +20,9 @@
 
 #define BITS_EXTRACT32(__v, __pos, __width) \
   ((TO_32(__v) >> (__pos)) & WIDTH_TO_MASK64(__width))
+
+#define BITS_EXTRACT8(__v, __pos, __width) \
+  ((TO_8(__v) >> (__pos)) & WIDTH_TO_MASK8(__width))
 
 #define BITS_EXTRACT64(__v, __pos, __width) \
   ((TO_64(__v) >> (__pos)) & WIDTH_TO_MASK64(__width))
