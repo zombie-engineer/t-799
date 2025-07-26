@@ -96,6 +96,7 @@ void print_mbox_props(void)
 }
 
 char sdcard_buf[2048] = { 0 };
+static struct sdhc sdhc;
 
 static void kernel_init(void)
 {
@@ -114,9 +115,22 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
-  err = bcm_sdhost_init();
+  err = sdhc_init(&sdhc, &bcm_sdhost_ops);
+  if (err != SUCCESS) {
+    printf("Failed to init sdhc, %d\r\n", err);
+    while(1)
+      asm volatile("wfe");
+  }
+  for (int i = 0; i < 128; ++i) {
+    sdcard_buf[i * 4 + 0] = 0x11;
+    sdcard_buf[i * 4 + 1] = 0x22;
+    sdcard_buf[i * 4 + 2] = 0x33;
+    sdcard_buf[i * 4 + 3] = 0x44;
+  }
+
+  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 1);
+
   err = ili9341_init();
-  // err = bcm2835_emmc_init();
   if (err != SUCCESS) {
     printf("Failed to initialize SDHC, %d\r\n", err);
     while(1)

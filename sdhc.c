@@ -1,0 +1,531 @@
+#include <errcode.h>
+#include <sdhc.h>
+#include <sdhc_cmd.h>
+#include <bcm2835_dma.h>
+#include <bitops.h>
+#include <log.h>
+
+static int sdhc_log_level;
+
+#define __SDHC_LOG(__level, __fmt, ...) \
+  LOG(sdhc_log_level, __level, "sdhc", __fmt, ##__VA_ARGS__)
+
+#define SDHC_LOG_INFO(__fmt, ...) \
+  __SDHC_LOG(INFO, __fmt, ## __VA_ARGS__)
+
+#define SDHC_LOG_DBG(__fmt, ...) \
+  __SDHC_LOG(DEBUG, __fmt, ## __VA_ARGS__)
+
+#define SDHC_LOG_DBG2(__fmt, ...) \
+  __SDHC_LOG(DEBUG2, __fmt, ## __VA_ARGS__)
+
+#define SDHC_LOG_WARN(__fmt, ...) \
+  __SDHC_LOG(WARN, __fmt, ## __VA_ARGS__)
+
+#define SDHC_LOG_CRIT(__fmt, ...) \
+  __SDHC_LOG(CRIT, __fmt, ## __VA_ARGS__)
+
+#define SDHC_LOG_ERR(__fmt, ...) \
+  __SDHC_LOG(ERR, __fmt, ## __VA_ARGS__)
+
+#define SDHC_CHECK_ERR(__fmt, ...)\
+  do {\
+    if (err != SUCCESS) {\
+      SDHC_LOG_ERR("%s err %d, " __fmt, __func__,  err, ## __VA_ARGS__);\
+      return err;\
+    }\
+  } while(0)
+
+#define SDHC_TIMEOUT_DEFAULT_USEC 1000000
+
+static void sdhc_dma_irq(void)
+{
+}
+
+/*
+ * - We to put SD card to SD mode (CMD0 with CS not asserted)
+ * - We need to make sure SD card runs in UHS-I 
+ *   UHS-I stands for Ultra High Speed Phase-I, it has 
+ *     DS - Default Speed up to 25MHz 3.3V signaling
+ *     HS - High Speed up to 50MHz 3.3V signaling
+ * - On reset after CMD0 SD card operates at 400KHz, we have a clock source
+ *   of 250MHz, 250 000 000  / 400 000 = 625, in theory we should run with this
+ *   clock, in theory we should run with this.
+ */
+
+/* 
+ * sdhc_process_acmd41 implements the following paragraphs, related to ACMD41
+ * Physical Layer Simplified Specification Version 9.00:
+ * 4.2.2 Operating Condition Validation
+ * "By setting the OCR to zero in the argument of ACMD41, the host can query
+ * each card and determine the common voltage range before sending
+ * out-of-range cards into the Inactive State (query mode). This query should
+ * be used if the host is able to select a common voltage range or if a
+ * notification to the application of non-usable cards in the stack is desired.
+ * The card does not start initialization and ignores HCS in the argument
+ * (refer to Section 4.2.3) if ACMD41 is issued as a query. Afterwards, the
+ * host may choose a voltage for operation and reissue ACMD41 with this
+ * condition, sending incompatible cards into the Inactive State.
+ * During the initialization procedure, the host is not allowed to change the
+ * operating voltage range. Refer to power up sequence as described in
+ * Section 6.4"
+ * 
+ * 4.2.3 Card Initialization and Identification Process
+ * 4.2.3.1 Initialization Command (ACMD41)
+ */
+static int sdhc_process_acmd41(struct sdhc *s)
+{
+  int err;
+  uint32_t acmd41_resp;
+  uint32_t acmd41_arg;
+
+#define SDHC_ACMD41_ARG_INQUERY 0
+
+#define SDHC_ACMD41_ARG_HCS 30
+#define SDHC_ACMD41_ARG_XPC 28
+
+#define SDHC_ACMD41_RESP_BUSY   31
+#define SDHC_ACMD41_RESP_CCS    30
+#define SDHC_ACMD41_RESP_UHS_II 29
+#define SDHC_ACMD41_RESP_S18_A  24
+/*
+ * In inquery mode ACMD41 (arg=0) SD card returns supported voltage ranges
+ * in response in OCR bits [23:15].
+ * OCR reg:
+ *  __________________________________________________________________________
+ * |    |   |     | |    | |    |   |   |   |   |   |   |   |   |   |         |
+ * |BUSY|CCS|UHSII|-|CO2T|-|S18A|V35|V34|V33|V32|V31|V30|V29|V28|V27|Reserved |
+ * |____|___|_____|_|____|_|____|___|___|___|___|___|___|___|___|___|_________|
+ * | 31 |30 | 29  | | 27 | | 24 |23 |22 |21 |20 |19 |18 |17 |16 |15 |  14-00  |
+ * |____|___|_____|_|____|_|____|___|___|___|___|___|___|___|___|___|_________|
+ *
+ *, where V35, V34, etc are ranges: V35=v3.5-3.6, V34=v3.4-v3.5 and so on
+ * In ACMD41 bits [23:8] of OCR are encoded in argument:
+ *  _____________________________________________
+ * |    |   |  |   |        |    |     |        |
+ * |BUSY|HCS|FB|XPC|Reserved|S18R| OCR |Reserved|
+ * |____|___|__|___|________|____|_____|________|
+ * | 31 |30 |29|28 |  27-25 | 24 |23-08|  07-00 |
+ * |____|___|__|___|________|____|_____|________|
+ *
+ * Voltage window mask thus is 9bits of data shifted by 15 bits:
+ * Raspberry PI only supports 3.3v signal so, we need to limit the mask even
+ * more by only bits 21 and 20
+ */
+#define SDHC_ACMD41_ARG_VOLTAGE_MASK 0x00ff8000 & (BIT(21) | BIT(20)
+#define SDHC_ACMD41_ARG_VOLTAGE_MASK_RPI3 (BIT(21) | BIT(20))
+
+  /*
+   * If the voltage window field (bit 23-0) in the argument is set to zero, it
+   * is called "inquiry CMD41" that does not start initialization and is use
+   * for getting OCR. The inquiry ACMD41 shall ignore the other field
+   * (bit 31-24) in the argument.
+   */
+  err = sdhc_acmd41(s, SDHC_ACMD41_ARG_INQUERY, &acmd41_resp,
+    SDHC_TIMEOUT_DEFAULT_USEC);
+
+  SDHC_CHECK_ERR("ACMD41 (GET_OCR) failed");
+  SDHC_LOG_DBG("ACMD41 response:%08x", acmd41_resp);
+
+  /* Form ACMD41 arg with valid voltage range
+   */
+  acmd41_arg = acmd41_resp & SDHC_ACMD41_ARG_VOLTAGE_MASK_RPI3;
+  if (s->cmd8_response_received)
+    acmd41_arg |= BIT(SDHC_ACMD41_ARG_HCS);
+
+  while (1) {
+    err = sdhc_acmd41(s, acmd41_arg, &acmd41_resp, SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("ACMD41 (GET_OCR) repeated failed");
+    SDHC_LOG_DBG("ACMD41: arg:%08x, resp:%08x", acmd41_arg, acmd41_resp);
+
+    /* BUSY bit == 0 : card is BUSY / still initializing
+     * BUSY bit == 1 : card is READY / initialized
+     */
+    if (acmd41_resp & BIT(SDHC_ACMD41_RESP_BUSY))
+      break;
+  }
+
+  /*
+   * If the card responds to CMD8, the response of ACMD41 includes the CCS
+   * field information. CCS is valid when the card returns ready (the busy bit
+   * is set to 1). CCS=0 means that the card is SDSC. CCS=1 means that the
+   * card is SDHC or SDXC
+   */
+  if (BIT_IS_SET(acmd41_resp, SDHC_ACMD41_RESP_CCS))
+    s->card_capacity = SD_CARD_CAPACITY_SDHC;
+  if (BIT_IS_SET(acmd41_resp, SDHC_ACMD41_RESP_UHS_II))
+    s->UHS_II_support = true;
+
+  SDHC_LOG_INFO("Card capacity: %s%s",
+    sd_card_capacity_to_str(s->card_capacity),
+    s->UHS_II_support ? ", UHS-II supported" : "");
+
+  return SUCCESS;
+}
+
+/*
+ * "Physical Layer Simplified Specification Version 9.00"
+ * SD host at initialization is in identification mode to know which cards
+ * are available. In this mode it queries cards and knows their addresses
+ * During that SD cards transition states in a defined order.
+ * We want to set the card to STANDBY state and move SD host to data
+ * transfer state.
+ * For that we:
+ * 1. Reset SD card back to IDLE state CMD0.
+ * 2. Issue commands to traverse states:
+ *    CDM0->IDLE->CMD8,CMD41->READY->CMD2->IDENT->CMD3->STANDBY
+ */
+static int sdhc_to_identification_mode(struct sdhc *s)
+{
+  int err;
+  sd_card_state_t card_state;
+  uint32_t sdcard_state;
+
+  /*
+   * TODO: set controller clock to 400KHz, at power on this is the cards
+   * operation speed until end of identitication state
+   */
+
+  err = sdhc_cmd0(s, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed at CMD0 (GO_TO_IDLE)");
+
+  /* card_state = IDLE */
+
+  /* CMD8 -SEND_IF_COND - this checks if SD card supports our voltage */
+  err = sdhc_cmd8(s, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("CMD8 (SEND_IF_COND) failed");
+  /* card_state = IDLE */
+  s->cmd8_response_received = true;
+  err = sdhc_process_acmd41(s);
+  SDHC_CHECK_ERR("failed to run ACMD41");
+
+  /* card_state = READY */
+
+  /* Get device id */
+  err = sdhc_cmd2(s, s->device_id, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("failed at CMD2 (SEND_ALL_CID) step");
+  /* card_state = IDENT */
+
+  SDHC_LOG_INFO("device_id: %08x|%08x|%08x|%08x",
+    s->device_id[0], s->device_id[1], s->device_id[2], s->device_id[3]);
+
+  err = sdhc_cmd3(s, &s->rca, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("failed at CMD3 (SEND_RELATIVE_ADDR) step");
+  SDHC_LOG_INFO("SD card RCA:%08x", s->rca);
+
+  /* card_state = STANDBY */
+  err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+
+  card_state = (sdcard_state >> 9) & 0xf;
+  if (card_state != SD_CARD_STATE_STANDBY) {
+    SDHC_LOG_ERR("Card not in STANDBY state after init");
+    return ERR_GENERIC;
+  }
+
+  if (s->ops->dump_fsm_state)
+    s->ops->dump_fsm_state();
+  return SUCCESS;
+}
+
+static int sdhc_read_scr_and_parse(struct sdhc *s)
+{
+  int err;
+  int sd_spec_ver_maj;
+  int sd_spec_ver_min;
+  uint64_t scr;
+
+  /* ACMD51 SEND_SCR */
+  err = sdhc_acmd51(s, &s->scr, sizeof(s->scr), SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed at ACMD51 (SEND_SCR)");
+
+  s->bus_width_4_supported = sd_scr_bus_width4_supported(s->scr);
+
+  sd_scr_get_sd_spec_version(s->scr, &sd_spec_ver_maj, &sd_spec_ver_min);
+
+  SDHC_LOG_INFO("SCR %016llx: sd spec version: %d.%d"
+    "bus_width1: %s, buswidth4:%s\r\n",
+    s->scr,
+    sd_spec_ver_maj,
+    sd_spec_ver_min,
+    sd_scr_bus_width1_supported(s->scr) ? "supported" : "not_supp",
+    s->bus_width_4_supported ? "supported" : "not_supp"
+  );
+
+  return SUCCESS;
+}
+
+static int sdhc_read_card_state(struct sdhc *s)
+{
+  int err;
+
+  uint32_t sdcard_state;
+  uint32_t card_state;
+  err = sdhc_cmd13(s, &sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+
+  card_state = (sdcard_state >> 9) & 0xf;
+  SDHC_LOG_INFO("sdcard_state:%08x, card_state:%d", sdcard_state,
+    card_state);
+
+  return SUCCESS;
+}
+
+static int sdhc_set_high_speed(struct sdhc *s)
+{
+  int err;
+  struct sd_cmd6_response_raw cmd6_resp = { 0 };
+
+  SDHC_LOG_DBG("Switching to HIGH SPEED mode");
+
+  err = sdhc_cmd6(s, CMD6_MODE_CHECK,
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    cmd6_resp.data,
+    SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("CMD6 query");
+
+  SDHC_LOG_INFO("CMD6 result: max_current:%d, fns(%04x,%04x,%04x,%04x)",
+    sd_cmd6_mode_0_resp_get_max_current(&cmd6_resp),
+    sd_cmd6_mode_0_resp_get_supp_fns_1(&cmd6_resp),
+    sd_cmd6_mode_0_resp_get_supp_fns_2(&cmd6_resp),
+    sd_cmd6_mode_0_resp_get_supp_fns_3(&cmd6_resp),
+    sd_cmd6_mode_0_resp_get_supp_fns_4(&cmd6_resp));
+
+  if (!sd_cmd6_mode_0_resp_is_sdr25_supported(&cmd6_resp)) {
+    SDHC_LOG_INFO("Switching to SDR25 not supported, skipping...");
+    return SUCCESS;
+  }
+
+  SDHC_LOG_INFO("Switching to SDR25 ...");
+
+  err = sdhc_cmd6(s, CMD6_MODE_SWITCH,
+    CMD6_ARG_ACCESS_MODE_SDR25,
+    CMD6_ARG_CMD_SYSTEM_DEFAULT,
+    CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
+    CMD6_ARG_POWER_LIMIT_DEFAULT,
+    cmd6_resp.data,
+    SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("CMD6 set");
+
+  SDHC_LOG_DBG("Switched to HIGH SPEED mode");
+  return SUCCESS;
+}
+
+static int csd_read_bits(const uint8_t *csd, int pos, int width)
+{
+  return BITS_EXTRACT8(csd[pos / 8], (pos % 8), width);
+}
+
+static void sdhc_parse_csd(const uint8_t *csd)
+{
+  int csd_ver;
+  int taac;
+  int nsac;
+  int tran_speed;
+  int ccc;
+  int read_bl_len;
+  int read_bl_partial;
+  int wr_block_misalignment;
+  int rd_block_misalignment;
+  int dsr;
+  int c_size;
+  int c_size_mult;
+  int erase_one_block_ena;
+  int erase_sector_size;
+  int write_speed_factor;
+  int max_wr_block_len;
+  char csdbuf[16 * 2 + 1];
+
+  int n = 0;
+  for (int i = 0; i < 16; ++i)
+    n += snprintf(csdbuf + n, sizeof(csdbuf) - n, "%02x", csd[i]);
+
+  SDHC_LOG_INFO("CSD: %s", csdbuf);
+
+  csd_ver = csd_read_bits(csd, 126, 2);
+  taac = csd_read_bits(csd, 112, 8);
+  nsac = csd_read_bits(csd, 104, 8);
+  tran_speed = csd_read_bits(csd, 96, 8);
+  ccc = csd_read_bits(csd, 84, 12);
+  read_bl_len = csd_read_bits(csd, 80, 4);
+  read_bl_partial = csd_read_bits(csd, 79, 1);
+  wr_block_misalignment = csd_read_bits(csd, 78, 1);
+  rd_block_misalignment = csd_read_bits(csd, 77, 1);
+  dsr = csd_read_bits(csd, 76, 1);
+  c_size = csd_read_bits(csd, 62, 12);
+  c_size_mult = csd_read_bits(csd, 47, 3);
+  erase_one_block_ena = csd_read_bits(csd, 46, 1);
+  erase_sector_size = csd_read_bits(csd, 39, 1);
+  write_speed_factor  = csd_read_bits(csd, 26, 3);
+  max_wr_block_len   = csd_read_bits(csd, 22, 4);
+
+  SDHC_LOG_INFO("CSD ver: %d", csd_ver);
+  SDHC_LOG_INFO("CSD TAAC(read access time): %d / NSAC:%d clk", taac,
+    nsac);
+  SDHC_LOG_INFO("CSD TRAN_SPEED:%d, CCC:0x%03x", tran_speed, ccc);
+  SDHC_LOG_INFO("CSD READ_BL_LEN:%d, READ_BL_PARTIAL:%d", read_bl_len,
+    read_bl_partial);
+  SDHC_LOG_INFO("CSD wr block misalignment:%d,rd block misalignment:%d",
+    wr_block_misalignment, rd_block_misalignment);
+  SDHC_LOG_INFO("CSD DSR:%d, C_SIZE:%d, C_SIZE_MULT:%d", dsr, c_size,
+    c_size_mult);
+  SDHC_LOG_INFO("CSD erase_one_block_ena: %d, erase sector size:%d",
+    erase_one_block_ena, erase_sector_size);
+  SDHC_LOG_INFO("CSD write speed factor: %d", write_speed_factor);
+  SDHC_LOG_INFO("CSD max write block len: %d", max_wr_block_len);
+}
+
+
+static int sdhc_to_data_transfer_mode(struct sdhc *s)
+{
+  uint64_t test_scr;
+  int err;
+
+  /*
+   * Guide card through data transfer mode states into 'tran' state
+   * CMD9 SEND_CSD to get and parse CSD registers
+   */
+  err = sdhc_cmd9(s, s->csd, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed at CMD9 (SEND_CSD)");
+
+  sdhc_parse_csd((uint8_t *)s->csd);
+
+  /* CMD7 SELECT_CARD to select card, making it to 'tran' statew */
+  err = sdhc_cmd7(s, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed at CMD7 (SELECT_CARD)");
+
+  sdhc_read_scr_and_parse(s);
+  SDHC_CHECK_ERR("Failed to read / parse SCR");
+
+  if (s->bus_width_4_supported) {
+    err = sdhc_acmd6(s, SDHC_ACMD6_ARG_BUS_WIDTH_4,
+      SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("Failed at ACMD6 (SET_BUS_WIDTH)");
+    s->ops->set_bus_width4();
+    s->ops->set_high_speed_clock();
+    s->bus_width_4 = true;
+  }
+
+  err = sdhc_read_card_state(s);
+  SDHC_CHECK_ERR("Failed to read card state");
+
+  err = sdhc_acmd51(s, &test_scr, sizeof(test_scr),
+    SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed at ACMD51 (SEND_SCR)");
+
+  if (test_scr != s->scr) {
+    SDHC_LOG_DBG("SCR mismatch after switch to 4bit bus: %016llx",
+      test_scr);
+    return ERR_IO;
+  }
+
+  err = sdhc_set_high_speed(s);
+  SDHC_CHECK_ERR("Failed to set UHS-I \"High Speed\" 50MHz 3.3v mode");
+
+  SDHC_LOG_INFO("SD card now runs in UHS-I 3.3V \"High Speed\" mode");
+  SDHC_LOG_INFO("Bus with 4 DAT3-0 lines, 50MHz -> 25Mbytes/sec");
+
+  if (s->ops->dump_fsm_state)
+    s->ops->dump_fsm_state();
+
+  return SUCCESS;
+}
+
+static int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void))
+{
+  io->dma_channel = bcm2835_dma_request_channel();
+  io->dma_control_block_idx = bcm2835_dma_reserve_cb();
+
+  if (io->dma_channel == -1 || io->dma_control_block_idx == -1)
+    return ERR_GENERIC;
+
+  bcm2835_dma_set_irq_callback(io->dma_channel, on_dma_done);
+
+  bcm2835_dma_irq_enable(io->dma_channel);
+  bcm2835_dma_enable(io->dma_channel);
+  bcm2835_dma_reset(io->dma_channel);
+
+  return SUCCESS;
+}
+
+int sdhc_init(struct sdhc *s, struct sdhc_ops *ops)
+{
+  int err;
+
+  s->bus_width_4 = false;
+  s->bus_width_4_supported = false;
+  s->blocking_mode = true;
+  s->is_acmd_context = false;
+  s->rca = 0;
+  s->scr = 0;
+  s->sdcard_mode = SDHC_SDCARD_MODE_SD;
+  s->cmd8_response_received = false;
+  s->card_capacity = SD_CARD_CAPACITY_SDSC;
+  s->UHS_II_support = false;
+  sdhc_log_level = LOG_LEVEL_INFO;
+
+  s->ops = ops;
+
+  err = sdhc_io_init(&s->io, sdhc_dma_irq);
+  SDHC_CHECK_ERR("Failed to init sdhc io");
+
+  if (s->ops->init) {
+    err = s->ops->init();
+    if (err)
+      return err;
+  }
+
+  if (s->ops->init_gpio)
+    s->ops->init_gpio();
+
+  if (s->ops->reset_regs)
+    s->ops->reset_regs();
+
+  err = sdhc_to_identification_mode(s);
+  if (err)
+    return err;
+
+  err = sdhc_to_data_transfer_mode(s);
+  if (err)
+    return err;
+
+  s->initialized = true;
+  return SUCCESS;
+}
+
+int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+  uint32_t num_sectors)
+{
+  return sdhc_cmd17(s, from_sector, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+}
+
+int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+  uint32_t num_sectors)
+{
+  int err;
+  sd_card_state_t card_state;
+  uint32_t sdcard_state;
+
+  /* card_state = STANDBY */
+  err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+
+  card_state = (sdcard_state >> 9) & 0xf;
+  SDHC_LOG_INFO("SD card state (before write): %d %s", card_state,
+    sd_card_state_to_str(card_state));
+
+  /* GET card state */
+  err = sdhc_cmd24(s, from_sector, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("CMD24 failed");
+
+  /* card_state = STANDBY */
+  err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("CMD13 after write failed");
+
+  card_state = (sdcard_state >> 9) & 0xf;
+  SDHC_LOG_INFO("SD card state (after write): %d %s", card_state,
+    sd_card_state_to_str(card_state));
+}

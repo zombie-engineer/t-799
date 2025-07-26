@@ -21,6 +21,3 @@ struct sdhc_io {
   /* Number of irqs that have been fired for this command */
   int num_irqs;
 };
-
-int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void));
-

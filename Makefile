@@ -51,6 +51,7 @@ OBJS := \
   partition \
   partition_table \
   printf \
+  sdhc \
   sched \
   semaphore \
   sprintf \

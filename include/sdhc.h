@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
+#include <sdhc_io.h>
 
 typedef enum {
   SD_CARD_STATE_IDLE    = 0,
@@ -8,17 +10,54 @@ typedef enum {
   SD_CARD_STATE_STANDBY = 3,
   SD_CARD_STATE_TRAN    = 4,
   SD_CARD_STATE_DATA    = 5,
-  SD_CARD_STATE_RECV    = 5,
-  SD_CARD_STATE_PROG    = 6,
-  SD_CARD_STATE_DISCARD = 7,
+  SD_CARD_STATE_RECV    = 6,
+  SD_CARD_STATE_PROG    = 7,
+  SD_CARD_STATE_DISCARD = 8,
   SD_CARD_STATE_UNKNOWN = 0xff
 } sd_card_state_t;
 
+static inline const char *sd_card_state_to_str(sd_card_state_t c)
+{
+  switch (c) {
+    case SD_CARD_STATE_IDLE    : return "IDLE";
+    case SD_CARD_STATE_READY   : return "READY";
+    case SD_CARD_STATE_IDENT   : return "IDENT";
+    case SD_CARD_STATE_STANDBY : return "STANDBY";
+    case SD_CARD_STATE_TRAN    : return "TRAN";
+    case SD_CARD_STATE_DATA    : return "DATA";
+    case SD_CARD_STATE_RECV    : return "RECV";
+    case SD_CARD_STATE_PROG    : return "PROG";
+    case SD_CARD_STATE_DISCARD : return "DISCARD";
+    case SD_CARD_STATE_UNKNOWN :
+    default: break;
+  }
+  return "UNKONWN";
+}
+
 typedef enum {
+  /* zero-initialized value is not valid */
   SD_CARD_CAPACITY_UNKNOWN = 0,
-  SD_CARD_CAPACITY_SDSC = 1,
-  SD_CARD_CAPACITY_SDHC = 2
+  /* Standard Capacity SD Memory card: SIZE <= 2GB */
+  SD_CARD_CAPACITY_SDSC,
+  /* High Capacity SD Memory card: 2GB < SIZE <= 32GB */
+  SD_CARD_CAPACITY_SDHC,
+  /* Extended Capacity SD Memory card: 32GB < SIZE <= 2TB */
+  SD_CARD_CAPACITY_SDXC,
+  /* Ultra Capacity SD Memory card: 2TB < SIZE <= 128TB */
+  SD_CARD_CAPACITY_SDUC,
 } sd_card_capacity_t;
+
+static inline const char *sd_card_capacity_to_str(sd_card_capacity_t c)
+{
+  switch (c) {
+    case SD_CARD_CAPACITY_SDSC: return "SDSC";
+    case SD_CARD_CAPACITY_SDHC: return "SDHC";
+    case SD_CARD_CAPACITY_SDXC: return "SDXC";
+    case SD_CARD_CAPACITY_SDUC: return "SDUC";
+    case SD_CARD_CAPACITY_UNKNOWN:
+    default: return "SD_UNKNOWN";
+  }
+}
 
 static inline int sd_scr_get_scr_version(uint64_t scr)
 {
@@ -203,3 +242,52 @@ static inline bool sd_scr_bus_width4_supported(uint64_t scr)
 {
   return (sd_scr_get_bus_widths(scr) >> 2) & 1;
 }
+
+struct sdhc;
+struct sd_cmd;
+
+struct sdhc_ops {
+  int (*init)(void);
+  void (*init_gpio)(void);
+  void (*reset_regs)(void);
+  void (*dump_regs)(bool);
+  void (*dump_fsm_state)(void);
+  void (*set_bus_width4)(void);
+  void (*set_high_speed_clock)(void);
+  int (*cmd)(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec);
+};
+
+typedef enum {
+  SDHC_SDCARD_MODE_UNKNOWN = 0,
+  /* Mode SD is default mode after power up */
+  SDHC_SDCARD_MODE_SD,
+  /* Mode SPI is set when CMD0 is run with CS line asserted */
+  SDHC_SDCARD_MODE_SPI,
+} sdhc_sdcard_mode_t;
+
+struct sdhc {
+  sdhc_sdcard_mode_t sdcard_mode;
+  struct sdhc_io io;
+  bool initialized;
+  bool blocking_mode;
+  bool is_acmd_context;
+  uint32_t rca;
+  uint64_t scr;
+  uint32_t device_id[4];
+  uint32_t csd[4];
+  sd_card_capacity_t card_capacity;
+  bool UHS_II_support;
+  bool bus_width_4_supported;
+  bool bus_width_4;
+  const struct sdhc_ops *ops;
+  bool cmd8_response_received;
+  bool dma_enabled;
+};
+
+int sdhc_init(struct sdhc *sdhc, struct sdhc_ops *ops);
+
+int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+  uint32_t num_sectors);
+
+int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+  uint32_t num_sectors);

@@ -1,4 +1,4 @@
 #pragma once
+#include <sdhc.h>
 
-int bcm_sdhost_init(void);
-
+extern struct sdhc_ops bcm_sdhost_ops;

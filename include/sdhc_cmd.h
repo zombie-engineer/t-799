@@ -2,6 +2,8 @@
 #include <string.h>
 #include <printf.h>
 #include <common.h>
+#include <bitops.h>
+#include <sdhc.h>
 
 /* GO_IDLE */
 #define SDHC_CMD0                 0x00000000
@@ -87,22 +89,19 @@ static inline void sd_cmd_init(struct sd_cmd *c,
   c->arg = arg;
 }
 
-int sdhc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
-  bool blocking);
-
-static inline int sdhc_cmd0(uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd0(struct sdhc *s, uint64_t timeout_usec)
 {
   struct sd_cmd c = SD_CMD_INIT(0, 0, 0);
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
 /* SEND_ALL_CID */
-static inline int sdhc_cmd2(uint32_t *device_id, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd2(struct sdhc *s, uint32_t *device_id,
+  uint64_t timeout_usec)
 {
   int err;
   struct sd_cmd c = SD_CMD_INIT(2, 0, 0);
-  err = sdhc_cmd(&c, timeout_usec, blocking);
+  err = s->ops->cmd(s, &c, timeout_usec);
 
   if (err != SUCCESS)
     return err;
@@ -115,9 +114,10 @@ static inline int sdhc_cmd2(uint32_t *device_id, uint64_t timeout_usec,
   return SUCCESS;
 }
 
-static inline int sdhc_cmd3(uint32_t *out_rca, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd3(struct sdhc *s, uint32_t *out_rca,
+  uint64_t timeout_usec)
 {
+  int ret;
   uint32_t rca;
   bool crc_error;
   bool illegal_cmd;
@@ -125,14 +125,12 @@ static inline int sdhc_cmd3(uint32_t *out_rca, uint64_t timeout_usec,
   bool status;
   bool ready;
 
-  int cmd_ret;
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD3, 0);
-  cmd_ret = sdhc_cmd(&c, timeout_usec, blocking);
-
-  if (cmd_ret != SUCCESS)
-    return cmd_ret;
+  ret = s->ops->cmd(s, &c, timeout_usec);
+  if (ret != SUCCESS)
+    return ret;
 
   crc_error = BITS_EXTRACT32(c.resp0, 15, 1);
   illegal_cmd = BITS_EXTRACT32(c.resp0, 14, 1);
@@ -177,11 +175,11 @@ static inline int sdhc_cmd3(uint32_t *out_rca, uint64_t timeout_usec,
 #define CMD6_ARG_POWER_LIMIT_1_80W 4
 #define CMD6_ARG_POWER_LIMIT_DEFAULT 0xf
 
-static inline int sdhc_cmd6(int mode, int access_mode,
+static inline int sdhc_cmd6(struct sdhc *s, int mode, int access_mode,
   int command_system, int driver_strength, int power_limit, uint8_t *dstbuf,
-  uint64_t timeout_usec, bool blocking)
+  uint64_t timeout_usec)
 {
-  int err;
+  int ret;
   struct sd_cmd c;
   uint32_t arg = access_mode & 0xf;
 
@@ -206,20 +204,20 @@ static inline int sdhc_cmd6(int mode, int access_mode,
   c.num_blocks = 1;
   c.block_size = 64;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
 
 /* Select card */
-static inline int sdhc_cmd7(uint32_t rca, uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd7(struct sdhc *s, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
-  sd_cmd_init(&c, SDHC_CMD7, rca << 16);
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  sd_cmd_init(&c, SDHC_CMD7, s->rca << 16);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_cmd8(uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd8(struct sdhc *s, uint64_t timeout_usec)
 {
   int ret;
   struct sd_cmd c;
@@ -242,7 +240,7 @@ static inline int sdhc_cmd8(uint64_t timeout_usec, bool blocking)
 #define CMD8_EXPECTED_RESPONSE CMD8_ARG
 
   sd_cmd_init(&c, SDHC_CMD8, CMD8_ARG);
-  ret = sdhc_cmd(&c, timeout_usec, blocking);
+  ret = s->ops->cmd(s, &c, timeout_usec);
   if (ret != SUCCESS)
     return ret;
 
@@ -254,14 +252,14 @@ static inline int sdhc_cmd8(uint64_t timeout_usec, bool blocking)
   return SUCCESS;
 }
 
-static inline int sdhc_cmd9(uint32_t rca, uint32_t *dst,
-  uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd9(struct sdhc *s, uint32_t *dst,
+  uint64_t timeout_usec)
 {
   int ret;
 
   struct sd_cmd c;
-  sd_cmd_init(&c, SDHC_CMD9, rca << 16);
-  ret = sdhc_cmd(&c, timeout_usec, blocking);
+  sd_cmd_init(&c, SDHC_CMD9, s->rca << 16);
+  ret = s->ops->cmd(s, &c, timeout_usec);
   if (ret == SUCCESS) {
     dst[0] = c.resp0;
     dst[1] = c.resp1;
@@ -272,14 +270,14 @@ static inline int sdhc_cmd9(uint32_t rca, uint32_t *dst,
   return ret;
 }
 
-static inline int sdhc_cmd13(uint32_t rca, uint32_t *out_status,
-  uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd13(struct sdhc *s, uint32_t *out_status,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
   int cmd_ret;
 
-  sd_cmd_init(&c, SDHC_CMD13, rca << 16);
-  cmd_ret = sdhc_cmd(&c, timeout_usec, blocking);
+  sd_cmd_init(&c, SDHC_CMD13, s->rca << 16);
+  cmd_ret = s->ops->cmd(s, &c, timeout_usec);
 
   if (cmd_ret != SUCCESS)
     return cmd_ret;
@@ -290,8 +288,8 @@ static inline int sdhc_cmd13(uint32_t rca, uint32_t *out_status,
 }
 
 /* READ_SINGLE_BLOCK */
-static inline int sdhc_cmd17(uint32_t block_idx, char *dstbuf,
-  uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd17(struct sdhc *s, uint32_t block_idx, char *dstbuf,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
@@ -300,12 +298,12 @@ static inline int sdhc_cmd17(uint32_t block_idx, char *dstbuf,
   c.num_blocks = 1;
   c.block_size = 512;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
 /* READ_MULTIPLE_BLOCK */
-static inline int sdhc_cmd18(uint32_t block_idx, size_t num_blocks,
-  char *dstbuf, uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd18(struct sdhc *s, uint32_t block_idx,
+  size_t num_blocks, char *dstbuf, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
@@ -314,13 +312,11 @@ static inline int sdhc_cmd18(uint32_t block_idx, size_t num_blocks,
   c.num_blocks = num_blocks;
   c.block_size = 512;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-extern bool emmc_should_log;
-
-static inline int sdhc_cmd23(size_t num_blocks, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd23(struct sdhc *s, size_t num_blocks,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
@@ -329,12 +325,12 @@ static inline int sdhc_cmd23(size_t num_blocks, uint64_t timeout_usec,
   c.num_blocks = 0;
   c.block_size = 0;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
 /* WRITE_BLOCK */
-static inline int sdhc_cmd24(uint32_t block_idx, char *srcbuf,
-  uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd24(struct sdhc *s, uint32_t block_idx, char *srcbuf,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
@@ -343,13 +339,11 @@ static inline int sdhc_cmd24(uint32_t block_idx, char *srcbuf,
   c.num_blocks = 1;
   c.block_size = 512;
 
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-int sdhc_cmd25_nonstop(uint32_t block_idx);
-
-static inline int sdhc_cmd25(uint32_t block_idx, size_t num_blocks,
-  char *srcbuf, uint64_t timeout_usec, bool blocking)
+static inline int sdhc_cmd25(struct sdhc *s, uint32_t block_idx,
+  size_t num_blocks, char *srcbuf, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
@@ -358,79 +352,84 @@ static inline int sdhc_cmd25(uint32_t block_idx, size_t num_blocks,
   c.num_blocks = num_blocks;
   c.block_size = 512;
 
-  int err = sdhc_cmd(&c, timeout_usec, blocking);
-  printf("CMD25 done with err:%d\r\n", err);
-  return err;
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_cmd32(uint32_t block_idx, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd32(struct sdhc *s, uint32_t block_idx,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD32, block_idx);
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_cmd33(uint32_t block_idx, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd33(struct sdhc *s, uint32_t block_idx,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD33, block_idx);
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_cmd38(uint32_t arg, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd38(struct sdhc *s, uint32_t arg,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD38, arg);
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_cmd58(uint32_t rca, uint64_t timeout_usec,
-  bool blocking)
+static inline int sdhc_cmd58(struct sdhc *s, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
-  sd_cmd_init(&c, SDHC_CMD58, rca << 16);
-  int err = sdhc_cmd(&c, timeout_usec, blocking);
+  sd_cmd_init(&c, SDHC_CMD58, s->rca << 16);
+  int ret = s->ops->cmd(s, &c, timeout_usec);
   printf("OCR:%08x %08x %08x %08x\r\n", c.resp0, c.resp1, c.resp2, c.resp3);
-  return err;
+  return ret;
 }
 
-static inline int sdhc_acmd6(uint32_t rca, uint32_t bus_width_bit,
-  uint64_t timeout_usec, bool blocking)
+static inline int sdhc_acmd6(struct sdhc *s, uint32_t bus_width_bit,
+  uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_ACMD6, bus_width_bit);
-  c.rca = rca;
-  return sdhc_cmd(&c, timeout_usec, blocking);
+  c.rca = s->rca;
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
-static inline int sdhc_acmd41(uint32_t arg, uint32_t rca, uint32_t *resp,
-  uint64_t timeout_usec, bool blocking)
+/*
+ * SD_SEND_OP_COND
+ * Sends Host Capacity Support (HCS) info to SD card and requests from SD card
+ * to send back Operation Conditions Register.
+ * arg - HCS
+ * resp = OCR
+ */
+static inline int sdhc_acmd41(struct sdhc *s, uint32_t arg, uint32_t *ocr,
+  uint64_t timeout_usec)
 {
-  int err;
-  struct sd_cmd c = SD_CMD_INIT(ACMD(41), arg, rca);
-  err = sdhc_cmd(&c, timeout_usec, blocking);
+  int ret;
 
-  if (err == SUCCESS)
-    *resp = c.resp0;
-  return err;
+  struct sd_cmd c = SD_CMD_INIT(ACMD(41), arg, s->rca);
+  ret = s->ops->cmd(s, &c, timeout_usec);
+
+  if (ret == SUCCESS)
+    *ocr = c.resp0;
+  return ret;
 }
 
 /* SEND_SCR */
-static inline int sdhc_acmd51(uint32_t rca, void *dst,
-  int dst_size, uint64_t timeout_usec, bool blocking)
+static inline int sdhc_acmd51(struct sdhc *s, void *dst,
+  int dst_size, uint64_t timeout_usec)
 {
   int ret;
   uint64_t scr;
 
-  struct sd_cmd c = SD_CMD_INIT(ACMD(51), 0, rca);
+  struct sd_cmd c = SD_CMD_INIT(ACMD(51), 0, s->rca);
 
   if (dst_size < sizeof(uint64_t))
     return -1;
@@ -442,29 +441,9 @@ static inline int sdhc_acmd51(uint32_t rca, void *dst,
   c.num_blocks = 1;
   c.databuf = (void *)&scr;
 
-  ret = sdhc_cmd(&c, timeout_usec, blocking);
+  ret = s->ops->cmd(s, &c, timeout_usec);
   if (ret == SUCCESS)
     *(uint64_t *)dst = reverse_bytes64(scr);
 
   return ret;
-}
-
-static inline int sdhc_acmd51x4(uint32_t rca, void *scrbuf,
-  int scrbuf_len, uint64_t timeout_usec, bool blocking)
-{
-  int ret;
-
-  struct sd_cmd c = SD_CMD_INIT(ACMD(51), 0, rca);
-
-  if (scrbuf_len < 8)
-    return -1;
-
-  if ((uint64_t)scrbuf & 3)
-    return -1;
-
-  c.block_size = 1;
-  c.num_blocks = 8;
-  c.databuf = scrbuf;
-
-  return sdhc_cmd(&c, timeout_usec, blocking);
 }

@@ -1,8 +1,6 @@
 #pragma once
 #include <log.h>
 
-extern int bcm_sdhost_log_level;
-
 #define BCM_SDHOST_LOG_COMMON(__level, __fmt, ...) \
   LOG(bcm_sdhost_log_level, __level, "bcm_sdhost", __fmt, ##__VA_ARGS__)
 
