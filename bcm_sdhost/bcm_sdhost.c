@@ -306,16 +306,22 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   const uint32_t *end)
 {
   int err;
+  int j = 0;
 
   while (ptr != end) {
+    uint32_t data = *ptr++;
+    for (int i = 0; i < 4; ++i) {
     bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
-    if (s->bus_width_4) {
-      err = bcm_sdhost_write_data_4bit_bus(*ptr++, /* log_edm */ true);
-      BCM_SDHOST_CHECK_ERR("Failed to write in 4bit bus mode");
+    ioreg32_write(SDHOST_DATA, data);
+    printf("wr #%d: %08x, hsts:%08x, edm:%08x\r\n", j++, data,
+        ioreg32_read(SDHOST_HSTS),
+        ioreg32_read(SDHOST_EDM));
     }
-    else
-      ioreg32_write(SDHOST_DATA, *ptr++);
   }
+
+  printf("wr compl #%d hsts:%08x, edm:%08x\r\n", j,
+    ioreg32_read(SDHOST_HSTS),
+    ioreg32_read(SDHOST_EDM));
 
   return SUCCESS;
 }
@@ -323,6 +329,8 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
 static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
   uint32_t *end)
 {
+  int num_words;
+  uint32_t edm;
   int err;
   uint32_t data;
 
@@ -330,12 +338,17 @@ static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
     /* Wait for data ready flag */
     bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
 
-    if (s->bus_width_4) {
+    if (0 && s->bus_width_4) {
       err = bcm_sdhost_read_data_4bit_bus(&data, /* log_edm */ true);
       BCM_SDHOST_CHECK_ERR("Failed to read in 4bit bus mode");
     }
-    else
+    else {
+      edm = ioreg32_read(SDHOST_EDM);
+      num_words = (edm >> 4) & 0x1f;
       data = ioreg32_read(SDHOST_DATA);
+      BCM_SDHOST_LOG_DBG(
+        "EDM:%08x, num_words:%d", edm, num_words);
+    }
     BCM_SDHOST_LOG_DBG2("data:%08x", data);
     *ptr++ = data;
   }
@@ -414,9 +427,6 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
   /* Wait prev command completion */
   while(1) {
     r = ioreg32_read(SDHOST_CMD);
-    BCM_SDHOST_LOG_DBG2("--wait_prev:-cmd %08x, hsts:%08x", r,
-      ioreg32_read(SDHOST_HSTS));
-
     if (BIT_IS_CLEAR(r, SDHOST_CMD_BIT_NEW))
       break;
   }
@@ -494,6 +504,8 @@ int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
     r = ioreg32_read(SDHOST_CMD);
     if (BIT_IS_CLEAR(r, SDHOST_CMD_BIT_NEW))
       break;
+    BCM_SDHOST_LOG_DBG2("--wait_prev:-cmd %08x, hsts:%08x", r,
+      ioreg32_read(SDHOST_HSTS));
   }
 
   /* Clear prev CMD errors */
@@ -503,8 +515,10 @@ int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
     ioreg32_write(SDHOST_HSTS, r);
   }
 
-  ioreg32_write(SDHOST_HBCT, c->block_size);
-  ioreg32_write(SDHOST_HBLC, c->num_blocks);
+  if (c->cmd_idx != 55) {
+    ioreg32_write(SDHOST_HBCT, c->block_size);
+    ioreg32_write(SDHOST_HBLC, c->num_blocks);
+  }
   ioreg32_write(SDHOST_ARG, c->arg);
 
   if (s->blocking_mode)
@@ -525,10 +539,11 @@ static void bcm_sdhost_reset_registers(void)
     (FIFO_READ_THRESHOLD << SDHOST_EDM_READ_THRESHOLD_SHIFT) |
     (FIFO_WRITE_THRESHOLD << SDHOST_EDM_WRITE_THRESHOLD_SHIFT);
 
+  bcm_sdhost_dump_regs(true);
+
   /* Power down */
   ioreg32_write(SDHOST_VDD, 0);
 
-  bcm_sdhost_dump_regs(true);
 
   ioreg32_write(SDHOST_CMD, 0);
   ioreg32_write(SDHOST_ARG, 0);
@@ -551,15 +566,12 @@ static void bcm_sdhost_reset_registers(void)
   ioreg32_write(SDHOST_VDD, 1);
 
   delay_us(20 * 1000);
-  r = ioreg32_read(SDHOST_HCFG);
-  r &= ~SDHOST_CFG_WIDE_EXT_BUS;
-  ioreg32_write(SDHOST_HCFG, r);
 
-  ioreg32_write(SDHOST_HCFG, SDHOST_CFG_WIDE_INT_BUS | SDHOST_CFG_SLOW_CARD);
-  ioreg32_write(SDHOST_CDIV, SDHOST_MAX_CDIV);
+  uint32_t hcfg = SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_WIDE_INT_BUS | SDHOST_CFG_SLOW_CARD;
+  uint32_t slow_clock = 0x3e6;
+  ioreg32_write(SDHOST_HCFG, hcfg);
+  ioreg32_write(SDHOST_CDIV, slow_clock);
 
-  bcm_sdhost_dump_regs(true);
-  delay_us(20 * 1000);
 }
 
 static inline void bcm_sdhost_dump_fsm_state(void)
@@ -574,7 +586,8 @@ static inline void bcm_sdhost_dump_fsm_state(void)
 static void bcm_sdhost_set_bus_width4(void)
 {
   uint32_t hcfg;
-  ioreg32_read(SDHOST_HCFG);
+
+  hcfg = ioreg32_read(SDHOST_HCFG);
   hcfg |= SDHOST_CFG_WIDE_EXT_BUS;
   ioreg32_write(SDHOST_HCFG, hcfg);
   BCM_SDHOST_LOG_DBG("set_bus_width4 done");
@@ -595,15 +608,14 @@ static void bcm_sdhost_get_max_clock(void)
 
   BCM_SDHOST_LOG_DBG("VCPU clock: ena:%d, div:%08x, src:%d(%s)",
     clk_enabled, clock_div, parent_clock_id, parent_clock_name);
+
 }
 
 static void bcm_sdhost_set_high_speed_clock(void)
 {
-  uint32_t hcfg;
-
-  ioreg32_write(SDHOST_CDIV, 5);
-  hcfg = ioreg32_read(SDHOST_HCFG);
-  hcfg &= ~SDHOST_CFG_SLOW_CARD;
+  uint32_t hcfg = SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_WIDE_INT_BUS
+    | SDHOST_CFG_SLOW_CARD;
+  ioreg32_write(SDHOST_CDIV, 6);
   ioreg32_write(SDHOST_HCFG, hcfg);
 }
 

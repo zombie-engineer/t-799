@@ -381,6 +381,7 @@ static void sdhc_parse_csd(const uint8_t *csd)
 
 static int sdhc_to_data_transfer_mode(struct sdhc *s)
 {
+  uint8_t sd_status[64];
   uint64_t test_scr;
   int err;
 
@@ -400,12 +401,18 @@ static int sdhc_to_data_transfer_mode(struct sdhc *s)
   sdhc_read_scr_and_parse(s);
   SDHC_CHECK_ERR("Failed to read / parse SCR");
 
+  err = sdhc_acmd13(s, sd_status, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed ACMD13");
+
+  err = sdhc_set_high_speed(s);
+  SDHC_CHECK_ERR("Failed to set UHS-I \"High Speed\" 50MHz 3.3v mode");
+  s->ops->set_high_speed_clock();
+
   if (s->bus_width_4_supported) {
     err = sdhc_acmd6(s, SDHC_ACMD6_ARG_BUS_WIDTH_4,
       SDHC_TIMEOUT_DEFAULT_USEC);
     SDHC_CHECK_ERR("Failed at ACMD6 (SET_BUS_WIDTH)");
     s->ops->set_bus_width4();
-    s->ops->set_high_speed_clock();
     s->bus_width_4 = true;
   }
 
@@ -422,8 +429,6 @@ static int sdhc_to_data_transfer_mode(struct sdhc *s)
     return ERR_IO;
   }
 
-  err = sdhc_set_high_speed(s);
-  SDHC_CHECK_ERR("Failed to set UHS-I \"High Speed\" 50MHz 3.3v mode");
 
   SDHC_LOG_INFO("SD card now runs in UHS-I 3.3V \"High Speed\" mode");
   SDHC_LOG_INFO("Bus with 4 DAT3-0 lines, 50MHz -> 25Mbytes/sec");
@@ -517,10 +522,10 @@ int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
   SDHC_LOG_INFO("SD card state (before write): %d %s", card_state,
     sd_card_state_to_str(card_state));
 
-  /* GET card state */
   err = sdhc_cmd24(s, from_sector, buf, SDHC_TIMEOUT_DEFAULT_USEC);
   SDHC_CHECK_ERR("CMD24 failed");
 
+  /* GET card state */
   /* card_state = STANDBY */
   err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
   SDHC_CHECK_ERR("CMD13 after write failed");

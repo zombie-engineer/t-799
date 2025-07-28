@@ -57,6 +57,7 @@
 #define SDHC_ACMD6_ARG_BUS_WIDTH_1 0
 #define SDHC_ACMD6_ARG_BUS_WIDTH_4 2
 #define SDHC_ACMD6 ACMD(6)
+#define SDHC_ACMD13 ACMD(13)
 
 #define SDHC_ACMD41 ACMD(41)
 #define SDHC_ACMD51 ACMD(51)
@@ -234,7 +235,7 @@ static inline int sdhc_cmd8(struct sdhc *s, uint64_t timeout_usec)
    *         0100 : Reserved
    *         1000 : Reserved
    */
-#define CMD8_ARG_PATTERN 0xdd
+#define CMD8_ARG_PATTERN 0xaa
 #define CMD8_ARG_VOLTAGE_3V3 1
 #define CMD8_ARG ((CMD8_ARG_VOLTAGE_3V3 << 8) | CMD8_ARG_PATTERN)
 #define CMD8_EXPECTED_RESPONSE CMD8_ARG
@@ -399,6 +400,20 @@ static inline int sdhc_acmd6(struct sdhc *s, uint32_t bus_width_bit,
 
   sd_cmd_init(&c, SDHC_ACMD6, bus_width_bit);
   c.rca = s->rca;
+  return s->ops->cmd(s, &c, timeout_usec);
+}
+
+static inline int sdhc_acmd13(struct sdhc *s, uint8_t *sd_status,
+  uint64_t timeout_usec)
+{
+  struct sd_cmd c;
+
+  sd_cmd_init(&c, SDHC_ACMD13, 0);
+  c.rca = s->rca;
+
+  c.block_size = 64;
+  c.num_blocks = 1;
+  c.databuf = (void *)sd_status;
   return s->ops->cmd(s, &c, timeout_usec);
 }
 
