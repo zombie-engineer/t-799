@@ -27,6 +27,8 @@
 #define SDHC_CMD12                0x0000000c
 /* SEND_STATUS */
 #define SDHC_CMD13                0x0000000d
+/* SET_BLOCK_LEN */
+#define SDHC_CMD16                0x00000010
 /* READ_SINGLE_BLOCK */
 #define SDHC_CMD17                0x00000011
 /* READ_MULTIPLE_BLOCKS */
@@ -285,6 +287,15 @@ static inline int sdhc_cmd13(struct sdhc *s, uint32_t *out_status,
   *out_status = c.resp0;
 
   return SUCCESS;
+}
+
+/* SET_BLOCK_LEN */
+static inline int sdhc_cmd16(struct sdhc *s, uint32_t block_len,
+  uint64_t timeout_usec)
+{
+  struct sd_cmd c;
+  sd_cmd_init(&c, SDHC_CMD16, block_len);
+  return s->ops->cmd(s, &c, timeout_usec);
 }
 
 /* READ_SINGLE_BLOCK */

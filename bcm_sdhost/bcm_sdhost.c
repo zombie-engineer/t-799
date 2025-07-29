@@ -258,50 +258,6 @@ static inline int bcm_sdhost_read_data_4bit_bus(uint32_t *out, bool log_edm)
   return SUCCESS;
 }
 
-static inline int bcm_sdhost_write_data_4bit_bus(uint32_t data, bool log_edm)
-{
-  int num_words;
-  uint32_t edm;
-  uint32_t hsts;
-  int num_waits = 0;
-
-  for (int i = 0; i < 4; ++i) {
-    while (1) {
-      hsts = ioreg32_read(SDHOST_HSTS);
-      edm = ioreg32_read(SDHOST_EDM);
-      if (hsts & SDHSTS_DATA_FLAG)
-        break;
-      num_waits++;
-    }
-
-    ioreg32_write(SDHOST_DATA, (data >> (i * 8)) & 0xff);
-    hsts = ioreg32_read(SDHOST_HSTS);
-    edm = ioreg32_read(SDHOST_EDM);
-    num_words = (edm >> 4) & 0x1f;
-    BCM_SDHOST_LOG_DBG(
-      "written:%08x, HSTS:%08x, EDM:%08x, num_words:%d,num_waits:%d", data,
-      hsts, edm, num_words, num_waits);
-  }
-
-#if 0
-  int num_bytes = 0;
-  uint32_t result = 0;
-  /* Wait until EDM shows 4 words */
-  for (int i = 0; i < 4; ++i) {
-    edm = ioreg32_read(SDHOST_EDM);
-    num_words = (edm >> 4) & 0x1f;
-    if (num_words == 0)
-      return ERR_IO;
-
-    if (log_edm)
-      BCM_SDHOST_LOG_DBG("EDM:%08x, num_words:%d", edm, num_words);
-    result = (result << 8) | ioreg32_read(SDHOST_DATA) & 0xff;
-    num_bytes++;
-  }
-#endif
-  return SUCCESS;
-}
-
 static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   const uint32_t *end)
 {
@@ -331,7 +287,7 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   }
 
   for (int i = 0; i < 32; ++i) {
-    ioreg32_write(SDHOST_DATA, data);
+    // ioreg32_write(SDHOST_DATA, data);
     printf("wr_compl hsts:%08x, edm:%08x\r\n",
       ioreg32_read(SDHOST_HSTS),
       ioreg32_read(SDHOST_EDM));
@@ -415,45 +371,52 @@ static void bcm_sdhost_cmd_prep_data(struct sdhc *s, struct sd_cmd *c,
 static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
-  int ret = SUCCESS;
-  uint32_t r;
-  uint32_t status;
+  int ret;
+  uint32_t reg_cmd;
+  uint32_t reg_hsts;
   bool is_write;
   bool has_data;
 
-  uint32_t cmd_reg = s->is_acmd_context
+  reg_cmd = s->is_acmd_context
     ? sd_acommands[c->cmd_idx]
     : sd_commands[c->cmd_idx];
 
-  cmd_reg |= BIT(SDHOST_CMD_BIT_NEW);
-  has_data = cmd_reg & SDHOST_CMD_HAS_DATA_MASK;
+  reg_cmd |= BIT(SDHOST_CMD_BIT_NEW);
+  has_data = reg_cmd & SDHOST_CMD_HAS_DATA_MASK;
 
   if (has_data) {
-    is_write = cmd_reg & SDHOST_CMD_WRITE_CMD;
+    ioreg32_write(SDHOST_HBCT, c->block_size);
+    ioreg32_write(SDHOST_HBLC, c->num_blocks);
+    is_write = reg_cmd & SDHOST_CMD_WRITE_CMD;
     bcm_sdhost_cmd_prep_data(s, c, is_write);
   }
 
   BCM_SDHOST_LOG_DBG("%SCMD%d: CMD:0x%08x, ARG:0x%08x",
     s->is_acmd_context ? "A" : "", c->cmd_idx,
-    cmd_reg, ioreg32_read(SDHOST_ARG), ioreg32_read(SDHOST_CMD));
-  ioreg32_write(SDHOST_CMD, cmd_reg);
+    reg_cmd, ioreg32_read(SDHOST_ARG), ioreg32_read(SDHOST_CMD));
+  ioreg32_write(SDHOST_ARG, c->arg);
+  ioreg32_write(SDHOST_CMD, reg_cmd);
 
   /* Wait prev command completion */
   while(1) {
-    r = ioreg32_read(SDHOST_CMD);
-    if (BIT_IS_CLEAR(r, SDHOST_CMD_BIT_NEW))
+    reg_cmd = ioreg32_read(SDHOST_CMD);
+    if (BIT_IS_CLEAR(reg_cmd, SDHOST_CMD_BIT_NEW))
       break;
+
+    printf("bcm_sdhost_cmd_blocking: wait_new,cmd:%08x,edm:%08x,hsts:%08x\r\n",
+      reg_cmd, ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
   }
 
   /* Clear possible error state from previous command */
-  if (BIT_IS_SET(r, SDHOST_CMD_BIT_FAIL)) {
-    status = ioreg32_read(SDHOST_HSTS);
+  if (BIT_IS_SET(reg_cmd, SDHOST_CMD_BIT_FAIL)) {
     ret = ERR_GENERIC;
     goto out;
   }
 
   if (has_data)
     ret = bcm_sdhost_cmd_data_phase(s, c, is_write);
+  else
+    ret = SUCCESS;
 
   c->resp0 = ioreg32_read(SDHOST_RESP0);
   c->resp1 = ioreg32_read(SDHOST_RESP1);
@@ -528,12 +491,6 @@ int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
     BCM_SDHOST_LOG_WARN("HSTS had errors: %08x", r);
     ioreg32_write(SDHOST_HSTS, r);
   }
-
-  if (c->cmd_idx != 55) {
-    ioreg32_write(SDHOST_HBCT, c->block_size);
-    ioreg32_write(SDHOST_HBLC, c->num_blocks);
-  }
-  ioreg32_write(SDHOST_ARG, c->arg);
 
   if (s->blocking_mode)
     return bcm_sdhost_cmd_blocking(s, c, timeout_usec);

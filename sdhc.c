@@ -242,13 +242,13 @@ static int sdhc_read_scr_and_parse(struct sdhc *s)
 
   sd_scr_get_sd_spec_version(s->scr, &sd_spec_ver_maj, &sd_spec_ver_min);
 
-  SDHC_LOG_INFO("SCR %016llx: sd spec version: %d.%d"
-    "bus_width1: %s, buswidth4:%s\r\n",
+  SDHC_LOG_INFO("SCR %016llx: spec ver:%d.%d, "
+    "supported bus widths:1bit:%s,4bit:%s\r\n",
     s->scr,
     sd_spec_ver_maj,
     sd_spec_ver_min,
-    sd_scr_bus_width1_supported(s->scr) ? "supported" : "not_supp",
-    s->bus_width_4_supported ? "supported" : "not_supp"
+    sd_scr_bus_width1_supported(s->scr) ? "yes" : "no",
+    s->bus_width_4_supported ? "yes" : "no"
   );
 
   return SUCCESS;
@@ -428,9 +428,10 @@ static int sdhc_to_data_transfer_mode(struct sdhc *s)
     return ERR_IO;
   }
 
-
   SDHC_LOG_INFO("SD card now runs in UHS-I 3.3V \"High Speed\" mode");
   SDHC_LOG_INFO("Bus with 4 DAT3-0 lines, 50MHz -> 25Mbytes/sec");
+
+  err = sdhc_cmd16(s, 512, SDHC_TIMEOUT_DEFAULT_USEC);
 
   if (s->ops->dump_fsm_state)
     s->ops->dump_fsm_state();
