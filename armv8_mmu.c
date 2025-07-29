@@ -259,7 +259,6 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui,
 {
   int i;
   uint64_t desc;
-  uint64_t section_size;
 
   uint64_t page_idx_ram_0_start = KERNEL_RAM0_PADDR_START / MMU_PAGE_GRANULE;
   uint64_t page_idx_ram_0_end = dma_mem_start / MMU_PAGE_GRANULE;
@@ -270,9 +269,6 @@ static NO_MMU void mmu_page_table_init(struct mmu_info *mmui,
 
   asm volatile ("ldr %0, =__pagetable_start\n" :"=r"(mmui->pagetable_start));
   asm volatile ("ldr %0, =__pagetable_end\n" :"=r"(mmui->pagetable_end));
-
-  section_size = (uint8_t *)mmui->pagetable_end
-    - (uint8_t *)mmui->pagetable_start;
 
   mmui->virtual_mem_size = max_mem_size;
   mmui->num_pages = (max_mem_size + (MMU_PAGE_GRANULE - 1)) / MMU_PAGE_GRANULE;

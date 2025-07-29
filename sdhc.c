@@ -233,7 +233,6 @@ static int sdhc_read_scr_and_parse(struct sdhc *s)
   int err;
   int sd_spec_ver_maj;
   int sd_spec_ver_min;
-  uint64_t scr;
 
   /* ACMD51 SEND_SCR */
   err = sdhc_acmd51(s, &s->scr, sizeof(s->scr), SDHC_TIMEOUT_DEFAULT_USEC);
@@ -533,4 +532,6 @@ int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
   card_state = (sdcard_state >> 9) & 0xf;
   SDHC_LOG_INFO("SD card state (after write): %d %s", card_state,
     sd_card_state_to_str(card_state));
+
+  return SUCCESS;
 }

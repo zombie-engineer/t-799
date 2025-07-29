@@ -382,10 +382,10 @@ static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
     iters = local_width * local_height / 8;
     ili9341_fast_fill(ili9341_canvas, iters, v1, v2, v3);
   } else {
-    c = ili9341_canvas;
+    c = (uint8_t *)ili9341_canvas;
     for (x = 0; x < local_width; ++x) {
       for (y = 0; y < local_height; ++y) {
-        c = ili9341_canvas + (y * local_width + x) * 3;
+        c = (uint8_t *)(ili9341_canvas + (y * local_width + x) * 3);
         *(c++) = r;
         *(c++) = g;
         *(c++) = b;
@@ -430,8 +430,6 @@ ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
 
 int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t))
 {
-  size_t i;
-
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
     os_log("WARN: tried to initialized nonstop refresh twice\r\n");
     return ERR_GENERIC;
@@ -491,8 +489,6 @@ int ili9341_nonstop_refresh_start(void)
 
 int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
 {
-  const uint8_t *src;
-
   if (!ili9341.transfer_done) {
     // printf("** [Not accepted %08x]\r\n", buf_handle);
     return ERR_GENERIC;
@@ -544,8 +540,6 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
 void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
   void (*dma_done_cb_irq)(uint32_t))
 {
-  size_t i;
-
   if (!ili9341.transfer_done)
     return;
 
@@ -723,10 +717,8 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
   bcm2835_dma_link_cbs(b->header_cbs[transfer_idx], b->tx_cbs[transfer_idx]);
 }
 
-static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf)
+static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf, int i)
 {
-  size_t i;
-  bool is_last_transfer;
   uint8_t *b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
 
   if (!b) {
@@ -762,7 +754,7 @@ static int ili9341_setup_dma(void)
   }
 
   for (i = 0; i < ARRAY_SIZE(ili9341.dma_bufs); ++i) {
-    err = ili9341_setup_single_dma_buf(&ili9341.dma_bufs[i]);
+    err = ili9341_setup_single_dma_buf(&ili9341.dma_bufs[i], i);
     if (err != SUCCESS)
       return err;
   }

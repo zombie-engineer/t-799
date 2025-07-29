@@ -41,6 +41,8 @@ static inline void irq_disable(void)
 
 static inline bool irq_is_enabled(void)
 {
+  bool ret;
+
   asm volatile (
     /*
      * Move DAIF to x0, x0 will have bits set as  D | A | I | F | RES0,
@@ -50,14 +52,18 @@ static inline bool irq_is_enabled(void)
      * Bit I == 1 (set) means IRQ exception /interrupt is masked (disabled),
      *      == 0 (clear) means IRQ exception / interrupt is not masked(enabled)
      */
-    "mrs x0, daif\n"
+    "mrs %0, daif\n"
     /* Invert bits in X0 to have 1 for interrupt enabled, 0 for disabled */
-    "mvn x0, x0\n"
+    "mvn %0, %0\n"
     /* Shift bit I (IRQ masked) to bit 0 */
-    "lsr x0, x0, #7\n"
+    "lsr %0, %0, #7\n"
     /* Return 0 for IRQ disabled, 1 for IRQ enabled */
-    "and x0, x0, #1\n"
+    "and %0, %0, #1\n"
+    : "=r"(ret)
+    :
+    : "x0"
   );
+  return ret;
 }
 
 #define aarch64_get_far_el1(__dst) \

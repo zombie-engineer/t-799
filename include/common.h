@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 #define ARRAY_SIZE(__a) (sizeof(__a)/sizeof(__a[0]))
 #define ASSERT(__a) {}

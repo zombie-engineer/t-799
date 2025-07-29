@@ -105,7 +105,6 @@ struct kmalloc_descriptor *kmalloc_descriptors[] = {
 void *kmalloc(size_t size)
 {
   int logsz = get_biggest_log2(size);
-  void *result;
 
   if (logsz >= ARRAY_SIZE(kmalloc_descriptors))
     return NULL;

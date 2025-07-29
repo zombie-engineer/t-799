@@ -120,11 +120,11 @@ static inline int sdhc_cmd3(struct sdhc *s, uint32_t *out_rca,
 {
   int ret;
   uint32_t rca;
-  bool crc_error;
-  bool illegal_cmd;
+  bool __attribute__((unused)) crc_error;
+  bool __attribute__((unused)) illegal_cmd;
   bool error;
-  bool status;
-  bool ready;
+  bool __attribute__((unused)) status;
+  bool __attribute__((unused)) ready;
 
   struct sd_cmd c;
 
@@ -180,7 +180,6 @@ static inline int sdhc_cmd6(struct sdhc *s, int mode, int access_mode,
   int command_system, int driver_strength, int power_limit, uint8_t *dstbuf,
   uint64_t timeout_usec)
 {
-  int ret;
   struct sd_cmd c;
   uint32_t arg = access_mode & 0xf;
 
@@ -201,7 +200,7 @@ static inline int sdhc_cmd6(struct sdhc *s, int mode, int access_mode,
 
   sd_cmd_init(&c, SDHC_CMD6, arg);
 
-  c.databuf = dstbuf;
+  c.databuf = (void *)dstbuf;
   c.num_blocks = 1;
   c.block_size = 64;
 
@@ -289,13 +288,13 @@ static inline int sdhc_cmd13(struct sdhc *s, uint32_t *out_status,
 }
 
 /* READ_SINGLE_BLOCK */
-static inline int sdhc_cmd17(struct sdhc *s, uint32_t block_idx, char *dstbuf,
+static inline int sdhc_cmd17(struct sdhc *s, uint32_t block_idx, uint8_t *dstbuf,
   uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD17, block_idx);
-  c.databuf = dstbuf;
+  c.databuf = (void *)dstbuf;
   c.num_blocks = 1;
   c.block_size = 512;
 
@@ -330,13 +329,13 @@ static inline int sdhc_cmd23(struct sdhc *s, size_t num_blocks,
 }
 
 /* WRITE_BLOCK */
-static inline int sdhc_cmd24(struct sdhc *s, uint32_t block_idx, char *srcbuf,
-  uint64_t timeout_usec)
+static inline int sdhc_cmd24(struct sdhc *s, uint32_t block_idx,
+  const uint8_t *srcbuf, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD24, block_idx);
-  c.databuf = srcbuf;
+  c.databuf = (void *)srcbuf;
   c.num_blocks = 1;
   c.block_size = 512;
 

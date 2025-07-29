@@ -60,7 +60,6 @@ void os_exit_current_task(void)
 void os_event_wait(struct event *ev)
 {
   OSAPI_PUTS("[os_event_wait]\r\n");
-  struct task *t = sched_get_current_task();
   if (ev->ev == 1) {
     OSAPI_PUTS("[os_event_wait end fast]\r\n");
     return;

@@ -9,7 +9,6 @@ static float bcm2835_report_pll(char pll_symbol, ioreg32_t ctrl_reg,
   uint32_t pll_ctrl, ndiv, pdiv, ndiv_frac_val;
   float ndiv_frac;
   float freq;
-  bool should_prescale;
   uint32_t prescale;
   pll_ctrl = ioreg32_read(ctrl_reg);
   ndiv = pll_ctrl & 0x3ff;

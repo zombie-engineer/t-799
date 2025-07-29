@@ -65,7 +65,7 @@ static void bcm2835_systimer_run_cb_1(void)
     systimer1.cb(systimer1.cb_arg);
 }
 
-static void bcm2835_systimer_cb_periodic_timer_1(void)
+__attribute__((unused)) static void bcm2835_systimer_cb_periodic_timer_1(void)
 {
   bcm2835_systimer_clear_irq_1();
   bcm2835_systimer_run_cb_1();
@@ -86,7 +86,7 @@ void bcm2835_systimer_start_oneshot(uint32_t usec, timer_callback_t cb,
 }
 
 /* Count maximum cycles for execution of bcm2835_systimer_start function */
-static uint32_t bcm2835_systimer_get_min_set_time(void)
+__attribute__((unused)) static uint32_t bcm2835_systimer_get_min_set_time(void)
 {
   uint32_t t1, t2;
   uint32_t max_delta;

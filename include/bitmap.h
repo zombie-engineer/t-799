@@ -42,7 +42,6 @@ static inline void bitmap_clear_entry(struct bitmap *b, int idx)
 static inline int bitmap_set_next_free(struct bitmap *b)
 {
   uint64_t *bitword;
-  int bit;
   size_t i;
   uint64_t mask;
 

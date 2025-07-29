@@ -415,13 +415,13 @@ uint32_t bcm_cm_read_reg_div_vpu(void)
   return ioreg32_read((ioreg32_t)(BCM_CM_BASE + CM_VPUDIV));
 }
 
-static float bcm_cm_get_pll_child_info(char pll, const char *name,
+static __attribute__((unused)) float bcm_cm_get_pll_child_info(char pll, const char *name,
   ioreg32_t pll_reg, float parent_freq)
 {
   uint32_t ctrl = ioreg32_read(pll_reg);
   uint32_t div = ctrl & 0xff;
-  bool ena = (ctrl >> 8) & 1;
-  bool bypass = (ctrl >> 9) & 1;
+  bool __attribute__((unused)) ena = (ctrl >> 8) & 1;
+  bool __attribute__((unused)) bypass = (ctrl >> 9) & 1;
 
   float freq = div ? (parent_freq  / div) : 0;
 
