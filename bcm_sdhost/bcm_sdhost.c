@@ -306,22 +306,36 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   const uint32_t *end)
 {
   int err;
-  int j = 0;
+  int wr_idx = 0;
+  uint32_t hsts;
+  uint32_t data;
 
   while (ptr != end) {
-    uint32_t data = *ptr++;
-    for (int i = 0; i < 4; ++i) {
-    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
-    ioreg32_write(SDHOST_DATA, data);
-    printf("wr #%d: %08x, hsts:%08x, edm:%08x\r\n", j++, data,
-        ioreg32_read(SDHOST_HSTS),
+    data = *ptr++;
+
+    while (1) {
+      hsts = ioreg32_read(SDHOST_HSTS);
+
+      if (hsts & SDHSTS_DATA_FLAG)
+        break;
+
+      printf("wr#%d(wait): hsts:%08x, edm:%08x\r\n", wr_idx, hsts,
         ioreg32_read(SDHOST_EDM));
     }
+
+    ioreg32_write(SDHOST_DATA, data);
+    printf("wr#%d(done): %08x, hsts:%08x,edm:%08x\r\n", wr_idx, data,
+        ioreg32_read(SDHOST_HSTS),
+        ioreg32_read(SDHOST_EDM));
+    wr_idx++;
   }
 
-  printf("wr compl #%d hsts:%08x, edm:%08x\r\n", j,
-    ioreg32_read(SDHOST_HSTS),
-    ioreg32_read(SDHOST_EDM));
+  for (int i = 0; i < 32; ++i) {
+    ioreg32_write(SDHOST_DATA, data);
+    printf("wr_compl hsts:%08x, edm:%08x\r\n",
+      ioreg32_read(SDHOST_HSTS),
+      ioreg32_read(SDHOST_EDM));
+  }
 
   return SUCCESS;
 }
