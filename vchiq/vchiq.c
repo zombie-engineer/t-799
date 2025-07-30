@@ -242,11 +242,6 @@ static struct block_device *bdev = NULL;
 static int sdcard_io_count = 0;
 static struct vchiq_mmal_port *port_to_display = NULL;
 
-void vchiq_set_blockdev(struct block_device *bd)
-{
-  bdev = bd;
-}
-
 static struct vchiq_state vchiq_state;
 
 static struct list_head mmal_io_work_list;
@@ -3298,7 +3293,7 @@ static void mmal_init_state(void)
   bitmap_clear_all(&mmal_state.work_bitmap);
 }
 
-void vchiq_init(void)
+void vchiq_init(struct block_device *b)
 {
   struct vchiq_slot_zero *vchiq_slot_zero;
   void *slot_mem;
@@ -3309,6 +3304,7 @@ void vchiq_init(void)
   uint32_t fragment_size;
   struct vchiq_state *s = &vchiq_state;
   char *fragments_baseaddr;
+  bdev = b;
   frame_num = 0;
 
   /* fragment size granulariry is cache line size */

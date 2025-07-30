@@ -282,6 +282,7 @@ struct sdhc {
   const struct sdhc_ops *ops;
   bool cmd8_response_received;
   bool dma_enabled;
+  uint32_t timeout_us;
 };
 
 int sdhc_init(struct sdhc *sdhc, struct sdhc_ops *ops);

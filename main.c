@@ -98,6 +98,15 @@ void print_mbox_props(void)
 char sdcard_buf[2048] = { 0 };
 static struct sdhc sdhc;
 
+void hexdump(const uint8_t *buffer, uint32_t size) {
+    for (uint32_t i = 0; i < size; i += 16) {
+        printf("%08x: ", i);
+        for (uint32_t j = 0; j < 16 && i + j < size; j++)
+            printf("%02x ", buffer[i + j]);
+        printf("\r\n");
+    }
+}
+
 static void kernel_init(void)
 {
   int err;
@@ -121,18 +130,30 @@ static void kernel_init(void)
     while(1)
       asm volatile("wfe");
   }
-  for (int i = 0; i < 128; ++i) {
-    sdcard_buf[i * 4 + 0] = 0x11;
-    sdcard_buf[i * 4 + 1] = 0x22;
-    sdcard_buf[i * 4 + 2] = 0x33;
-    sdcard_buf[i * 4 + 3] = 0x44;
+  for (int i = 0; i < 512 * 4 / 4; ++i) {
+    sdcard_buf[i * 4 + 0] = i & 0xff;
+    sdcard_buf[i * 4 + 1] = i / 4;
+    sdcard_buf[i * 4 + 2] = 0x11;
+    sdcard_buf[i * 4 + 3] = 0xee;
   }
 
-  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 1);
+  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 4);
+  if (err) {
+    printf("failed to write to SD\r\n");
+    while(1)
+      asm volatile("wfe");
+  }
+  err = sdhc_read(&sdhc, sdcard_buf, 0, 4);
+  if (err) {
+    printf("failed to read from SD\r\n");
+    while(1)
+      asm volatile("wfe");
+  }
 
+  hexdump(sdcard_buf, 512);
   err = ili9341_init();
   if (err != SUCCESS) {
-    printf("Failed to initialize SDHC, %d\r\n", err);
+    printf("Failed to init display, %d\r\n", err);
     while(1)
       asm volatile("wfe");
   }
@@ -166,13 +187,12 @@ static void vchiq_main(void)
   memset(readbuf, 0x11, 32768);
   err = bd->ops.read(bd, readbuf, 0, 1);
   printf("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
-  vchiq_set_blockdev(bd);
 
   err = ili9341_init();
   if (err != SUCCESS) {
     printf("Failed to init ili9341 display, err: %d\r\n", err);
   }
-  vchiq_init();
+  vchiq_init(bd);
 out:
   os_exit_current_task();
 }

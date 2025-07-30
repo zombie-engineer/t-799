@@ -102,7 +102,7 @@
     }\
   } while(0)
 
-static int bcm_sdhost_log_level = LOG_LEVEL_DEBUG2;
+static int bcm_sdhost_log_level = LOG_LEVEL_WARN;
 
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
@@ -217,10 +217,8 @@ static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
       break;
   }
 
-  dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
-  for (int i = 0; i < c->num_blocks * c->block_size; ++i)
-    printf("%02x", ((const uint8_t *)c->databuf)[i]);
-  printf("\r\n");
+  if (!is_write)
+    dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
   return SUCCESS;
 }
 
@@ -275,23 +273,25 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
       if (hsts & SDHSTS_DATA_FLAG)
         break;
 
-      printf("wr#%d(wait): hsts:%08x, edm:%08x\r\n", wr_idx, hsts,
+      BCM_SDHOST_LOG_DBG2("wr#%d(wait): hsts:%08x, edm:%08x", wr_idx, hsts,
         ioreg32_read(SDHOST_EDM));
     }
 
     ioreg32_write(SDHOST_DATA, data);
-    printf("wr#%d(done): %08x, hsts:%08x,edm:%08x\r\n", wr_idx, data,
+
+    BCM_SDHOST_LOG_DBG2("wr#%d(done): %08x, hsts:%08x,edm:%08x", wr_idx, data,
         ioreg32_read(SDHOST_HSTS),
         ioreg32_read(SDHOST_EDM));
     wr_idx++;
   }
 
+#if 0
   for (int i = 0; i < 32; ++i) {
-    // ioreg32_write(SDHOST_DATA, data);
-    printf("wr_compl hsts:%08x, edm:%08x\r\n",
+    BCM_SDHOST_LOG_DBG2("wr_compl hsts:%08x, edm:%08x\r\n",
       ioreg32_read(SDHOST_HSTS),
       ioreg32_read(SDHOST_EDM));
   }
+#endif
 
   return SUCCESS;
 }
@@ -391,9 +391,8 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
     bcm_sdhost_cmd_prep_data(s, c, is_write);
   }
 
-  BCM_SDHOST_LOG_DBG("%SCMD%d: CMD:0x%08x, ARG:0x%08x",
-    s->is_acmd_context ? "A" : "", c->cmd_idx,
-    reg_cmd, ioreg32_read(SDHOST_ARG), ioreg32_read(SDHOST_CMD));
+  BCM_SDHOST_LOG_DBG("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
+    ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
@@ -403,7 +402,7 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
     if (BIT_IS_CLEAR(reg_cmd, SDHOST_CMD_BIT_NEW))
       break;
 
-    printf("bcm_sdhost_cmd_blocking: wait_new,cmd:%08x,edm:%08x,hsts:%08x\r\n",
+    BCM_SDHOST_LOG_DBG2("wait_new,cmd:%08x,edm:%08x,hsts:%08x",
       reg_cmd, ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
   }
 
@@ -424,10 +423,6 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
   c->resp3 = ioreg32_read(SDHOST_RESP3);
 
 out:
-  BCM_SDHOST_LOG_DBG("%sCMD%d done, R:%08x|%08x|%08x|%08x, ret:%d",
-    s->is_acmd_context ? "A" : "", c->cmd_idx, c->resp0, c->resp1, c->resp2,
-    c->resp3, ret);
-
   if (ret != SUCCESS)
     bcm_sdhost_dump_regs(false);
   return ret;
@@ -466,41 +461,52 @@ static int bcm_sdhost_acmd(struct sdhc *s, struct sd_cmd *c,
 
 int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
 {
-  uint32_t r;
+  int ret;
+  uint32_t reg_cmd;
+  uint32_t reg_hsts;
 
   const bool is_acmd = c->cmd_idx & 0x80000000;
 
-  BCM_SDHOST_LOG_DBG("CMD%d (is_acmd=%d) started %d/%d",
-    c->cmd_idx & 0x7fffffff, is_acmd, c->block_size, c->num_blocks);
+  BCM_SDHOST_LOG_DBG("%sCMD%d started (%d bytes block x %d)",
+    is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, c->block_size, c->num_blocks);
 
   if (is_acmd)
     return bcm_sdhost_acmd(s, c, timeout_usec);
 
   /* Wait for prev CMD to finish */
   while (1) {
-    r = ioreg32_read(SDHOST_CMD);
-    if (BIT_IS_CLEAR(r, SDHOST_CMD_BIT_NEW))
+    reg_cmd = ioreg32_read(SDHOST_CMD);
+    if (BIT_IS_CLEAR(reg_cmd, SDHOST_CMD_BIT_NEW))
       break;
-    BCM_SDHOST_LOG_DBG2("--wait_prev:-cmd %08x, hsts:%08x", r,
+    BCM_SDHOST_LOG_DBG2("--wait_prev:-cmd %08x, hsts:%08x", reg_cmd,
       ioreg32_read(SDHOST_HSTS));
   }
 
   /* Clear prev CMD errors */
-  r = ioreg32_read(SDHOST_HSTS);
-  if (r & SDHOST_HSTS_ERROR_MASK) {
-    BCM_SDHOST_LOG_WARN("HSTS had errors: %08x", r);
-    ioreg32_write(SDHOST_HSTS, r);
+  reg_hsts = ioreg32_read(SDHOST_HSTS);
+  if (reg_hsts & SDHOST_HSTS_ERROR_MASK) {
+    BCM_SDHOST_LOG_WARN("HSTS had errors: %08x", reg_hsts);
+    ioreg32_write(SDHOST_HSTS, reg_hsts);
   }
 
   if (s->blocking_mode)
-    return bcm_sdhost_cmd_blocking(s, c, timeout_usec);
+    ret = bcm_sdhost_cmd_blocking(s, c, timeout_usec);
+  else
+    ret = bcm_sdhost_cmd_non_blocking(s, c, timeout_usec);
 
-  return bcm_sdhost_cmd_non_blocking(s, c, timeout_usec);
+  BCM_SDHOST_LOG_DBG("%sCMD%d done, ret: %d, resp:%08x|%08x|%08x|%08x",
+    is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, ret,
+    c->resp0, c->resp1, c->resp2, c->resp3);
+
+  return ret;
 }
 
 static void bcm_sdhost_reset_registers(void)
 {
   uint32_t r;
+
+  const uint32_t hcfg = SDHOST_CFG_WIDE_INT_BUS | SDHOST_CFG_SLOW_CARD;
+  const uint32_t cdiv_slow_clock = 0x3e6;
 
   const uint32_t edm_clear_mask =
     (SDHOST_EDM_THRESHOLD_MASK << SDHOST_EDM_READ_THRESHOLD_SHIFT) |
@@ -529,6 +535,7 @@ static void bcm_sdhost_reset_registers(void)
   r = ioreg32_read(SDHOST_EDM);
   r &= ~edm_clear_mask;
   r |= edm_set_mask;
+  BCM_SDHOST_LOG_DBG2("reset: EDM=%08x", r);
   ioreg32_write(SDHOST_EDM, r);
 
   delay_us(20 * 1000);
@@ -538,11 +545,9 @@ static void bcm_sdhost_reset_registers(void)
 
   delay_us(20 * 1000);
 
-  uint32_t hcfg = SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_WIDE_INT_BUS | SDHOST_CFG_SLOW_CARD;
-  uint32_t slow_clock = 0x3e6;
+  BCM_SDHOST_LOG_DBG2("slow_hcfg=%08x, slow_clock=%08x", hcfg, cdiv_slow_clock);
   ioreg32_write(SDHOST_HCFG, hcfg);
-  ioreg32_write(SDHOST_CDIV, slow_clock);
-
+  ioreg32_write(SDHOST_CDIV, cdiv_slow_clock);
 }
 
 static inline void bcm_sdhost_dump_fsm_state(void)
@@ -561,6 +566,7 @@ static void bcm_sdhost_set_bus_width4(void)
   hcfg = ioreg32_read(SDHOST_HCFG);
   hcfg |= SDHOST_CFG_WIDE_EXT_BUS;
   ioreg32_write(SDHOST_HCFG, hcfg);
+  BCM_SDHOST_LOG_DBG2("set_bus_width4: HCFG=%08x", hcfg);
   BCM_SDHOST_LOG_DBG("set_bus_width4 done");
 }
 
@@ -584,10 +590,11 @@ static void bcm_sdhost_get_max_clock(void)
 
 static void bcm_sdhost_set_high_speed_clock(void)
 {
-  uint32_t hcfg = SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_WIDE_INT_BUS
-    | SDHOST_CFG_SLOW_CARD;
-  ioreg32_write(SDHOST_CDIV, 6);
-  ioreg32_write(SDHOST_HCFG, hcfg);
+  const uint32_t cdiv = 6;
+
+  ioreg32_write(SDHOST_CDIV, cdiv);
+  BCM_SDHOST_LOG_DBG2("highspeed_clock=%d, hcfg:%08x",
+    cdiv, ioreg32_read(SDHOST_HCFG));
 }
 
 static void bcm_sdhost_init_gpio(void)
@@ -602,7 +609,7 @@ static void bcm_sdhost_init_gpio(void)
 static int bcm_sdhost_init(void)
 {
   int err;
-  bcm_sdhost_log_level = LOG_LEVEL_DEBUG2;
+  bcm_sdhost_log_level = LOG_LEVEL_WARN;
   bcm_sdhost_get_max_clock();
   return SUCCESS;
 }

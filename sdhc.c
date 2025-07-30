@@ -5,6 +5,11 @@
 #include <bitops.h>
 #include <log.h>
 
+typedef enum {
+  SDHC_OP_READ = 0,
+  SDHC_OP_WRITE = 1
+} sdhc_op_t;
+
 static int sdhc_log_level;
 
 #define __SDHC_LOG(__level, __fmt, ...) \
@@ -37,6 +42,16 @@ static int sdhc_log_level;
   } while(0)
 
 #define SDHC_TIMEOUT_DEFAULT_USEC 1000000
+
+static inline const char *sdhc_op_to_str(sdhc_op_t op)
+{
+  switch (op) {
+    case SDHC_OP_READ: return "READ";
+    case SDHC_OP_WRITE: return "WRITE";
+    default: break;
+  }
+  return "UNKNOWN";
+}
 
 static void sdhc_dma_irq(void)
 {
@@ -185,7 +200,6 @@ static int sdhc_to_identification_mode(struct sdhc *s)
    * TODO: set controller clock to 400KHz, at power on this is the cards
    * operation speed until end of identitication state
    */
-
   err = sdhc_cmd0(s, SDHC_TIMEOUT_DEFAULT_USEC);
   SDHC_CHECK_ERR("Failed at CMD0 (GO_TO_IDLE)");
 
@@ -242,8 +256,8 @@ static int sdhc_read_scr_and_parse(struct sdhc *s)
 
   sd_scr_get_sd_spec_version(s->scr, &sd_spec_ver_maj, &sd_spec_ver_min);
 
-  SDHC_LOG_INFO("SCR %016llx: spec ver:%d.%d, "
-    "supported bus widths:1bit:%s,4bit:%s\r\n",
+  SDHC_LOG_INFO("SCR %016llx: Spec vesionr:%d.%d, "
+    "bus_widths1:%s,bus_width4:%s",
     s->scr,
     sd_spec_ver_maj,
     sd_spec_ver_min,
@@ -254,18 +268,38 @@ static int sdhc_read_scr_and_parse(struct sdhc *s)
   return SUCCESS;
 }
 
-static int sdhc_read_card_state(struct sdhc *s)
+/*
+ * Runs CMD13 to card state.
+ * Check 4.8 Card State Transition Table in
+ * Physical Layer Simplified Specification Version 9.00
+ * If CMD13 completes successfully, returns sd_card_state_t ret > 0
+ * If CMD13 fails, returns error value < 0
+ */
+static int sdhc_get_card_state(struct sdhc *s)
 {
   int err;
 
-  uint32_t sdcard_state;
-  uint32_t card_state;
-  err = sdhc_cmd13(s, &sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
+  /* card_state = STANDBY */
+  uint32_t card_status;
+  err = sdhc_cmd13(s, &card_status, SDHC_TIMEOUT_DEFAULT_USEC);
   SDHC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
+  return (int)((card_status >> 9) & 0xf);
+}
 
-  card_state = (sdcard_state >> 9) & 0xf;
-  SDHC_LOG_INFO("sdcard_state:%08x, card_state:%d", sdcard_state,
-    card_state);
+static inline int sdhc_dump_card_state(struct sdhc *s, const char *tag,
+  int log_level)
+{
+  int card_state;
+
+  if (sdhc_log_level < log_level)
+    return SUCCESS;
+
+  card_state = sdhc_get_card_state(s);
+  if (card_state < 0)
+    return card_state;
+
+  SDHC_LOG_INFO("[%s] SD card state:%d %s", tag, card_state,
+    sd_card_state_to_str(card_state));
 
   return SUCCESS;
 }
@@ -415,7 +449,9 @@ static int sdhc_to_data_transfer_mode(struct sdhc *s)
     s->bus_width_4 = true;
   }
 
-  err = sdhc_read_card_state(s);
+  err = sdhc_dump_card_state(s, "high-speed and bus_width configured",
+    LOG_LEVEL_INFO);
+
   SDHC_CHECK_ERR("Failed to read card state");
 
   err = sdhc_acmd51(s, &test_scr, sizeof(test_scr),
@@ -501,38 +537,67 @@ int sdhc_init(struct sdhc *s, struct sdhc_ops *ops)
   return SUCCESS;
 }
 
-int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
-  uint32_t num_sectors)
+static inline int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
+  size_t start_block_idx, size_t num_blocks)
 {
-  return sdhc_cmd17(s, from_sector, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+  int err = ERR_INVAL;
+  sd_card_state_t card_state;
+
+wait:
+  err = sdhc_get_card_state(s);
+  if (err < 0)
+    return err;
+
+  card_state = (sd_card_state_t)err;
+  printf("card state: %d\r\n", card_state);
+  if (card_state == SD_CARD_STATE_PROG)
+    goto wait;
+
+  if (num_blocks > 1) {
+    err = sdhc_cmd23(s, num_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
+  }
+
+  err = sdhc_dump_card_state(s, "before op", LOG_LEVEL_DEBUG2);
+  if (err)
+    return err;
+
+  if (op == SDHC_OP_READ) {
+    /* READ_SINGLE_BLOCK or READ_MULTIPLE_BLOCKS */
+    if (num_blocks == 1)
+      err = sdhc_cmd17(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+    else
+      err = sdhc_cmd18(s, start_block_idx, num_blocks, buf,
+        SDHC_TIMEOUT_DEFAULT_USEC);
+  } else if (op == SDHC_OP_WRITE) {
+    /* WRITE_SINGLE_BLOCK or WRITE_MULTIPLE_BLOCKS */
+    if (num_blocks == 1)
+      err = sdhc_cmd24(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+    else
+      err = sdhc_cmd25(s, start_block_idx, num_blocks, buf,
+        SDHC_TIMEOUT_DEFAULT_USEC);
+  }
+
+  if (err == SUCCESS) {
+    err = sdhc_dump_card_state(s, "after op", LOG_LEVEL_DEBUG2);
+    if (err)
+      return err;
+  }
+
+  if (err)
+    SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
+
+  return err;
 }
 
-int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
-  uint32_t num_sectors)
+int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t start_block_idx,
+  uint32_t num_blocks)
 {
-  int err;
-  sd_card_state_t card_state;
-  uint32_t sdcard_state;
+  return sdhc_op(s, SDHC_OP_READ, buf, start_block_idx, num_blocks);
+}
 
-  /* card_state = STANDBY */
-  err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
-  SDHC_CHECK_ERR("failed at CMD13 (SEND_STATUS) step");
-
-  card_state = (sdcard_state >> 9) & 0xf;
-  SDHC_LOG_INFO("SD card state (before write): %d %s", card_state,
-    sd_card_state_to_str(card_state));
-
-  err = sdhc_cmd24(s, from_sector, buf, SDHC_TIMEOUT_DEFAULT_USEC);
-  SDHC_CHECK_ERR("CMD24 failed");
-
-  /* GET card state */
-  /* card_state = STANDBY */
-  err = sdhc_cmd13(s,&sdcard_state, SDHC_TIMEOUT_DEFAULT_USEC);
-  SDHC_CHECK_ERR("CMD13 after write failed");
-
-  card_state = (sdcard_state >> 9) & 0xf;
-  SDHC_LOG_INFO("SD card state (after write): %d %s", card_state,
-    sd_card_state_to_str(card_state));
-
-  return SUCCESS;
+int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t start_block_idx,
+  uint32_t num_blocks)
+{
+  return sdhc_op(s, SDHC_OP_WRITE, buf, start_block_idx, num_blocks);
 }

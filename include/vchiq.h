@@ -2,5 +2,4 @@
 
 struct block_device;
 
-void vchiq_init(void);
-void vchiq_set_blockdev(struct block_device *bd);
+void vchiq_init(struct block_device *bd);

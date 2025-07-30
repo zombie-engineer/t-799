@@ -267,7 +267,6 @@ static inline int sdhc_cmd9(struct sdhc *s, uint32_t *dst,
     dst[1] = c.resp1;
     dst[2] = c.resp2;
     dst[3] = c.resp3;
-    printf("%08x\r\n", dst[0]);
   }
   return ret;
 }
@@ -313,13 +312,13 @@ static inline int sdhc_cmd17(struct sdhc *s, uint32_t block_idx, uint8_t *dstbuf
 }
 
 /* READ_MULTIPLE_BLOCK */
-static inline int sdhc_cmd18(struct sdhc *s, uint32_t block_idx,
-  size_t num_blocks, char *dstbuf, uint64_t timeout_usec)
+static inline int sdhc_cmd18(struct sdhc *s, uint32_t start_block_idx,
+  size_t num_blocks, uint8_t *dstbuf, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
-  sd_cmd_init(&c, SDHC_CMD18, block_idx);
-  c.databuf = dstbuf;
+  sd_cmd_init(&c, SDHC_CMD18, start_block_idx);
+  c.databuf = (void *)dstbuf;
   c.num_blocks = num_blocks;
   c.block_size = 512;
 
