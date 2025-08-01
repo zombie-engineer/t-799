@@ -203,22 +203,19 @@ static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
 {
   uint32_t hsts;
 
-  if (is_write) {
-    BCM_SDHOST_LOG_ERR("DMA write not supported yet");
-    return ERR_NOTSUPP;
-  }
-
   while(1) {
     hsts = ioreg32_read(SDHOST_HSTS);
-    BCM_SDHOST_LOG_DBG("data HSTS: %08x EDM:%08x", hsts,
+    BCM_SDHOST_LOG_INFO("data HSTS: %08x EDM:%08x", hsts,
       ioreg32_read(SDHOST_EDM));
 
-    if (hsts & SDHSTS_DATA_FLAG)
+    if ((hsts & SDHSTS_DATA_FLAG) == 0)
       break;
   }
 
+  /* If is read, invalidate cache now when DMA is done */
   if (!is_write)
     dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
+
   return SUCCESS;
 }
 
@@ -346,25 +343,28 @@ static int bcm_sdhost_cmd_data_phase(struct sdhc *s, struct sd_cmd *c,
   return bcm_sdhost_data_read_sw(s, ptr, end);
 }
 
-static void bcm_sdhost_cmd_prep_data(struct sdhc *s, struct sd_cmd *c,
+static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
   bool is_write)
 {
-  if (!s->dma_enabled)
-    return;
-
-  memset(c->databuf, 0, c->block_size * c->num_blocks);
   s->io.c = c;
 
-  /* setup read DMA */
+  /* Setup DMA control block: destination, source, number of copies, etc. */
   bcm_sdhost_setup_dma_transfer(
     s->io.dma_control_block_idx,
     s->io.c->databuf,
     s->io.c->block_size,
     s->io.c->num_blocks, is_write);
 
-  bcm2835_dma_set_cb(s->io.dma_channel,
-    s->io.dma_control_block_idx);
+  /* Assign DMA control block to channel */
+  bcm2835_dma_set_cb(s->io.dma_channel, s->io.dma_control_block_idx);
 
+  if (is_write)
+    dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
+
+  /*
+   * Activates DMA channel, DMA will copy 4byte word each time sdhost asserts
+   * DREQ signal
+   */
   bcm2835_dma_activate(s->io.dma_channel);
 }
 
@@ -388,7 +388,8 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
     ioreg32_write(SDHOST_HBCT, c->block_size);
     ioreg32_write(SDHOST_HBLC, c->num_blocks);
     is_write = reg_cmd & SDHOST_CMD_WRITE_CMD;
-    bcm_sdhost_cmd_prep_data(s, c, is_write);
+    if (s->dma_enabled)
+      bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
   BCM_SDHOST_LOG_DBG("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
@@ -396,7 +397,6 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
-  /* Wait prev command completion */
   while(1) {
     reg_cmd = ioreg32_read(SDHOST_CMD);
     if (BIT_IS_CLEAR(reg_cmd, SDHOST_CMD_BIT_NEW))

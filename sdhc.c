@@ -549,7 +549,9 @@ wait:
     return err;
 
   card_state = (sd_card_state_t)err;
-  printf("card state: %d\r\n", card_state);
+  SDHC_LOG_DBG2("card state: %d(%s)", card_state,
+    sd_card_state_to_str(card_state));
+
   if (card_state == SD_CARD_STATE_PROG)
     goto wait;
 
