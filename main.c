@@ -107,6 +107,53 @@ void hexdump(const uint8_t *buffer, uint32_t size) {
     }
 }
 
+static int sdhc_test_io(struct sdhc *s)
+{
+  int err;
+
+  struct {
+    sdhc_io_mode_t mode;
+    const char *name;
+  } test_modes[] = {
+    { SDHC_IO_MODE_BLOCKING_PIO, "BLOCKING_PIO" },
+    { SDHC_IO_MODE_BLOCKING_DMA, "BLOCKING_DMA" }
+    /* SDHC_IO_MODE_IT_DMA, */
+  };
+
+  for (int i = 0; i < ARRAY_SIZE(test_modes); ++i) {
+    err = sdhc_set_io_mode(s, test_modes[i].mode);
+    if (err != SUCCESS) {
+      printf("Failed to set sdhc io mode %s\r\n", test_modes[i].name);
+      return err;
+    }
+
+    printf("Testing SDHC with mode %s\r\n", test_modes[i].name);
+    err = sdhc_read(s, sdcard_buf, 0, 4);
+    if (err) {
+      printf("failed to read from SD\r\n");
+      return err;
+    }
+
+    hexdump(sdcard_buf, 512);
+  }
+#if 0
+  for (int i = 0; i < 512 * 4 / 4; ++i) {
+    sdcard_buf[i * 4 + 0] = i & 0xff;
+    sdcard_buf[i * 4 + 1] = i / 4;
+    sdcard_buf[i * 4 + 2] = 0x11;
+    sdcard_buf[i * 4 + 3] = 0xee;
+  }
+
+  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 4);
+  if (err) {
+    printf("failed to write to SD\r\n");
+    while(1)
+      asm volatile("wfe");
+  }
+#endif
+  return SUCCESS;
+}
+
 static void kernel_init(void)
 {
   int err;
@@ -124,43 +171,30 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
+
   err = sdhc_init(&sdhc, &bcm_sdhost_ops);
   if (err != SUCCESS) {
     printf("Failed to init sdhc, %d\r\n", err);
-    while(1)
-      asm volatile("wfe");
-  }
-  for (int i = 0; i < 512 * 4 / 4; ++i) {
-    sdcard_buf[i * 4 + 0] = i & 0xff;
-    sdcard_buf[i * 4 + 1] = i / 4;
-    sdcard_buf[i * 4 + 2] = 0x11;
-    sdcard_buf[i * 4 + 3] = 0xee;
+    goto out;
   }
 
-  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 4);
-  if (err) {
-    printf("failed to write to SD\r\n");
-    while(1)
-      asm volatile("wfe");
-  }
-  err = sdhc_read(&sdhc, sdcard_buf, 0, 4);
-  if (err) {
-    printf("failed to read from SD\r\n");
-    while(1)
-      asm volatile("wfe");
-  }
+  err = sdhc_test_io(&sdhc);
+  if (err != SUCCESS)
+    goto out;
 
-  hexdump(sdcard_buf, 512);
-  err = ili9341_init();
-  if (err != SUCCESS) {
-    printf("Failed to init display, %d\r\n", err);
-    while(1)
-      asm volatile("wfe");
-  }
   blockdev_scheduler_init();
   err = logger_init();
-  if (err != SUCCESS)
+  if (err != SUCCESS) {
     printf("Failed to init logger, err: %d\r\n", err);
+    goto out;
+  }
+
+out:
+  if (err != SUCCESS) {
+    printf("Going to err loop\r\n");
+    while(1)
+      asm volatile("wfe");
+  }
 }
 
 atomic_t test_atomic;
@@ -173,6 +207,14 @@ static void vchiq_main(void)
 {
   int err;
   struct block_device *bd;
+
+  err = ili9341_init();
+  if (err != SUCCESS) {
+    printf("Failed to init display, %d\r\n", err);
+    while(1)
+      asm volatile("wfe");
+  }
+  printf("----\r\n");
 
   os_log("vchiq_start\r\n");
 

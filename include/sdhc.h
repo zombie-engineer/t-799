@@ -4,6 +4,12 @@
 #include <sdhc_io.h>
 
 typedef enum {
+  SDHC_IO_MODE_BLOCKING_PIO,
+  SDHC_IO_MODE_BLOCKING_DMA,
+  SDHC_IO_MODE_IT_DMA,
+} sdhc_io_mode_t;
+
+typedef enum {
   SD_CARD_STATE_IDLE    = 0,
   SD_CARD_STATE_READY   = 1,
   SD_CARD_STATE_IDENT   = 2,
@@ -254,6 +260,7 @@ struct sdhc_ops {
   void (*dump_fsm_state)(void);
   void (*set_bus_width4)(void);
   void (*set_high_speed_clock)(void);
+  int (*set_io_mode)(struct sdhc *s, sdhc_io_mode_t mode);
   int (*cmd)(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec);
 };
 
@@ -281,11 +288,13 @@ struct sdhc {
   bool bus_width_4;
   const struct sdhc_ops *ops;
   bool cmd8_response_received;
-  bool dma_enabled;
+  sdhc_io_mode_t io_mode;
   uint32_t timeout_us;
 };
 
 int sdhc_init(struct sdhc *sdhc, struct sdhc_ops *ops);
+
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode);
 
 int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
   uint32_t num_sectors);

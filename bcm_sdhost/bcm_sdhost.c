@@ -330,7 +330,7 @@ static int bcm_sdhost_cmd_data_phase(struct sdhc *s, struct sd_cmd *c,
   uint32_t *ptr;
   uint32_t *end;
 
-  if (s->dma_enabled)
+  if (s->io_mode == SDHC_IO_MODE_BLOCKING_DMA)
     return bcm_sdhost_dma_io(c, is_write);
 
   /* Do data IO by manually copying bytes from/to data register */
@@ -388,7 +388,8 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
     ioreg32_write(SDHOST_HBCT, c->block_size);
     ioreg32_write(SDHOST_HBLC, c->num_blocks);
     is_write = reg_cmd & SDHOST_CMD_WRITE_CMD;
-    if (s->dma_enabled)
+    if (s->io_mode == SDHC_IO_MODE_BLOCKING_DMA
+      || s->io_mode == SDHC_IO_MODE_IT_DMA)
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
@@ -614,6 +615,11 @@ static int bcm_sdhost_init(void)
   return SUCCESS;
 }
 
+int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode)
+{
+  return SUCCESS;
+}
+
 struct sdhc_ops bcm_sdhost_ops = {
   .init = bcm_sdhost_init,
   .init_gpio = bcm_sdhost_init_gpio,
@@ -622,5 +628,6 @@ struct sdhc_ops bcm_sdhost_ops = {
   .dump_regs = bcm_sdhost_dump_regs,
   .set_bus_width4 = bcm_sdhost_set_bus_width4,
   .set_high_speed_clock = bcm_sdhost_set_high_speed_clock,
+  .set_io_mode = bcm_sdhost_set_io_mode,
   .cmd = bcm_sdhost_cmd
 };

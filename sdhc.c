@@ -534,6 +534,7 @@ int sdhc_init(struct sdhc *s, struct sdhc_ops *ops)
     return err;
 
   s->initialized = true;
+  SDHC_LOG_INFO("SD host controller initialized");
   return SUCCESS;
 }
 
@@ -590,6 +591,19 @@ wait:
     SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
 
   return err;
+}
+
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode)
+{
+  int err;
+  err = sdhc->ops->set_io_mode(sdhc, mode);
+  if (err != SUCCESS) {
+    SDHC_LOG_ERR("Failed to set io_mode %d", mode);
+    return err;
+  }
+
+  sdhc->io_mode = mode;
+  return SUCCESS;
 }
 
 int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t start_block_idx,
