@@ -357,6 +357,26 @@ bool mbox_set_clock_rate(uint32_t clock_id, uint32_t *clock_rate,
   return false;
 }
 
+DECL_MBOX_REQ_3T(set_sdhost_clock_freq, clock_freq, arg1, arg2);
+DECL_MBOX_RSP_2T(set_sdhost_clock_freq, clock_freq, resp1);
+DECL_MBOX_1TAG_MSG_T(set_sdhost_clock_freq);
+
+bool mbox_set_sdhost_clock_freq(uint32_t *clock_freq)
+{
+  int ret;
+
+  DECL_MBOX_MSG(set_sdhost_clock_freq, MBOX_TAG_SET_SDHOST_CLOCK_FREQ);
+  m->tag.u.req.clock_freq = *clock_freq;
+  m->tag.u.req.arg1 = 0;
+  m->tag.u.req.arg2 = 0;
+  ret = mbox_prop_call(MBOX_CH_PROP);
+  if (!ret) {
+    *clock_freq = MBOX_GET_RSP(clock_freq);
+    return true;
+  }
+  return false;
+}
+
 DECL_MBOX_REQ_0T(get_virt_wh);
 DECL_MBOX_RSP_2T(get_virt_wh, width, height);
 DECL_MBOX_1TAG_MSG_T(get_virt_wh);

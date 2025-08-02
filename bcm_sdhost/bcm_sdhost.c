@@ -14,7 +14,21 @@
 #include <bcm2835_dma.h>
 #include "bcm_sdhost_cmd_reg.h"
 #include "bcm_sdhost_log.h"
+#include <mbox_props.h>
 #include "memory_map.h"
+
+/*
+ * In manual mode we set CDIV register by calculating required CDIV from
+ * the required SDHOST clock frequency and the known source clock
+ * But we can also let raspberry pi firmware control CDIV register by itself.
+ * This might be important since it is known that Videocore might throttle
+ * VPU clock to slower speed, at this point it could be handy it Videocore
+ * also checked that CDIV receives a corrected value to upkeep the proper
+ * frequency
+ */
+#define BCM_SDHOST_SET_CLOCK_MANUAL      0
+#define BCM_SDHOST_SET_CLOCK_BY_FIRMWARE 1
+#define BCM_SDHOST_SET_CLOCK BCM_SDHOST_SET_CLOCK_BY_FIRMWARE
 
 #define PERIPHERAL_BASE  0x3f000000
 #define SDHOST_BASE      (PERIPHERAL_BASE + 0x202000)
@@ -591,11 +605,15 @@ static void bcm_sdhost_get_max_clock(void)
 
 static void bcm_sdhost_set_high_speed_clock(void)
 {
+#if BCM_SDHOST_SET_CLOCK == BCM_SDHOST_SET_CLOCK_MANUAL
   const uint32_t cdiv = 6;
-
   ioreg32_write(SDHOST_CDIV, cdiv);
+#elif BCM_SDHOST_SET_CLOCK == BCM_SDHOST_SET_CLOCK_BY_FIRMWARE
+  uint32_t clock_freq = 50000000;
+  mbox_set_sdhost_clock_freq(&clock_freq);
+#endif
   BCM_SDHOST_LOG_DBG2("highspeed_clock=%d, hcfg:%08x",
-    cdiv, ioreg32_read(SDHOST_HCFG));
+    ioreg32_read(SDHOST_CDIV), ioreg32_read(SDHOST_HCFG));
 }
 
 static void bcm_sdhost_init_gpio(void)

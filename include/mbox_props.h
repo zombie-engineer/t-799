@@ -37,6 +37,8 @@ bool mbox_get_max_clock_rate(uint32_t clock_id, uint32_t *clock_rate);
 bool mbox_set_clock_rate(uint32_t clock_id, uint32_t *clock_rate,
   uint32_t skip_turbo);
 
+bool mbox_set_sdhost_clock_freq(uint32_t *clock_freq);
+
 bool mbox_get_virt_wh(uint32_t *out_width, uint32_t *out_height);
 
 bool mbox_init_vchiq(uint32_t *vchiq_base);
