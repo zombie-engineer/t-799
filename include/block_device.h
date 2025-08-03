@@ -9,20 +9,20 @@ struct block_dev_write_stream {
 };
 
 struct block_device_ops {
-  int (*read)(struct block_device *, char *buf, size_t start_sector,
-    size_t num_sectors);
+  int (*read)(struct block_device *, uint8_t *buf, uint64_t start_sector,
+    uint32_t num_sectors);
 
-  int (*write)(struct block_device *, const void *src, size_t start_sector,
-    size_t num_sectors);
+  int (*write)(struct block_device *, const uint8_t *src, uint64_t start_sector,
+    uint32_t num_sectors);
 
   int (*write_stream_open)(struct block_device *,
-    struct block_dev_write_stream *, size_t start_sector);
+    struct block_dev_write_stream *, uint64_t start_sector);
 
   int (*write_stream_write)(struct block_device *,
     struct block_dev_write_stream *, const void *data, size_t num_bytes);
 
-  int (*block_erase)(struct block_device *,
-    size_t start_sector, size_t num_sectors);
+  int (*block_erase)(struct block_device *, uint64_t start_sector,
+    uint32_t num_sectors);
 };
 
 struct block_device {
@@ -37,8 +37,8 @@ struct blockdev_io {
   struct block_device *dev;
   bool is_write;
   void *addr;
-  size_t start_sector;
-  size_t num_sectors;
+  uint64_t start_sector;
+  uint32_t num_sectors;
   void (*cb)(int);
 };
 

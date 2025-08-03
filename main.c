@@ -29,6 +29,9 @@
 #include <logger.h>
 
 static struct block_device *fs_blockdev;
+static char sdhc_testbuf[512 * 2] = { 0 };
+static struct sdhc sdhc;
+struct block_device blockdev_sd;
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -95,20 +98,21 @@ void print_mbox_props(void)
   GET_DEVICE_POWER_STATE(CCP2TX);
 }
 
-char sdcard_buf[2048] = { 0 };
-static struct sdhc sdhc;
+static inline void hexdump(const uint8_t *buffer, uint32_t size)
+{
+  uint32_t i, j;
 
-void hexdump(const uint8_t *buffer, uint32_t size) {
-    for (uint32_t i = 0; i < size; i += 16) {
-        printf("%08x: ", i);
-        for (uint32_t j = 0; j < 16 && i + j < size; j++)
-            printf("%02x ", buffer[i + j]);
-        printf("\r\n");
-    }
+  for (i = 0; i < size; i += 16) {
+    printf("%08x: ", i);
+    for (j = 0; j < 16 && i + j < size; j++)
+      printf("%02x ", buffer[i + j]);
+    printf("\r\n");
+  }
 }
 
-static int sdhc_test_io(struct sdhc *s)
+static int sdhc_test_io(struct sdhc *s, bool skip_it)
 {
+  int i;
   int err;
 
   struct {
@@ -116,35 +120,42 @@ static int sdhc_test_io(struct sdhc *s)
     const char *name;
   } test_modes[] = {
     { SDHC_IO_MODE_BLOCKING_PIO, "BLOCKING_PIO" },
-    { SDHC_IO_MODE_BLOCKING_DMA, "BLOCKING_DMA" }
-    /* SDHC_IO_MODE_IT_DMA, */
+    { SDHC_IO_MODE_BLOCKING_DMA, "BLOCKING_DMA" },
+    { SDHC_IO_MODE_IT_DMA, "IT_DMA" }
   };
 
-  for (int i = 0; i < ARRAY_SIZE(test_modes); ++i) {
+  for (i = 0; i < ARRAY_SIZE(test_modes); ++i) {
+    if (skip_it && test_modes[i].mode == SDHC_IO_MODE_IT_DMA)
+      continue;
+
     err = sdhc_set_io_mode(s, test_modes[i].mode);
     if (err != SUCCESS) {
       printf("Failed to set sdhc io mode %s\r\n", test_modes[i].name);
       return err;
     }
 
-    printf("Testing SDHC with mode %s\r\n", test_modes[i].name);
-    err = sdhc_read(s, sdcard_buf, 0, 4);
-    if (err) {
-      printf("failed to read from SD\r\n");
-      return err;
+    for (int j = 0; j < 4; ++j) {
+      printf("Testing SDHC with mode %s, iter%d\r\n", test_modes[i].name, j);
+      memset(sdhc_testbuf, 0, sizeof(sdhc_testbuf));
+      err = sdhc_read(s, sdhc_testbuf, 8196, 2);
+      if (err) {
+        printf("failed to read from SD\r\n");
+        return err;
+      }
+  
+      hexdump(sdhc_testbuf, 2 * 512);
     }
-
-    hexdump(sdcard_buf, 512);
   }
+
 #if 0
   for (int i = 0; i < 512 * 4 / 4; ++i) {
-    sdcard_buf[i * 4 + 0] = i & 0xff;
-    sdcard_buf[i * 4 + 1] = i / 4;
-    sdcard_buf[i * 4 + 2] = 0x11;
-    sdcard_buf[i * 4 + 3] = 0xee;
+    sdhc_testbuf[i * 4 + 0] = i & 0xff;
+    sdhc_testbuf[i * 4 + 1] = i / 4;
+    sdhc_testbuf[i * 4 + 2] = 0x11;
+    sdhc_testbuf[i * 4 + 3] = 0xee;
   }
 
-  err = sdhc_write(&sdhc, sdcard_buf, 1056768, 4);
+  err = sdhc_write(&sdhc, sdhc_testbuf, 1048576, 4);
   if (err) {
     printf("failed to write to SD\r\n");
     while(1)
@@ -172,15 +183,11 @@ static void kernel_init(void)
   debug_led_init();
   bcm2835_dma_init();
 
-  err = sdhc_init(&sdhc, &bcm_sdhost_ops);
+  err = sdhc_init(&blockdev_sd, &sdhc, &bcm_sdhost_ops);
   if (err != SUCCESS) {
     printf("Failed to init sdhc, %d\r\n", err);
     goto out;
   }
-
-  err = sdhc_test_io(&sdhc);
-  if (err != SUCCESS)
-    goto out;
 
   blockdev_scheduler_init();
   err = logger_init();
@@ -203,38 +210,45 @@ struct event test_ev;
 
 char *readbuf;
 
-static void vchiq_main(void)
+static void app_main(void)
 {
   int err;
-  struct block_device *bd;
-
-  err = ili9341_init();
-  if (err != SUCCESS) {
-    printf("Failed to init display, %d\r\n", err);
-    while(1)
-      asm volatile("wfe");
-  }
-  printf("----\r\n");
-
   os_log("vchiq_start\r\n");
 
-  os_wait_ms(100);
-  err = fs_init(&bd);
+  err = sdhc_test_io(&sdhc, false);
+  if (err != SUCCESS)
+    goto out;
+
+#if 0
+  err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA);
+  if (err != SUCCESS) {
+    printf("Failed to set sdhc io mode IT_DMA\r\n");
+    goto out;
+  }
+#endif
+  readbuf = dma_alloc(32768, 0);
+  memset(readbuf, 0x11, 32768);
+  err = blockdev_sd.ops.read(&blockdev_sd, readbuf, 0, 1);
+  printf("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
+  while(1) {
+    asm volatile("wfe");
+  }
+
+  err = fs_init(&blockdev_sd);
   if (err != SUCCESS) {
     os_log("Failed to init fs block device, err: %d\r\n", err);
     goto out;
   }
 
-  readbuf = dma_alloc(32768, 0);
-  memset(readbuf, 0x11, 32768);
-  err = bd->ops.read(bd, readbuf, 0, 1);
-  printf("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
+  os_wait_ms(100);
 
   err = ili9341_init();
   if (err != SUCCESS) {
     printf("Failed to init ili9341 display, err: %d\r\n", err);
+    goto out;
   }
-  vchiq_init(bd);
+
+  vchiq_init(&blockdev_sd);
 out:
   os_exit_current_task();
 }
@@ -279,11 +293,12 @@ static void kernel_run(void)
 #endif
   // test_dma();
 
-  t = task_create(vchiq_main, "vchiq_main");
+  t = task_create(app_main, "app_main");
   sched_run_task_isr(t);
   t = task_create(blockdev_scheduler_fn, "block-sched");
   sched_run_task_isr(t);
   bcm2835_emmc_set_interrupt_mode();
+  sdhc_test_io(&sdhc, true);
   scheduler_start();
   panic();
 }

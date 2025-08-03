@@ -11,6 +11,7 @@ typedef enum {
 } sdhc_op_t;
 
 static int sdhc_log_level;
+static struct sdhc *sdhc_current;
 
 #define __SDHC_LOG(__level, __fmt, ...) \
   LOG(sdhc_log_level, __level, "sdhc", __fmt, ##__VA_ARGS__)
@@ -55,6 +56,7 @@ static inline const char *sdhc_op_to_str(sdhc_op_t op)
 
 static void sdhc_dma_irq(void)
 {
+  sdhc_current->ops->notify_dma(sdhc_current);
 }
 
 /*
@@ -352,7 +354,7 @@ static int csd_read_bits(const uint8_t *csd, int pos, int width)
   return BITS_EXTRACT8(csd[pos / 8], (pos % 8), width);
 }
 
-static void sdhc_parse_csd(const uint8_t *csd)
+static void sdhc_parse_csd(struct sdhc *s, const uint8_t *csd)
 {
   int csd_ver;
   int taac;
@@ -409,6 +411,8 @@ static void sdhc_parse_csd(const uint8_t *csd)
     erase_one_block_ena, erase_sector_size);
   SDHC_LOG_INFO("CSD write speed factor: %d", write_speed_factor);
   SDHC_LOG_INFO("CSD max write block len: %d", max_wr_block_len);
+
+  s->block_size = 1 << read_bl_len;
 }
 
 
@@ -425,7 +429,7 @@ static int sdhc_to_data_transfer_mode(struct sdhc *s)
   err = sdhc_cmd9(s, s->csd, SDHC_TIMEOUT_DEFAULT_USEC);
   SDHC_CHECK_ERR("Failed at CMD9 (SEND_CSD)");
 
-  sdhc_parse_csd((uint8_t *)s->csd);
+  sdhc_parse_csd(s, (uint8_t *)s->csd);
 
   /* CMD7 SELECT_CARD to select card, making it to 'tran' statew */
   err = sdhc_cmd7(s, SDHC_TIMEOUT_DEFAULT_USEC);
@@ -492,7 +496,107 @@ static int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void))
   return SUCCESS;
 }
 
-int sdhc_init(struct sdhc *s, struct sdhc_ops *ops)
+static inline int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
+  size_t start_block_idx, size_t num_blocks)
+{
+  int err = ERR_INVAL;
+  sd_card_state_t card_state;
+
+wait:
+  err = sdhc_get_card_state(s);
+  if (err < 0)
+    return err;
+
+  card_state = (sd_card_state_t)err;
+  SDHC_LOG_DBG2("card state: %d(%s)", card_state,
+    sd_card_state_to_str(card_state));
+
+  if (card_state == SD_CARD_STATE_PROG)
+    goto wait;
+
+  err = sdhc_dump_card_state(s, "before op", LOG_LEVEL_DEBUG2);
+  if (err)
+    return err;
+
+  sdhc_current = s;
+  /*
+   * CMD18 READ_MULTIPLE_BLOCKS or CMD25 WRITE_MULTIPLE_BLOCKS must follow
+   * CMD23 SET_BLOCK_COUNT in strict sequence, other CMDs not allowed inside
+   */
+  if (num_blocks > 1) {
+    err = sdhc_cmd23(s, num_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
+  }
+
+  if (op == SDHC_OP_READ) {
+    /* READ_SINGLE_BLOCK or READ_MULTIPLE_BLOCKS */
+    if (num_blocks == 1)
+      err = sdhc_cmd17(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+    else
+      err = sdhc_cmd18(s, start_block_idx, num_blocks, buf,
+        SDHC_TIMEOUT_DEFAULT_USEC);
+  } else if (op == SDHC_OP_WRITE) {
+    /* WRITE_SINGLE_BLOCK or WRITE_MULTIPLE_BLOCKS */
+    if (num_blocks == 1)
+      err = sdhc_cmd24(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
+    else
+      err = sdhc_cmd25(s, start_block_idx, num_blocks, buf,
+        SDHC_TIMEOUT_DEFAULT_USEC);
+  }
+
+  if (num_blocks > 1) {
+    // err = sdhc_cmd12(s, SDHC_TIMEOUT_DEFAULT_USEC);
+    // SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
+  }
+
+  if (err == SUCCESS) {
+    err = sdhc_dump_card_state(s, "after op", LOG_LEVEL_DEBUG2);
+    if (err)
+      return err;
+  }
+
+  if (err)
+    SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
+
+  return err;
+}
+
+int sdhc_read(struct sdhc *s, uint8_t *buf, uint64_t start_block_idx,
+  uint32_t num_blocks)
+{
+  return sdhc_op(s, SDHC_OP_READ, buf, start_block_idx, num_blocks);
+}
+
+int sdhc_write(struct sdhc *s, const uint8_t *buf, uint64_t start_block_idx,
+  uint32_t num_blocks)
+{
+  return sdhc_op(s, SDHC_OP_WRITE, (uint8_t *)buf, start_block_idx,
+    num_blocks);
+}
+
+int sdhc_blockdev_read(struct block_device *blockdev, uint8_t *buf,
+  uint64_t start_block_idx, uint32_t num_blocks)
+{
+  struct sdhc *s = blockdev->priv;
+  return sdhc_op(s, SDHC_OP_READ, buf, start_block_idx, num_blocks);
+}
+
+int sdhc_blockdev_write(struct block_device *blockdev, const uint8_t *buf,
+  uint64_t start_block_idx, uint32_t num_blocks)
+{
+  struct sdhc *s = blockdev->priv;
+  return sdhc_op(s, SDHC_OP_WRITE, (uint8_t *)buf, start_block_idx,
+    num_blocks);
+}
+
+int sdhc_blockdev_erase(struct block_device *blockdev,
+  uint64_t start_block_idx, uint32_t num_blocks)
+{
+  return ERR_NOTSUPP;
+}
+
+int sdhc_init(struct block_device *blockdev, struct sdhc *s,
+  struct sdhc_ops *ops)
 {
   int err;
 
@@ -534,63 +638,15 @@ int sdhc_init(struct sdhc *s, struct sdhc_ops *ops)
     return err;
 
   s->initialized = true;
-  SDHC_LOG_INFO("SD host controller initialized");
+  blockdev->priv = s;
+  blockdev->sector_size = s->block_size;
+  blockdev->ops.read = sdhc_blockdev_read;
+  blockdev->ops.write = sdhc_blockdev_write;
+  blockdev->ops.block_erase = sdhc_blockdev_erase;
+  SDHC_LOG_INFO("SD host controller initialized, block_size:%d",
+    blockdev->sector_size);
+
   return SUCCESS;
-}
-
-static inline int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
-  size_t start_block_idx, size_t num_blocks)
-{
-  int err = ERR_INVAL;
-  sd_card_state_t card_state;
-
-wait:
-  err = sdhc_get_card_state(s);
-  if (err < 0)
-    return err;
-
-  card_state = (sd_card_state_t)err;
-  SDHC_LOG_DBG2("card state: %d(%s)", card_state,
-    sd_card_state_to_str(card_state));
-
-  if (card_state == SD_CARD_STATE_PROG)
-    goto wait;
-
-  if (num_blocks > 1) {
-    err = sdhc_cmd23(s, num_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
-    SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
-  }
-
-  err = sdhc_dump_card_state(s, "before op", LOG_LEVEL_DEBUG2);
-  if (err)
-    return err;
-
-  if (op == SDHC_OP_READ) {
-    /* READ_SINGLE_BLOCK or READ_MULTIPLE_BLOCKS */
-    if (num_blocks == 1)
-      err = sdhc_cmd17(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
-    else
-      err = sdhc_cmd18(s, start_block_idx, num_blocks, buf,
-        SDHC_TIMEOUT_DEFAULT_USEC);
-  } else if (op == SDHC_OP_WRITE) {
-    /* WRITE_SINGLE_BLOCK or WRITE_MULTIPLE_BLOCKS */
-    if (num_blocks == 1)
-      err = sdhc_cmd24(s, start_block_idx, buf, SDHC_TIMEOUT_DEFAULT_USEC);
-    else
-      err = sdhc_cmd25(s, start_block_idx, num_blocks, buf,
-        SDHC_TIMEOUT_DEFAULT_USEC);
-  }
-
-  if (err == SUCCESS) {
-    err = sdhc_dump_card_state(s, "after op", LOG_LEVEL_DEBUG2);
-    if (err)
-      return err;
-  }
-
-  if (err)
-    SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
-
-  return err;
 }
 
 int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode)
@@ -606,14 +662,3 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode)
   return SUCCESS;
 }
 
-int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t start_block_idx,
-  uint32_t num_blocks)
-{
-  return sdhc_op(s, SDHC_OP_READ, buf, start_block_idx, num_blocks);
-}
-
-int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t start_block_idx,
-  uint32_t num_blocks)
-{
-  return sdhc_op(s, SDHC_OP_WRITE, buf, start_block_idx, num_blocks);
-}

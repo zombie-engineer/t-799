@@ -271,6 +271,14 @@ static inline int sdhc_cmd9(struct sdhc *s, uint32_t *dst,
   return ret;
 }
 
+static inline int sdhc_cmd12(struct sdhc *s, uint64_t timeout_usec)
+{
+  struct sd_cmd c;
+
+  sd_cmd_init(&c, SDHC_CMD12, 0);
+  return s->ops->cmd(s, &c, timeout_usec);
+}
+
 static inline int sdhc_cmd13(struct sdhc *s, uint32_t *out_status,
   uint64_t timeout_usec)
 {

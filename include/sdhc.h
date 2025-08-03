@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sdhc_io.h>
+#include <block_device.h>
 
 typedef enum {
   SDHC_IO_MODE_BLOCKING_PIO,
@@ -261,6 +262,7 @@ struct sdhc_ops {
   void (*set_bus_width4)(void);
   void (*set_high_speed_clock)(void);
   int (*set_io_mode)(struct sdhc *s, sdhc_io_mode_t mode);
+  void (*notify_dma)(struct sdhc *s);
   int (*cmd)(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec);
 };
 
@@ -290,14 +292,16 @@ struct sdhc {
   bool cmd8_response_received;
   sdhc_io_mode_t io_mode;
   uint32_t timeout_us;
+  int block_size;
 };
 
-int sdhc_init(struct sdhc *sdhc, struct sdhc_ops *ops);
+int sdhc_init(struct block_device *blockdev, struct sdhc *s,
+  struct sdhc_ops *ops);
 
 int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode);
 
-int sdhc_read(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+int sdhc_read(struct sdhc *s, uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);
 
-int sdhc_write(struct sdhc *s, uint8_t *buf, uint32_t from_sector,
+int sdhc_write(struct sdhc *s, const uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);

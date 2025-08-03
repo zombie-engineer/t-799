@@ -16,6 +16,9 @@
 #include "bcm_sdhost_log.h"
 #include <mbox_props.h>
 #include "memory_map.h"
+#include <os_api.h>
+#include <irq.h>
+#include <bcm2835/bcm2835_ic.h>
 
 /*
  * In manual mode we set CDIV register by calculating required CDIV from
@@ -117,6 +120,7 @@
   } while(0)
 
 static int bcm_sdhost_log_level = LOG_LEVEL_WARN;
+static struct event bcm_sdhost_event;
 
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
@@ -181,6 +185,12 @@ static void bcm_sdhost_dump_regs(bool full)
   BCM_SDHOST_LOG_INFO("resp3:0x%08x", ioreg32_read(SDHOST_RESP3));
 }
 
+static void bcm_sdhost_irq(void)
+{
+  printf("bcm_sdhost_irq::BUSY\r\n");
+  os_event_notify(&bcm_sdhost_event);
+}
+
 static void bcm_sdhost_setup_dma_transfer(int control_block,
   void *mem_addr, size_t block_size, size_t num_blocks, bool is_write)
 {
@@ -207,12 +217,6 @@ static void bcm_sdhost_setup_dma_transfer(int control_block,
   bcm2835_dma_program_cb(&r, control_block);
 }
 
-static int bcm_sdhost_cmd_non_blocking(struct sdhc *s, struct sd_cmd *c,
-  uint64_t timeout_usec)
-{
-  return 0;
-}
-
 static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
 {
   uint32_t hsts;
@@ -233,16 +237,22 @@ static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
   return SUCCESS;
 }
 
-static inline void bcm_sdhost_wait_data_ready_bit(bool log_hsts)
+static inline void bcm_sdhost_wait_bytes_in_fifo(int i, bool dump)
 {
+  uint32_t edm;
   uint32_t hsts;
+  int num_words;
 
   while(1) {
-    hsts = ioreg32_read(SDHOST_HSTS);
-    if (log_hsts)
-      BCM_SDHOST_LOG_DBG("HSTS: %08x\r\n", hsts);
+    edm = ioreg32_read(SDHOST_EDM);
+    num_words = (edm >> 4) & 0x1f;
+    if (dump) {
+      hsts = ioreg32_read(SDHOST_HSTS);
+      BCM_SDHOST_LOG_DBG2("#%d HSTS: %08x, EDM:%08x/%d", i, hsts, edm,
+        num_words);
+    }
 
-    if (hsts & SDHSTS_DATA_FLAG)
+    if (num_words)
       return;
   }
 }
@@ -315,23 +325,22 @@ static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
   int err;
   uint32_t data;
 
+  int i = 0;
   while (ptr != end) {
-    /* Wait for data ready flag */
-    bcm_sdhost_wait_data_ready_bit(/* log_hsts */ false);
-
-    if (0 && s->bus_width_4) {
-      err = bcm_sdhost_read_data_4bit_bus(&data, /* log_edm */ true);
-      BCM_SDHOST_CHECK_ERR("Failed to read in 4bit bus mode");
-    }
-    else {
-      edm = ioreg32_read(SDHOST_EDM);
-      num_words = (edm >> 4) & 0x1f;
-      data = ioreg32_read(SDHOST_DATA);
-      BCM_SDHOST_LOG_DBG(
-        "EDM:%08x, num_words:%d", edm, num_words);
-    }
+    bcm_sdhost_wait_bytes_in_fifo(i++, /* log_hsts */ true);
+    edm = ioreg32_read(SDHOST_EDM);
+    num_words = (edm >> 4) & 0x1f;
+    data = ioreg32_read(SDHOST_DATA);
+    BCM_SDHOST_LOG_DBG("EDM:%08x, num_words:%d", edm, num_words);
     BCM_SDHOST_LOG_DBG2("data:%08x", data);
     *ptr++ = data;
+  }
+
+  edm = ioreg32_read(SDHOST_EDM);
+  if ((edm & 0xf) == 4) {
+    ioreg32_write(SDHOST_EDM, edm |SDHOST_EDM_FORCE_DATA_MODE);
+    BCM_SDHOST_LOG_DBG2("read done, FORCE_DATA_MODE:edm:%08x->%08x", edm,
+      ioreg32_read(SDHOST_EDM));
   }
 
   return SUCCESS;
@@ -382,7 +391,7 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
   bcm2835_dma_activate(s->io.dma_channel);
 }
 
-static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
+static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
   int ret;
@@ -407,10 +416,17 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
+  os_event_clear(&bcm_sdhost_event);
   BCM_SDHOST_LOG_DBG("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
     ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
+
+  if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA) {
+    os_event_wait(&bcm_sdhost_event);
+    ret = SUCCESS;
+    goto resp;
+  }
 
   while(1) {
     reg_cmd = ioreg32_read(SDHOST_CMD);
@@ -432,6 +448,7 @@ static int bcm_sdhost_cmd_blocking(struct sdhc *s, struct sd_cmd *c,
   else
     ret = SUCCESS;
 
+resp:
   c->resp0 = ioreg32_read(SDHOST_RESP0);
   c->resp1 = ioreg32_read(SDHOST_RESP1);
   c->resp2 = ioreg32_read(SDHOST_RESP2);
@@ -504,10 +521,7 @@ int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
     ioreg32_write(SDHOST_HSTS, reg_hsts);
   }
 
-  if (s->blocking_mode)
-    ret = bcm_sdhost_cmd_blocking(s, c, timeout_usec);
-  else
-    ret = bcm_sdhost_cmd_non_blocking(s, c, timeout_usec);
+  ret = bcm_sdhost_cmd_step0(s, c, timeout_usec);
 
   BCM_SDHOST_LOG_DBG("%sCMD%d done, ret: %d, resp:%08x|%08x|%08x|%08x",
     is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, ret,
@@ -630,12 +644,31 @@ static int bcm_sdhost_init(void)
   int err;
   bcm_sdhost_log_level = LOG_LEVEL_WARN;
   bcm_sdhost_get_max_clock();
+
+  irq_set(BCM2835_IRQNR_SDHOST, bcm_sdhost_irq);
+  bcm2835_ic_disable_irq(BCM2835_IRQNR_SDHOST);
+
+  os_event_init(&bcm_sdhost_event);
   return SUCCESS;
 }
 
-int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode)
+static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode)
 {
+  uint32_t hcfg = 0;
+
+  BCM_SDHOST_LOG_DBG("bcm_sdhost_set_io_mode");
+  if (mode == SDHC_IO_MODE_IT_DMA) {
+    hcfg = ioreg32_read(SDHOST_HCFG);
+    hcfg |= SDHOST_CFG_BUSY_IRPT_EN;
+    ioreg32_write(SDHOST_HCFG, hcfg);
+    bcm2835_ic_enable_irq(BCM2835_IRQNR_SDHOST);
+  }
   return SUCCESS;
+}
+
+static void bcm_sdhost_notify_dma(struct sdhc *s)
+{
+  os_event_notify(&bcm_sdhost_event);
 }
 
 struct sdhc_ops bcm_sdhost_ops = {
@@ -647,5 +680,6 @@ struct sdhc_ops bcm_sdhost_ops = {
   .set_bus_width4 = bcm_sdhost_set_bus_width4,
   .set_high_speed_clock = bcm_sdhost_set_high_speed_clock,
   .set_io_mode = bcm_sdhost_set_io_mode,
-  .cmd = bcm_sdhost_cmd
+  .cmd = bcm_sdhost_cmd,
+  .notify_dma = bcm_sdhost_notify_dma
 };
