@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <compiler.h>
 
-#define LOGGER_MAX_ENTRY_LENGTH 1024
+#define LOGGER_MAX_ENTRY_LENGTH 256
 
 #define LOGGER_ENT_STATE_FREE 0
 #define LOGGER_ENT_STATE_BUSY 1

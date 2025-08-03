@@ -64,6 +64,7 @@
 #define SDHOST_CFG_WIDE_INT_BUS  BIT(1)
 #define SDHOST_CFG_REL_CMD_LINE  BIT(0)
 
+#define FIFO_BUG_NUM_DRAIN_WORDS 2
 #define FIFO_READ_THRESHOLD   4
 #define FIFO_WRITE_THRESHOLD  4
 #define SDDATA_FIFO_PIO_BURST 8
@@ -191,14 +192,18 @@ static void bcm_sdhost_irq(void)
   os_event_notify(&bcm_sdhost_event);
 }
 
-static void bcm_sdhost_setup_dma_transfer(int control_block,
-  void *mem_addr, size_t block_size, size_t num_blocks, bool is_write)
+static void bcm_sdhost_setup_dma_transfer(struct sdhc_io *io,
+  int control_block, void *mem_addr, size_t block_size, size_t num_blocks,
+  bool is_write)
 {
   struct bcm2835_dma_request_param r = { 0 };
   uint32_t data_reg = PERIPH_ADDR_TO_DMA(SDHOST_DATA);
+  uint32_t num_drain_bytes = sizeof(uint32_t) * FIFO_BUG_NUM_DRAIN_WORDS;
+  uint8_t *end = (uint8_t *)mem_addr + block_size * num_blocks;
+  io->drain_addr = end - num_drain_bytes;
 
   r.dreq       = DMA_DREQ_SD_HOST;
-  r.len        = block_size * num_blocks;
+  r.len        = block_size * num_blocks - num_drain_bytes;
   r.enable_irq = true;
   if (is_write) {
     r.dreq_type  = BCM2835_DMA_DREQ_TYPE_DST;
@@ -336,17 +341,10 @@ static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
     *ptr++ = data;
   }
 
-  edm = ioreg32_read(SDHOST_EDM);
-  if ((edm & 0xf) == 4) {
-    ioreg32_write(SDHOST_EDM, edm |SDHOST_EDM_FORCE_DATA_MODE);
-    BCM_SDHOST_LOG_DBG2("read done, FORCE_DATA_MODE:edm:%08x->%08x", edm,
-      ioreg32_read(SDHOST_EDM));
-  }
-
   return SUCCESS;
 }
 
-static int bcm_sdhost_cmd_data_phase(struct sdhc *s, struct sd_cmd *c,
+static int bcm_sdhost_data_blocking(struct sdhc *s, struct sd_cmd *c,
   bool is_write)
 {
   int ret;
@@ -373,6 +371,7 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
 
   /* Setup DMA control block: destination, source, number of copies, etc. */
   bcm_sdhost_setup_dma_transfer(
+    &s->io,
     s->io.dma_control_block_idx,
     s->io.c->databuf,
     s->io.c->block_size,
@@ -389,6 +388,27 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
    * DREQ signal
    */
   bcm2835_dma_activate(s->io.dma_channel);
+}
+
+/*
+ * There is a bug in bcm2835 sdhost. When when READ_MULTIPLE_BLOCKS(CMD18)
+ * or WRITE_MULTIPLE_BLOCKS(CMD25) commands are used in combination with
+ * SET_BLOCK_COUNT (CMD23), after all data has been read-out, HSTS will first
+ * switch to 0, but then will show 0x80 (TIMEOUT). EDM will show that 0 words
+ * are in fifo and FSM state == 4.
+ * So this 4 means READWAIT, but actually FSM should go to state 1, which is
+ * DATAMODE. So we force sd controller FSM to DATAMODE by FORCE_DATA_MODE bit
+ * each time MULTI-io is completed
+ */
+static void bcm_sdhost_on_data_done(void)
+{
+  uint32_t edm = ioreg32_read(SDHOST_EDM);
+  if ((edm & SDHOST_EDM_FSM_MASK) != SDHOST_EDM_FSM_READWAIT)
+    return;
+
+  ioreg32_write(SDHOST_EDM, edm | SDHOST_EDM_FORCE_DATA_MODE);
+  BCM_SDHOST_LOG_DBG2("read done, FORCE_DATA_MODE:edm:%08x->%08x", edm,
+    ioreg32_read(SDHOST_EDM));
 }
 
 static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
@@ -417,15 +437,48 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   }
 
   os_event_clear(&bcm_sdhost_event);
-  BCM_SDHOST_LOG_DBG("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
+  BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
     ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA) {
     os_event_wait(&bcm_sdhost_event);
+    if (is_write) {
+      /* IS DMA WRITE */
+      irq_disable();
+      while(1) {
+        printf("edm:%08x,hsts:%08x\r\n", ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
+      }
+    } else {
+      /* IS DMA READ */
+      /* Read steps should be carefully arranged, because we will need to
+       * invalidate cache + clear FSM in time + add 2 last 32bit words to the
+       * read results. Invalidate cache is a time-consuming operation, that's
+       * why we have to finalize FIFO FSM before timeout and 0x80 in HSTS.
+       * After FIFO FSM has been completed, HSTS will be ok, so we can
+       * invalidate at this point, but we can only add last 2 words to result
+       * only after invalide cache has been done, for this reason we need to
+       * first read the data to temporary variables.
+       *
+       * 1. Read 2 last words from FIFO which DMA could not (silicon bug#0 
+       *    workaround) to clear SDHOST's internal states
+       * 2. reset SDHOST FSM back to IDLE (silicon bug#0 workaround)
+       * 3. invalidate data cache above DMA-copied addresses to make data
+       *    available from CPU side.
+       * 4. Copy last two words on top of invalidated cache to actualize
+       *    cache line with data also from CPU.
+       */
+      uint32_t data0 = ioreg32_read(SDHOST_DATA);
+      uint32_t data1 = ioreg32_read(SDHOST_DATA);
+      bcm_sdhost_on_data_done();
+      dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
+      ((uint32_t *)s->io.drain_addr)[0] = data0;
+      ((uint32_t *)s->io.drain_addr)[1] = data1;
+    }
+
     ret = SUCCESS;
-    goto resp;
+    goto data_completion;
   }
 
   while(1) {
@@ -444,11 +497,11 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   }
 
   if (has_data)
-    ret = bcm_sdhost_cmd_data_phase(s, c, is_write);
+    ret = bcm_sdhost_data_blocking(s, c, is_write);
   else
     ret = SUCCESS;
 
-resp:
+data_completion:
   c->resp0 = ioreg32_read(SDHOST_RESP0);
   c->resp1 = ioreg32_read(SDHOST_RESP1);
   c->resp2 = ioreg32_read(SDHOST_RESP2);

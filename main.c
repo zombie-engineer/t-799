@@ -103,10 +103,9 @@ static inline void hexdump(const uint8_t *buffer, uint32_t size)
   uint32_t i, j;
 
   for (i = 0; i < size; i += 16) {
-    printf("%08x: ", i);
     for (j = 0; j < 16 && i + j < size; j++)
-      printf("%02x ", buffer[i + j]);
-    printf("\r\n");
+      os_log("%02x ", buffer[i + j]);
+    os_log("\r\n");
   }
 }
 
@@ -119,8 +118,8 @@ static int sdhc_test_io(struct sdhc *s, bool skip_it)
     sdhc_io_mode_t mode;
     const char *name;
   } test_modes[] = {
-    { SDHC_IO_MODE_BLOCKING_PIO, "BLOCKING_PIO" },
-    { SDHC_IO_MODE_BLOCKING_DMA, "BLOCKING_DMA" },
+    // { SDHC_IO_MODE_BLOCKING_PIO, "BLOCKING_PIO" },
+    // { SDHC_IO_MODE_BLOCKING_DMA, "BLOCKING_DMA" },
     { SDHC_IO_MODE_IT_DMA, "IT_DMA" }
   };
 
@@ -143,7 +142,7 @@ static int sdhc_test_io(struct sdhc *s, bool skip_it)
         return err;
       }
   
-      hexdump(sdhc_testbuf, 2 * 512);
+      hexdump(sdhc_testbuf, 32);
     }
   }
 
@@ -298,7 +297,7 @@ static void kernel_run(void)
   t = task_create(blockdev_scheduler_fn, "block-sched");
   sched_run_task_isr(t);
   bcm2835_emmc_set_interrupt_mode();
-  sdhc_test_io(&sdhc, true);
+  // sdhc_test_io(&sdhc, true);
   scheduler_start();
   panic();
 }

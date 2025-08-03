@@ -20,4 +20,5 @@ struct sdhc_io {
 
   /* Number of irqs that have been fired for this command */
   int num_irqs;
+  void *drain_addr;
 };
