@@ -211,17 +211,17 @@ int bcm2835_emmc_write_stream_open(
   return SUCCESS;
 }
 
-int bcm2835_emmc_block_erase(
-  struct block_device *b,
-  size_t start_sector, size_t num_sectors)
+int bcm2835_emmc_block_erase(struct block_device *blockdev,
+  uint64_t start_block_idx, uint32_t num_blocks)
 {
   int err;
-  err = bcm2835_emmc_cmd32(start_sector, bcm2835_emmc.is_blocking_mode);
+  err = bcm2835_emmc_cmd32(start_block_idx, bcm2835_emmc.is_blocking_mode);
   if (err != SUCCESS) {
     printf("cmd32 failed\r\n");
     return err;
   }
-  err = bcm2835_emmc_cmd33(start_sector + num_sectors, bcm2835_emmc.is_blocking_mode);
+  err = bcm2835_emmc_cmd33(start_block_idx + num_blocks,
+    bcm2835_emmc.is_blocking_mode);
   if (err != SUCCESS) {
     printf("cmd33 failed\r\n");
     return err;
@@ -249,18 +249,18 @@ int bcm2835_emmc_write_stream_write(
   return SUCCESS;
 }
 
-static int bcm2835_emmc_read(struct block_device *b, char *buf,
-  size_t start_sector, size_t num_blocks)
+static int bcm2835_emmc_read(struct block_device *blockdev, uint8_t *buf,
+  uint64_t start_block_idx, uint32_t num_blocks)
 {
-  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, start_sector,
+  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, start_block_idx,
     num_blocks);
 }
 
-static int bcm2835_emmc_write(struct block_device *b, const void *buf,
-  size_t start_sector, size_t num_blocks)
+static int bcm2835_emmc_write(struct block_device *blockdev, const uint8_t *buf,
+  uint64_t start_block_idx, uint32_t num_blocks)
 {
   return bcm2835_emmc_data_io(BCM2835_EMMC_IO_WRITE, (char *)buf,
-    start_sector, num_blocks);
+    start_block_idx, num_blocks);
 }
 
 int bcm2835_emmc_set_interrupt_mode(void)

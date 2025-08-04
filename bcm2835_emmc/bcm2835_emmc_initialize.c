@@ -12,7 +12,7 @@
 #include <bcm2835/bcm2835_emmc.h>
 #include "bcm2835_emmc_cmd.h"
 #include "bcm2835_emmc_utils.h"
-#include "sd.h"
+#include <sdhc.h>
 #include <printf.h>
 
 #define BCM2835_EMMC_CHECK_ERR(__fmt, ...)\

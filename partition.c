@@ -3,7 +3,7 @@
 #include <stringlib.h>
 
 static int partition_read(struct block_device *b,
- char *buf, size_t start_sector, size_t num_sectors)
+  uint8_t *buf, uint64_t start_sector, uint32_t num_sectors)
 {
   struct partition *p = container_of(b, struct partition, bdev);
 
@@ -12,7 +12,7 @@ static int partition_read(struct block_device *b,
 }
 
 static int partition_write(struct block_device *b,
- const void *buf, size_t start_sector, size_t num_sectors)
+ const uint8_t *buf, uint64_t start_sector, uint32_t num_sectors)
 {
   struct partition *p = container_of(b, struct partition, bdev);
 
@@ -22,7 +22,7 @@ static int partition_write(struct block_device *b,
 }
 
 static int partition_block_erase(struct block_device *b,
- size_t start_sector, size_t num_sectors)
+ uint64_t start_sector, uint32_t num_sectors)
 {
   struct partition *p = container_of(b, struct partition, bdev);
 
