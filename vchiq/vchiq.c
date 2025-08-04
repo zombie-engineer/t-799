@@ -3149,56 +3149,44 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = create_resizer_component(mmal_service, &resizer_in, &resizer_out,
     frame_width, frame_height, 320, 240);
 
-  printf("h1\r\n");
   err = vchiq_mmal_port_connect(cam_video, encoder_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
-  printf("h2\r\n");
   err = vchiq_mmal_port_connect(cam_preview, resizer_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
-  printf("h3\r\n");
   err = mmal_port_set_zero_copy(encoder_out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
 
-  printf("h4\r\n");
   err = mmal_port_set_zero_copy(encoder_in);
   CHECK_ERR("Failed to set zero copy to encoder.IN");
 
-  printf("h5\r\n");
   err = mmal_port_set_zero_copy(cam_video);
   CHECK_ERR("Failed to set zero copy to video.OUT");
 
-  printf("h6\r\n");
   err = mmal_port_set_zero_copy(cam_preview);
   CHECK_ERR("Failed to set zero copy to preview.OUT");
 
-  printf("h7\r\n");
   err = mmal_port_set_zero_copy(resizer_in);
   CHECK_ERR("Failed to set zero copy to resizer.IN");
 
-  printf("h8\r\n");
   err = mmal_port_set_zero_copy(resizer_out);
   CHECK_ERR("Failed to set zero copy to resizer.OUT");
 
   /* Enable resizer ports */
-  printf("h9\r\n");
   err = vchiq_mmal_port_enable(resizer_out);
   CHECK_ERR("Failed to enable resizer.OUT");
 
   port_to_display = resizer_out;
 
   /* Enable encoder ports */
-  printf("h10\r\n");
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
   port_to_sdcard = encoder_out;
 
-  printf("h11\r\n");
   err = vchiq_mmal_port_enable(encoder_in);
   CHECK_ERR("Failed to enable encoder.IN");
 
-  printf("h12\r\n");
   err = mmal_apply_buffers(mems_service, encoder_out, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
@@ -3213,13 +3201,11 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_enable(cam_preview);
   CHECK_ERR("Failed to enable preview.OUT");
   MMAL_INFO("Preview port enabled %p", cam_preview);
-  printf("h13\r\n");
 
   err = mmal_apply_display_buffers(mems_service, resizer_out, display_buffers,
     ARRAY_SIZE(display_buffers));
 
   CHECK_ERR("Failed to add display buffers");
-  printf("h17\r\n");
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");
