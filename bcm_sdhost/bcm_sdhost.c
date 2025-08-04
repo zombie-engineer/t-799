@@ -120,7 +120,7 @@
     }\
   } while(0)
 
-static int bcm_sdhost_log_level = LOG_LEVEL_INFO;
+static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
 static struct event bcm_sdhost_event;
 
 typedef enum {
@@ -189,13 +189,14 @@ static void bcm_sdhost_dump_regs(bool full)
 static void bcm_sdhost_irq(void)
 {
   uint32_t hsts = ioreg32_read(SDHOST_HSTS);
-  printf("hsts: %08x\r\n", ioreg32_read(SDHOST_HSTS));
-  printf("irq hello\r\n");
   if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
     uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
     os_event_notify(&bcm_sdhost_event);
+  }
+  if (hsts & ~SDHOST_HSTS_BLOCK_IRPT) {
+    printf("Unexpected irq: HSTS: %08x\r\n", hsts);
   }
 }
 
@@ -462,11 +463,9 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
       if (hsts & SDHSTS_DATA_FLAG) {
         uint32_t hcfg;
         irq_disable();
-        BCM_SDHOST_LOG_WARN("edm:%08x,hsts:%08x++",
-          ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
         os_event_clear(&bcm_sdhost_event);
         hcfg = ioreg32_read(SDHOST_HCFG);
-        hcfg |= SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_BLOCK_IRPT_EN;//|SDHOST_CFG_DATA_IRPT_EN;
+        hcfg |= SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_BLOCK_IRPT_EN;
         ioreg32_write(SDHOST_HCFG, hcfg);
         irq_enable();
         os_event_wait(&bcm_sdhost_event);
@@ -701,7 +700,10 @@ static void bcm_sdhost_set_high_speed_clock(void)
   ioreg32_write(SDHOST_CDIV, cdiv);
 #elif BCM_SDHOST_SET_CLOCK == BCM_SDHOST_SET_CLOCK_BY_FIRMWARE
   uint32_t clock_freq = 50000000;
-  mbox_set_sdhost_clock_freq(&clock_freq);
+  if (!mbox_set_sdhost_clock_freq(&clock_freq)) {
+    BCM_SDHOST_LOG_ERR("Failed to set clock via mbox: %d, CDIV:%08x",
+      clock_freq, ioreg32_read(SDHOST_CDIV));
+  }
 #endif
   BCM_SDHOST_LOG_DBG2("highspeed_clock=%d, hcfg:%08x",
     ioreg32_read(SDHOST_CDIV), ioreg32_read(SDHOST_HCFG));
@@ -718,8 +720,7 @@ static void bcm_sdhost_init_gpio(void)
 
 static int bcm_sdhost_init(void)
 {
-  int err;
-  bcm_sdhost_log_level = LOG_LEVEL_WARN;
+  bcm_sdhost_log_level = LOG_LEVEL_INFO;
   bcm_sdhost_get_max_clock();
 
   irq_set(BCM2835_IRQNR_SDHOST, bcm_sdhost_irq);
