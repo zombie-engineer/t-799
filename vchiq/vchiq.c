@@ -963,8 +963,7 @@ static void vchiq_event_wait(struct event *ev,
  */
 static void vchiq_process_free_queue(struct vchiq_state *s)
 {
-  int slot_queue_available, slot_index;
-  uint16_t pos, old_pos;
+  int slot_queue_available, pos, slot_index;
   char *slots;
   struct vchiq_header *h;
 
@@ -982,16 +981,9 @@ static void vchiq_process_free_queue(struct vchiq_state *s)
     pos = 0;
     while (pos < VCHIQ_SLOT_SIZE) {
       h = (struct vchiq_header *)(slots + pos);
-      // printf("pos: %d, sz:%d, msgid:%08x\r\n", pos, h->size, h->msgid);
 
-      old_pos = pos;
       pos += VCHIQ_MSG_TOTAL_SIZE(h->size);
-      if (pos > VCHIQ_SLOT_SIZE) {
-        printf("Found corrupted vchiq header why recycling\r\n");
-        printf("  pos: %d, size: %d, msgid: %08x\r\n", old_pos, h->size,
-          h->msgid);
-        BUG_IF(1, "vchiq slot recycle failure\r\n");
-      }
+      BUG_IF(pos > VCHIQ_SLOT_SIZE, "wrong vchiq header");
     }
 
     mb();
@@ -1621,7 +1613,7 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-#define IO_MIN_SECTORS 64
+#define IO_MIN_SECTORS (8192)
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
 
 struct camera {
@@ -1662,10 +1654,8 @@ static inline void camera_io_on_buffer_filled(void)
   os_event_wait(&cam.next_buf_avail);
   os_event_clear(&cam.next_buf_avail);
 
-#if 1
   MMAL_INFO("wr_req#%d, from:%ld,num:%ld", sdcard_io_count,
     cam.write_sector_offset, IO_MIN_SECTORS);
-#endif
 
   sdcard_io_count++;
   blockdev_scheduler_push_io(&io);
@@ -2437,23 +2427,8 @@ static int vchiq_mmal_port_action_port(struct vchiq_mmal_component *c,
 static int vchiq_mmal_port_connect(struct vchiq_mmal_port *src,
   struct vchiq_mmal_port *dst)
 {
-  struct mmal_msg_context ctx = {
-    .u.sync = {
-      .msg_type = MMAL_MSG_TYPE_PORT_ACTION,
-      .rmsg = NULL
-    }
-  };
-
-  printf("src: %016x\r\n", src);
-  printf("component: %016x\r\n", src->component);
-  struct vchiq_service_common *const _ms = src->component->ms;
-  struct mmal_msg_port_action_reply *r;
-  struct mmal_msg msg;
-  struct mmal_msg_port_action_handle *const m = &msg.u.port_action_handle;
-
-  printf("x0\r\n");
-  memset(&msg, 0, sizeof(msg));
-  printf("x1\r\n");
+  VCHIQ_MMAL_MSG_DECL(src->component->ms, PORT_ACTION, port_action_handle,
+    port_action_reply);
   m->component_handle = src->component->handle;
   m->port_handle = src->handle;
   m->action = MMAL_MSG_PORT_ACTION_TYPE_CONNECT;
@@ -2486,7 +2461,6 @@ out_err:
   return err;
 }
 
-#if 0
 static int create_port_connection(struct vchiq_mmal_port *in,
   struct vchiq_mmal_port *out, struct vchiq_mmal_port *out2)
 {
@@ -2524,7 +2498,6 @@ static int create_port_connection(struct vchiq_mmal_port *in,
 out_err:
   return err;
 }
-#endif
 
 static struct mems_msg_context *mems_msg_context_alloc(void)
 {
@@ -2650,12 +2623,6 @@ static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
   buf->buffer = dma_buf;
   buf->buffer_size = dma_buf_size;
   buf->user_handle = user_handle;
-
-#if 0
-  if (p->zero_copy) {
-    printf("zero copy\r\n");
-  }
-#endif
   err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
   CHECK_ERR("failed to import dmabuf");
   list_add_tail(&buf->list, &p->buffers_free);
