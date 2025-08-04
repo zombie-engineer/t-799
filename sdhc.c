@@ -3,6 +3,7 @@
 #include <sdhc_cmd.h>
 #include <bcm2835_dma.h>
 #include <bitops.h>
+#include <os_api.h>
 #include <log.h>
 
 typedef enum {
@@ -313,6 +314,7 @@ static int sdhc_set_high_speed(struct sdhc *s)
 
   SDHC_LOG_DBG("Switching to HIGH SPEED mode");
 
+  os_wait_ms(100);
   err = sdhc_cmd6(s, CMD6_MODE_CHECK,
     CMD6_ARG_ACCESS_MODE_SDR25,
     CMD6_ARG_CMD_SYSTEM_DEFAULT,
@@ -661,4 +663,3 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode)
   sdhc->io_mode = mode;
   return SUCCESS;
 }
-

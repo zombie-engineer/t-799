@@ -17,6 +17,7 @@
 #include <mbox_props.h>
 #include "memory_map.h"
 #include <os_api.h>
+#include <sched.h>
 #include <irq.h>
 #include <bcm2835/bcm2835_ic.h>
 
@@ -606,6 +607,15 @@ int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
   return ret;
 }
 
+static inline void bcm_sdhost_sleep_ms(uint32_t ms)
+{
+  /* If scheduler is running, use os sleep, else use baremetal busy wait */
+  if (sched_get_current_task())
+    os_wait_ms(ms);
+  else
+    delay_us(ms * 1000);
+}
+
 static void bcm_sdhost_reset_registers(void)
 {
   uint32_t r;
@@ -643,12 +653,12 @@ static void bcm_sdhost_reset_registers(void)
   BCM_SDHOST_LOG_DBG2("reset: EDM=%08x", r);
   ioreg32_write(SDHOST_EDM, r);
 
-  delay_us(20 * 1000);
+  bcm_sdhost_sleep_ms(20);
 
   /* Power up */
   ioreg32_write(SDHOST_VDD, 1);
 
-  delay_us(20 * 1000);
+  bcm_sdhost_sleep_ms(20);
 
   BCM_SDHOST_LOG_DBG2("slow_hcfg=%08x, slow_clock=%08x", hcfg, cdiv_slow_clock);
   ioreg32_write(SDHOST_HCFG, hcfg);

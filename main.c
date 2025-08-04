@@ -184,14 +184,6 @@ static void kernel_init(void)
   scheduler_init();
   debug_led_init();
   bcm2835_dma_init();
-
-  err = sdhc_init(&bdev_sdcard, &sdhc, &bcm_sdhost_ops);
-  if (err != SUCCESS) {
-    printf("Failed to init sdhc, %d\r\n", err);
-    goto out;
-  }
-
-  blockdev_scheduler_init();
   err = logger_init();
   if (err != SUCCESS) {
     printf("Failed to init logger, err: %d\r\n", err);
@@ -215,7 +207,15 @@ char *readbuf;
 static void app_main(void)
 {
   int err;
-  os_log("vchiq_start\r\n");
+  os_log("Application main\r\n");
+
+  err = sdhc_init(&bdev_sdcard, &sdhc, &bcm_sdhost_ops);
+  if (err != SUCCESS) {
+    printf("Failed to init sdhc, %d\r\n", err);
+    goto out;
+  }
+  os_log("SDHC intialized\r\n");
+  blockdev_scheduler_init();
 
   err = sdhc_test_io(&sdhc, false);
   if (err != SUCCESS)
@@ -227,16 +227,6 @@ static void app_main(void)
     goto out;
   }
 
-#if 0
-  readbuf = dma_alloc(32768, 0);
-  memset(readbuf, 0x11, 32768);
-  err = bdev_sdcard.ops.read(&bdev_sdcard, readbuf, 0, 1);
-  os_log("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
-  while(1) {
-    asm volatile("wfe");
-  }
-
-#endif
   err = fs_init(&bdev_sdcard, &bdev_partition);
   if (err != SUCCESS) {
     os_log("Failed to init fs block device, err: %d\r\n", err);
@@ -257,35 +247,6 @@ out:
   os_exit_current_task();
 }
 
-#if 0
-static void test_dma(void)
-{
-  uint64_t pa;
-  bool success;
-  struct bcm2835_dma_request_param p = { 0 };
-
-  void *src = dma_alloc(4096);
-  void *dst = dma_alloc(4096);
-  if (!src || !dst)
-  {
-    printf("Failed to test dma\n");
-    return;
-  }
-  memset(src, 0x7, 256);
-  success = mmu_get_pddr((uint64_t)src, &pa);
-  printf("%p->%lx\n", src, pa);
-  p.dreq = 0;
-  p.dreq_type = BCM2835_DMA_DREQ_TYPE_NONE;
-  p.src = 0xc0000000 | (uint32_t)(uint64_t)src;
-  p.dst = 0xc0000000 | (uint32_t)(uint64_t)dst;
-  p.src_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
-  p.dst_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
-  p.len = 16;
-
-  bcm2835_dma_requests(&p, 1);
-}
-#endif
-
 static void kernel_run(void)
 {
   struct task *t;
@@ -295,14 +256,11 @@ static void kernel_run(void)
   mmu_print_va(0xffff000001ff1000, 1);
   mmu_print_va(0xffff00000201c000, 1);
 #endif
-  // test_dma();
 
   t = task_create(app_main, "app_main");
   sched_run_task_isr(t);
   t = task_create(blockdev_scheduler_fn, "block-sched");
   sched_run_task_isr(t);
-  bcm2835_emmc_set_interrupt_mode();
-  // sdhc_test_io(&sdhc, true);
   scheduler_start();
   panic();
 }
