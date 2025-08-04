@@ -120,7 +120,7 @@
     }\
   } while(0)
 
-static int bcm_sdhost_log_level = LOG_LEVEL_WARN;
+static int bcm_sdhost_log_level = LOG_LEVEL_INFO;
 static struct event bcm_sdhost_event;
 
 typedef enum {
@@ -188,8 +188,15 @@ static void bcm_sdhost_dump_regs(bool full)
 
 static void bcm_sdhost_irq(void)
 {
-  printf("bcm_sdhost_irq::BUSY\r\n");
-  os_event_notify(&bcm_sdhost_event);
+  uint32_t hsts = ioreg32_read(SDHOST_HSTS);
+  printf("hsts: %08x\r\n", ioreg32_read(SDHOST_HSTS));
+  printf("irq hello\r\n");
+  if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
+    uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
+    hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
+    ioreg32_write(SDHOST_HCFG, hcfg);
+    os_event_notify(&bcm_sdhost_event);
+  }
 }
 
 static void bcm_sdhost_setup_dma_transfer(struct sdhc_io *io,
@@ -199,11 +206,9 @@ static void bcm_sdhost_setup_dma_transfer(struct sdhc_io *io,
   struct bcm2835_dma_request_param r = { 0 };
   uint32_t data_reg = PERIPH_ADDR_TO_DMA(SDHOST_DATA);
   uint32_t num_drain_bytes = sizeof(uint32_t) * FIFO_BUG_NUM_DRAIN_WORDS;
-  uint8_t *end = (uint8_t *)mem_addr + block_size * num_blocks;
-  io->drain_addr = end - num_drain_bytes;
 
   r.dreq       = DMA_DREQ_SD_HOST;
-  r.len        = block_size * num_blocks - num_drain_bytes;
+  r.len        = block_size * num_blocks;
   r.enable_irq = true;
   if (is_write) {
     r.dreq_type  = BCM2835_DMA_DREQ_TYPE_DST;
@@ -213,6 +218,9 @@ static void bcm_sdhost_setup_dma_transfer(struct sdhc_io *io,
     r.src        = RAM_PHY_TO_BUS_UNCACHED(mem_addr);
   }
   else {
+    uint8_t *end = (uint8_t *)mem_addr + block_size * num_blocks;
+    io->drain_addr = end - num_drain_bytes;
+    r.len -= num_drain_bytes;
     r.dreq_type  = BCM2835_DMA_DREQ_TYPE_SRC;
     r.dst_type   = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
     r.dst        = RAM_PHY_TO_BUS_UNCACHED(mem_addr);
@@ -233,6 +241,11 @@ static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
 
     if ((hsts & SDHSTS_DATA_FLAG) == 0)
       break;
+  }
+
+  while(1) {
+    BCM_SDHOST_LOG_INFO("edm:%08x,hsts:%08x",
+      ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
   }
 
   /* If is read, invalidate cache now when DMA is done */
@@ -445,10 +458,18 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA) {
     os_event_wait(&bcm_sdhost_event);
     if (is_write) {
-      /* IS DMA WRITE */
-      irq_disable();
-      while(1) {
-        printf("edm:%08x,hsts:%08x\r\n", ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
+      uint32_t hsts = ioreg32_read(SDHOST_HSTS);
+      if (hsts & SDHSTS_DATA_FLAG) {
+        uint32_t hcfg;
+        irq_disable();
+        BCM_SDHOST_LOG_WARN("edm:%08x,hsts:%08x++",
+          ioreg32_read(SDHOST_EDM), ioreg32_read(SDHOST_HSTS));
+        os_event_clear(&bcm_sdhost_event);
+        hcfg = ioreg32_read(SDHOST_HCFG);
+        hcfg |= SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_BLOCK_IRPT_EN;//|SDHOST_CFG_DATA_IRPT_EN;
+        ioreg32_write(SDHOST_HCFG, hcfg);
+        irq_enable();
+        os_event_wait(&bcm_sdhost_event);
       }
     } else {
       /* IS DMA READ */
@@ -502,6 +523,9 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
     ret = SUCCESS;
 
 data_completion:
+  if (has_data)
+    bcm_sdhost_on_data_done();
+
   c->resp0 = ioreg32_read(SDHOST_RESP0);
   c->resp1 = ioreg32_read(SDHOST_RESP1);
   c->resp2 = ioreg32_read(SDHOST_RESP2);

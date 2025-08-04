@@ -768,7 +768,7 @@ static void vchiq_irq_handler(void)
     vchiq_check_local_events();
 }
 
-void vchiq_ring_bell(void)
+static void vchiq_ring_bell(void)
 {
   ioreg32_write(BELL2, 0);
 }
@@ -892,7 +892,7 @@ static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
   return err;
 }
 
-void vchiq_event_signal(struct vchiq_remote_event *event)
+static void vchiq_event_signal(struct vchiq_remote_event *event)
 {
   wmb();
   event->fired = 1;

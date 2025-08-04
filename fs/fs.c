@@ -8,10 +8,12 @@
 #include <bcm2835/bcm2835_emmc.h>
 #include <stringlib.h>
 #include <kmalloc.h>
+#include <os_api.h>
 
 static struct partition main_part;
 
-int fs_init(struct block_device *blockdev)
+int fs_init(struct block_device *blockdev,
+  struct block_device **bdev_partition)
 {
   int err;
   struct mbr *mbr;
@@ -37,7 +39,17 @@ int fs_init(struct block_device *blockdev)
     start_sector,
     start_sector + num_sectors);
 
+  *bdev_partition = &main_part.bdev;
+
 out:
   kfree(mbr);
   return err;
+}
+
+void fs_dump_partition(struct block_device *bdev_partition)
+{
+  struct partition *p = container_of(bdev_partition, struct partition,
+    bdev);
+  os_log("partition: start_sector:%d, end_sector:%d\r\n",
+    p->start_sector, p->end_sector);
 }

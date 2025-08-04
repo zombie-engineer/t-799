@@ -31,7 +31,8 @@
 static struct block_device *fs_blockdev;
 static char sdhc_testbuf[512 * 2] = { 0 };
 static struct sdhc sdhc;
-struct block_device blockdev_sd;
+struct block_device bdev_sdcard;
+struct block_device *bdev_partition;
 
 volatile char buf1[1024];
 volatile char buf2[1024];
@@ -129,38 +130,40 @@ static int sdhc_test_io(struct sdhc *s, bool skip_it)
 
     err = sdhc_set_io_mode(s, test_modes[i].mode);
     if (err != SUCCESS) {
-      printf("Failed to set sdhc io mode %s\r\n", test_modes[i].name);
+      os_log("Failed to set sdhc io mode %s\r\n", test_modes[i].name);
       return err;
     }
 
     for (int j = 0; j < 4; ++j) {
-      printf("Testing SDHC with mode %s, iter%d\r\n", test_modes[i].name, j);
+      os_log("Testing SDHC with mode %s, iter%d\r\n", test_modes[i].name, j);
       memset(sdhc_testbuf, 0, sizeof(sdhc_testbuf));
       err = sdhc_read(s, sdhc_testbuf, 8196, 2);
       if (err) {
-        printf("failed to read from SD\r\n");
+        os_log("failed to read from SD\r\n");
         return err;
       }
   
       hexdump(sdhc_testbuf, 32);
     }
+
+    for (int i = 0; i < 256; ++i) {
+      sdhc_testbuf[i * 4 + 0] = i & 0xff;
+      sdhc_testbuf[i * 4 + 1] = i / 4;
+      sdhc_testbuf[i * 4 + 2] = 0xd6;
+      sdhc_testbuf[i * 4 + 3] = 0xd7;
+    }
+  
+    err = sdhc_write(&sdhc, sdhc_testbuf, 1056768, 2);
+    if (err) {
+      os_log("failed to write to SD\r\n");
+      while(1)
+        asm volatile("wfe");
+    }
+
+    os_log("SDHC test mode %s done\r\n", test_modes[i].name);
   }
 
-#if 0
-  for (int i = 0; i < 512 * 4 / 4; ++i) {
-    sdhc_testbuf[i * 4 + 0] = i & 0xff;
-    sdhc_testbuf[i * 4 + 1] = i / 4;
-    sdhc_testbuf[i * 4 + 2] = 0x11;
-    sdhc_testbuf[i * 4 + 3] = 0xee;
-  }
-
-  err = sdhc_write(&sdhc, sdhc_testbuf, 1048576, 4);
-  if (err) {
-    printf("failed to write to SD\r\n");
-    while(1)
-      asm volatile("wfe");
-  }
-#endif
+  os_log("sdhc_test_io DONE\r\n");
   return SUCCESS;
 }
 
@@ -182,7 +185,7 @@ static void kernel_init(void)
   debug_led_init();
   bcm2835_dma_init();
 
-  err = sdhc_init(&blockdev_sd, &sdhc, &bcm_sdhost_ops);
+  err = sdhc_init(&bdev_sdcard, &sdhc, &bcm_sdhost_ops);
   if (err != SUCCESS) {
     printf("Failed to init sdhc, %d\r\n", err);
     goto out;
@@ -218,22 +221,23 @@ static void app_main(void)
   if (err != SUCCESS)
     goto out;
 
-#if 0
   err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA);
   if (err != SUCCESS) {
-    printf("Failed to set sdhc io mode IT_DMA\r\n");
+    os_log("Failed to set sdhc io mode IT_DMA\r\n");
     goto out;
   }
-#endif
+
+#if 0
   readbuf = dma_alloc(32768, 0);
   memset(readbuf, 0x11, 32768);
-  err = blockdev_sd.ops.read(&blockdev_sd, readbuf, 0, 1);
-  printf("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
+  err = bdev_sdcard.ops.read(&bdev_sdcard, readbuf, 0, 1);
+  os_log("readbuf: %d, %08x, %08x\r\n", err, *(uint32_t *)readbuf, *(uint32_t *)(readbuf+4));
   while(1) {
     asm volatile("wfe");
   }
 
-  err = fs_init(&blockdev_sd);
+#endif
+  err = fs_init(&bdev_sdcard, &bdev_partition);
   if (err != SUCCESS) {
     os_log("Failed to init fs block device, err: %d\r\n", err);
     goto out;
@@ -247,7 +251,8 @@ static void app_main(void)
     goto out;
   }
 
-  vchiq_init(&blockdev_sd);
+  fs_dump_partition(bdev_partition);
+  vchiq_init(bdev_partition);
 out:
   os_exit_current_task();
 }

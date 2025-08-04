@@ -9,7 +9,7 @@
 #include <mutex.h>
 #include <common.h>
 
-#define LOG_ENTRIES_COUNT (1024 + 512)
+#define LOG_ENTRIES_COUNT 256
 
 /*
  * Logger data structure explained:
