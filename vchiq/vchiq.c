@@ -1805,7 +1805,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   restore_irq_flags(irqflags);
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
-  mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
+  // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
   os_event_notify(&mmal_io_work_waitflag);
 
@@ -2219,7 +2219,7 @@ static int vchiq_mmal_get_cam_info(struct vchiq_service_common *ms,
   int err;
   struct vchiq_mmal_component *camera_info;
   struct vchiq_mmal_component *cam;
-  struct mmal_parameter_logging l = { .set = 0x3, .clear = 0 };
+  struct mmal_parameter_logging l = { .set = 0x1, .clear = 0 };
 
   camera_info = vchiq_mmal_create_camera_info(ms);
 
@@ -2768,7 +2768,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_component *encoder;
   struct mmal_parameter_video_profile video_profile;
   struct encoder_h264_params p = {
-    .quantization = 20
+    .quantization = 0
   };
  
   encoder = component_create(mmal_service, "ril.video_encode");
@@ -2788,7 +2788,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("failed to enable control port");
 
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
-    height, 0, 0);
+    height, 0, 25000000);
 
   size_t requested_buf_size = 256 * 1024;
   size_t requested_num_buffers = 128;
