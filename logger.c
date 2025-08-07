@@ -153,7 +153,7 @@ static void logger_mark_ready(struct logger_entry *e)
 }
 
 #define STACK_CANARY 0xff112277
-void __os_log(const char *fmt, __builtin_va_list *args)
+void OPTIMIZED __os_log(const char *fmt, __builtin_va_list *args)
 {
   int irqflags;
   struct logger_entry *e;

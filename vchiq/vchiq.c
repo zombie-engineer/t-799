@@ -610,13 +610,10 @@ static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
   uint64_t vcos_systime;
   bool buffer_processed = false;
 
-  // printf("process_port_buffers: %p\r\n", p);
   if (list_empty(&p->buffers_pending))
     goto buffer_return;
 
   b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
-  // printf("process_port_buffers: buffer: %p->%p, user:%d\r\n", b, b->buffer,
-  //  b->user_handle);
 
   if (p != port_to_display) {
     camera_io_process_new_data(b->buffer, b->length);
@@ -642,7 +639,6 @@ static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
         if (list_empty(&p->buffers_pending))
           break;
 
-        // printf("process_port_buffers: skipping buf: %p\r\n", b);
         list_add_tail(&b->list, &p->buffers_free);
         b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
       }
@@ -652,8 +648,6 @@ static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
         list_add_tail(&b->list, &p->buffers_in_process);
 
       restore_irq_flags(irqflags);
-
-      // last_draw_start = sched_get_time_us();
       if (!should_draw)
         goto buffer_return;
 
@@ -853,7 +847,7 @@ static int vchiq_parse_msg_openack(struct vchiq_state *s,
   return SUCCESS;
 }
 
-static int vchiq_parse_msg_data(struct vchiq_state *s, int localport,
+static OPTIMIZED int vchiq_parse_msg_data(struct vchiq_state *s, int localport,
   int remoteport, struct vchiq_header *h)
 {
   struct vchiq_service_common *service = NULL;
@@ -865,7 +859,7 @@ static int vchiq_parse_msg_data(struct vchiq_state *s, int localport,
 }
 
 
-static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
+static inline int OPTIMIZED vchiq_parse_rx_dispatch(struct vchiq_state *s,
   struct vchiq_header *h)
 {
   int err;
@@ -877,6 +871,7 @@ static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
     case VCHIQ_MSG_CONNECT:
       s->is_connected = true;
       os_event_notify(&s->state_waitflag);
+      err = SUCCESS;
       break;
     case VCHIQ_MSG_OPENACK:
       err = vchiq_parse_msg_openack(s, localport, remoteport);
@@ -885,7 +880,6 @@ static inline int vchiq_parse_rx_dispatch(struct vchiq_state *s,
       err = vchiq_parse_msg_data(s, localport, remoteport, h);
       break;
     default:
-      // printf("---\r\n");
       err = ERR_INVAL;
       break;
   }
@@ -912,7 +906,7 @@ static void vchiq_release_slot(struct vchiq_state *s, int slot_index)
   vchiq_event_signal(&s->remote->recycle);
 }
 
-static int vchiq_parse_rx(struct vchiq_state *s)
+static int OPTIMIZED vchiq_parse_rx(struct vchiq_state *s)
 {
   int err = SUCCESS;
   int rx_slot;
@@ -1014,7 +1008,7 @@ static void vchiq_sync_release_thread(void)
   }
 }
 
-static void vchiq_loop_thread(void)
+static void OPTIMIZED vchiq_loop_thread(void)
 {
   struct vchiq_state *s;
 
@@ -1827,7 +1821,7 @@ static int mmal_event_to_host_cb(const struct mmal_msg *rmsg)
   return SUCCESS;
 }
 
-static int mmal_service_data_callback(struct vchiq_service_common *s,
+static OPTIMIZED int mmal_service_data_callback(struct vchiq_service_common *s,
   struct vchiq_header *h)
 {
   struct mmal_msg *rmsg;
