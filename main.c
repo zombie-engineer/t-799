@@ -29,7 +29,7 @@
 #include <logger.h>
 
 static struct block_device *fs_blockdev;
-static char sdhc_testbuf[512 * 2] = { 0 };
+static char sdhc_testbuf[512 * 32] = { 0 };
 static struct sdhc sdhc;
 struct block_device bdev_sdcard;
 struct block_device *bdev_partition;
@@ -128,7 +128,7 @@ static int sdhc_test_io(struct sdhc *s, bool skip_it)
     if (skip_it && test_modes[i].mode == SDHC_IO_MODE_IT_DMA)
       continue;
 
-    err = sdhc_set_io_mode(s, test_modes[i].mode);
+    err = sdhc_set_io_mode(s, test_modes[i].mode, true);
     if (err != SUCCESS) {
       os_log("Failed to set sdhc io mode %s\r\n", test_modes[i].name);
       return err;
@@ -204,6 +204,11 @@ struct event test_ev;
 
 char *readbuf;
 
+extern uint64_t sdhost_ts_cmd_start;
+extern uint64_t sdhost_ts_cmd_end;
+extern uint64_t sdhost_ts_data_end;
+extern uint64_t sdhost_ts_cmd_finished;
+
 static void app_main(void)
 {
   int err;
@@ -217,11 +222,13 @@ static void app_main(void)
   os_log("SDHC intialized\r\n");
   blockdev_scheduler_init();
 
+#if 0
   err = sdhc_test_io(&sdhc, false);
   if (err != SUCCESS)
     goto out;
+#endif
 
-  err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA);
+  err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA, false);
   if (err != SUCCESS) {
     os_log("Failed to set sdhc io mode IT_DMA\r\n");
     goto out;
@@ -234,6 +241,31 @@ static void app_main(void)
   }
 
   os_wait_ms(100);
+
+  memset(sdhc_testbuf, 0x33, sizeof(sdhc_testbuf));
+  dcache_invalidate(sdhc_testbuf, sizeof(sdhc_testbuf));
+
+  for (int i = 0; i < 4000; ++i) {
+    os_wait_ms(2);
+
+    uint64_t ts1 = arm_timer_get_count();
+    err = bdev_partition->ops.write(bdev_partition, sdhc_testbuf, i * 32, 32);
+    if (err) {
+      os_log("failed to write to SD partition\r\n");
+      while(1)
+        asm volatile("wfe");
+    }
+    uint64_t ts2 = arm_timer_get_count();
+    printf("wr#%d: %d %d %d %d\r\n", i,
+      (uint32_t)(ts2 - ts1),
+      (uint32_t)(sdhost_ts_cmd_end - sdhost_ts_cmd_start),
+      (uint32_t)(sdhost_ts_data_end - sdhost_ts_cmd_end),
+      (uint32_t)(sdhost_ts_cmd_finished - sdhost_ts_data_end)
+    );
+  }
+  while(1) {
+    asm volatile ("wfi");
+  }
 
   err = ili9341_init();
   if (err != SUCCESS) {
