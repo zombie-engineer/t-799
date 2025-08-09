@@ -77,6 +77,18 @@ void os_event_notify(struct event *ev)
   OSAPI_PUTS("[os_event_notify end]\r\n");
 }
 
+void os_event_notify_and_yield(struct event *ev)
+{
+  int irq;
+
+  OSAPI_PUTS("[os_event_notify]\r\n");
+  disable_irq_save_flags(irq);
+  sched_event_notify(ev);
+  os_yield();
+  restore_irq_flags(irq);
+  OSAPI_PUTS("[os_event_notify end]\r\n");
+}
+
 
 void svc_handler(uint32_t imm)
 {

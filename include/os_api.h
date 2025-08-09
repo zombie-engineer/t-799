@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <event.h>
+#include <cpu.h>
 
 /*
  * os_wait_ms - put current task to sleep for a given number of milliseconds
@@ -27,5 +28,6 @@ void os_exit_task(struct task *t);
 void os_exit_current_task(void);
 
 void os_event_notify(struct event *ev);
+void os_event_notify_and_yield(struct event *ev);
 
 void svc_handler(uint32_t imm);
