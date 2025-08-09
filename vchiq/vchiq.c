@@ -652,10 +652,8 @@ static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
         goto buffer_return;
 
       err = ili9341_draw_dma_buf(b->user_handle);
-      if (err != SUCCESS) {
-       //  printf("dbuf skipped\r\n");
+      if (err == SUCCESS)
         buffer_processed = true;
-      }
     }
   }
 
@@ -669,10 +667,6 @@ static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
 buffer_return:
   while (!list_empty(&p->buffers_free)) {
     b = list_first_entry(&p->buffers_free, struct mmal_buffer, list);
-#if 0
-  MMAL_DEBUG("Submitting buffer %08x to port:%s",
-    (uint32_t)(uint64_t)b->vcsm_handle, p->name);
-#endif
     disable_irq_save_flags(irqflags);
     list_del(&b->list);
     list_add_tail(&b->list, &p->buffers_busy);
@@ -694,7 +688,7 @@ static void vchiq_io_thread(void)
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
     mmal_process_port_buffers(port_to_sdcard);
-    mmal_process_port_buffers(port_to_display);
+    // mmal_process_port_buffers(port_to_display);
   }
 }
 
@@ -1607,7 +1601,7 @@ static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
     &frame_count, sizeof(frame_count));
 }
 
-#define IO_MIN_SECTORS (8192)
+#define IO_MIN_SECTORS 8192
 #define H264BUF_SIZE (IO_MIN_SECTORS * 512)
 
 struct camera {
@@ -1666,14 +1660,6 @@ static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
   while (bytes_left) {
     buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
     io_sz = MIN(bytes_left, buffer_left);
-
-#if 0
-  putc('+');
-    MMAL_INFO("%d +%d bytes %08x %08x", cam.current_buf_ptr - cam.current_buf,
-      io_sz, ((uint32_t *)b->buffer)[0],
-      ((uint32_t *)b->buffer)[1]);
-#endif
-
     memcpy(cam.current_buf_ptr, src, io_sz);
     cam.current_buf_ptr += io_sz;
     bytes_left -= io_sz;
@@ -1796,9 +1782,19 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   b->flags = r->buffer_header.flags;
   list_add_tail(&b->list, &p->buffers_pending);
   p->nr_busy--;
+//  p->nr_busy++;
+//  list_del(&b->list);
+//  list_add_tail(&b->list, &p->buffers_busy);
   restore_irq_flags(irqflags);
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
+//  err = mmal_port_buffer_send_one(p, b);
+  uint32_t freq = 19200000;
+  uint64_t ts = arm_timer_get_count();
+  float d = (float)ts / freq;
+  os_log("%ld %ld %ld %08x\r\n", ts, r->buffer_header.pts,
+    r->buffer_header.length, r->buffer_header.flags);
+
   // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
   os_event_notify(&mmal_io_work_waitflag);
@@ -2762,7 +2758,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_component *encoder;
   struct mmal_parameter_video_profile video_profile;
   struct encoder_h264_params p = {
-    .quantization = 0
+    .quantization = 20
   };
  
   encoder = component_create(mmal_service, "ril.video_encode");
@@ -2816,14 +2812,17 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
       MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT, &uint32_arg,
       sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
+    printf("Set quantization to %d\r\n", uint32_arg);
 
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
       MMAL_PARAMETER_VIDEO_ENCODE_MIN_QUANT, &uint32_arg, sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
+    printf("Set min quantization to %d\r\n", uint32_arg);
 
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
       MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT, &uint32_arg, sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT param");
+    printf("Set max quantization to %d\r\n", uint32_arg);
   }
 
   video_profile.profile = MMAL_VIDEO_PROFILE_H264_HIGH;
@@ -3099,7 +3098,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 
-  err = create_camera_component(mmal_service, frame_width, frame_height, 24,
+  err = create_camera_component(mmal_service, frame_width, frame_height, 30,
     &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
   CHECK_ERR("Failed to create camera component");
 
@@ -3107,14 +3106,18 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
     &encoder_out, frame_width, frame_height);
   CHECK_ERR("Failed to create encoder component");
 
+#if 0
   err = create_resizer_component(mmal_service, &resizer_in, &resizer_out,
     frame_width, frame_height, 320, 240);
+#endif
 
   err = vchiq_mmal_port_connect(cam_video, encoder_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
 
+#if 0
   err = vchiq_mmal_port_connect(cam_preview, resizer_in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
+#endif
 
   err = mmal_port_set_zero_copy(encoder_out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
@@ -3125,6 +3128,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_zero_copy(cam_video);
   CHECK_ERR("Failed to set zero copy to video.OUT");
 
+#if 0
   err = mmal_port_set_zero_copy(cam_preview);
   CHECK_ERR("Failed to set zero copy to preview.OUT");
 
@@ -3140,6 +3144,8 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 
   port_to_display = resizer_out;
 
+#endif
+
   /* Enable encoder ports */
   err = vchiq_mmal_port_enable(encoder_out);
   CHECK_ERR("Failed to enable encoder.OUT");
@@ -3151,6 +3157,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = mmal_apply_buffers(mems_service, encoder_out, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
+#if 0
   /*
    * Preview frames will start coming indefinitely as soon as
    * - preview port is enabled
@@ -3165,6 +3172,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 
   err = mmal_apply_display_buffers(mems_service, resizer_out, display_buffers,
     ARRAY_SIZE(display_buffers));
+#endif
 
   CHECK_ERR("Failed to add display buffers");
 

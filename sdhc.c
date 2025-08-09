@@ -498,12 +498,13 @@ static int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void))
   return SUCCESS;
 }
 
-static inline int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
+static OPTIMIZED int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
   size_t start_block_idx, size_t num_blocks)
 {
   int err = ERR_INVAL;
   sd_card_state_t card_state;
 
+#if 0
 wait:
   err = sdhc_get_card_state(s);
   if (err < 0)
@@ -519,6 +520,7 @@ wait:
   err = sdhc_dump_card_state(s, "before op", LOG_LEVEL_DEBUG2);
   if (err)
     return err;
+#endif
 
   sdhc_current = s;
   /*
@@ -551,11 +553,13 @@ wait:
     // SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
   }
 
+#if 0
   if (err == SUCCESS) {
     err = sdhc_dump_card_state(s, "after op", LOG_LEVEL_DEBUG2);
     if (err)
       return err;
   }
+#endif
 
   if (err)
     SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
@@ -583,7 +587,7 @@ int sdhc_blockdev_read(struct block_device *blockdev, uint8_t *buf,
   return sdhc_op(s, SDHC_OP_READ, buf, start_block_idx, num_blocks);
 }
 
-int sdhc_blockdev_write(struct block_device *blockdev, const uint8_t *buf,
+int OPTIMIZED sdhc_blockdev_write(struct block_device *blockdev, const uint8_t *buf,
   uint64_t start_block_idx, uint32_t num_blocks)
 {
   struct sdhc *s = blockdev->priv;
@@ -651,8 +655,7 @@ int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   return SUCCESS;
 }
 
-int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
-  bool invalidate_before_write)
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode, bool invalidate_before_write)
 {
   int err;
   err = sdhc->ops->set_io_mode(sdhc, mode, invalidate_before_write);
