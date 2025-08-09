@@ -277,26 +277,6 @@ static inline void bcm_sdhost_wait_bytes_in_fifo(int i, bool dump)
   }
 }
 
-static inline int bcm_sdhost_read_data_4bit_bus(uint32_t *out, bool log_edm)
-{
-  uint32_t result = 0;
-  uint32_t edm;
-  int num_words;
-  /* Wait until EDM shows 4 words */
-  for (int i = 0; i < 4; ++i) {
-    edm = ioreg32_read(SDHOST_EDM);
-    num_words = (edm >> 4) & 0x1f;
-    if (num_words == 0)
-      return ERR_IO;
-
-    if (log_edm)
-      BCM_SDHOST_LOG_DBG("EDM:%08x, num_words:%d", edm, num_words);
-    result |= (ioreg32_read(SDHOST_DATA) & 0xff) << (i * 8);
-  }
-  *out = result;
-  return SUCCESS;
-}
-
 static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   const uint32_t *end)
 {
@@ -452,8 +432,11 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   }
 
   os_event_clear(&bcm_sdhost_event);
-  BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
-    ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
+
+  if (bcm_sdhost_log_level >= LOG_LEVEL_DEBUG2)
+    BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
+      ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
+
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
