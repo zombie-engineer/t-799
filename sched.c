@@ -5,9 +5,9 @@
 #include <common.h>
 #include <bcm2835/bcm2835_systimer.h>
 #include "armv8_cpuctx.h"
-#if 0
-#define SCHED_PRINTF(__fmt, ...) printf(__fmt, #__VA_ARGS__)
 #include <printf.h>
+#if 0
+#define SCHED_PRINTF(__fmt, ...) printf(__fmt, ##__VA_ARGS__)
 #else
 #define SCHED_PRINTF(__fmt, ...) ;
 #endif
