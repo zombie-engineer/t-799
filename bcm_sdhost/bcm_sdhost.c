@@ -828,7 +828,7 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
   return SUCCESS;
 }
 
-static void bcm_sdhost_notify_dma(struct sdhc *s)
+static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
   sdhost_ts_data_end = arm_timer_get_count();
   os_event_notify(&bcm_sdhost_dma_done_event);
@@ -844,5 +844,5 @@ struct sdhc_ops bcm_sdhost_ops = {
   .set_high_speed_clock = bcm_sdhost_set_high_speed_clock,
   .set_io_mode = bcm_sdhost_set_io_mode,
   .cmd = bcm_sdhost_cmd,
-  .notify_dma = bcm_sdhost_notify_dma
+  .notify_dma_isr = bcm_sdhost_notify_dma_isr
 };

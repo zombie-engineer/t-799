@@ -263,7 +263,7 @@ struct sdhc_ops {
   void (*set_high_speed_clock)(void);
   int (*set_io_mode)(struct sdhc *s, sdhc_io_mode_t mode,
     bool invalidate_before_write);
-  void (*notify_dma)(struct sdhc *s);
+  void (*notify_dma_isr)(struct sdhc *s);
   int (*cmd)(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec);
 };
 
