@@ -107,3 +107,17 @@ static inline uint64_t get_boottime_msec(void)
     :"memory");
   return (cnt * 1000) / freq;
 }
+
+static inline uint64_t arm_timer_get_count(void) {
+  uint64_t val;
+  __asm__ volatile("mrs %0, cntvct_el0" : "=r" (val));
+  return val;
+}
+
+static inline uint32_t arm_timer_get_freq(void) {
+  uint32_t freq;
+  __asm__ volatile("mrs %0, cntfrq_el0" : "=r" (freq));
+  // Hz
+  return freq;
+}
+
