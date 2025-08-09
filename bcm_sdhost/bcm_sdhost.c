@@ -375,7 +375,7 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
   /* Assign DMA control block to channel */
   bcm2835_dma_set_cb(s->io.dma_channel, s->io.dma_control_block_idx);
 
-  if (is_write)
+  if (is_write && s->invalidate_before_write)
     dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
 
   /*
@@ -723,7 +723,8 @@ static int bcm_sdhost_init(void)
   return SUCCESS;
 }
 
-static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode)
+static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
+  bool invalidate_before_write)
 {
   uint32_t hcfg = 0;
 

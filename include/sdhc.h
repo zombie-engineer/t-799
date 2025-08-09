@@ -261,7 +261,8 @@ struct sdhc_ops {
   void (*dump_fsm_state)(void);
   void (*set_bus_width4)(void);
   void (*set_high_speed_clock)(void);
-  int (*set_io_mode)(struct sdhc *s, sdhc_io_mode_t mode);
+  int (*set_io_mode)(struct sdhc *s, sdhc_io_mode_t mode,
+    bool invalidate_before_write);
   void (*notify_dma)(struct sdhc *s);
   int (*cmd)(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec);
 };
@@ -293,12 +294,13 @@ struct sdhc {
   sdhc_io_mode_t io_mode;
   uint32_t timeout_us;
   int block_size;
+  bool invalidate_before_write;
 };
 
 int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   struct sdhc_ops *ops);
 
-int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode);
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode, bool invalidate_before_write);
 
 int sdhc_read(struct sdhc *s, uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);

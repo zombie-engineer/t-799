@@ -651,15 +651,17 @@ int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   return SUCCESS;
 }
 
-int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode)
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
+  bool invalidate_before_write)
 {
   int err;
-  err = sdhc->ops->set_io_mode(sdhc, mode);
+  err = sdhc->ops->set_io_mode(sdhc, mode, invalidate_before_write);
   if (err != SUCCESS) {
     SDHC_LOG_ERR("Failed to set io_mode %d", mode);
     return err;
   }
 
   sdhc->io_mode = mode;
+  sdhc->invalidate_before_write = invalidate_before_write;
   return SUCCESS;
 }
