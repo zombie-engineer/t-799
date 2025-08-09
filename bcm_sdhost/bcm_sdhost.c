@@ -59,6 +59,15 @@
 #define SDHOST_CFG_BUSY_IRPT_EN  BIT(10)
 #define SDHOST_CFG_BLOCK_IRPT_EN BIT(8)
 #define SDHOST_CFG_SDIO_IRPT_EN  BIT(5)
+
+/*
+ * DATA interrupt is triggered in the following case:
+ * 1.SDHOST_CFG_DATA_IRPT_EN is enabled in SDHOST reg
+ * 2.CPU has written valid command in SDHOST_CMD with SDHOST_CMD_NEW_FLAG set
+ * 3.SDHOST controller has started processing CMD
+ * 4.SDHOST has completed transferring CMD and now switched to DATA phase
+ * 5.Interrupt is triggered upon clearing SDHOST_CMD_NEW_FLAG bit
+ */
 #define SDHOST_CFG_DATA_IRPT_EN  BIT(4)
 #define SDHOST_CFG_SLOW_CARD     BIT(3)
 #define SDHOST_CFG_WIDE_EXT_BUS  BIT(2)
@@ -122,7 +131,9 @@
   } while(0)
 
 static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
-static struct event bcm_sdhost_event;
+static struct event bcm_sdhost_cmd_done_event;
+static struct event bcm_sdhost_block_done_event;
+static struct event bcm_sdhost_dma_done_event;
 
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
@@ -189,15 +200,60 @@ static void bcm_sdhost_dump_regs(bool full)
 
 static void bcm_sdhost_irq(void)
 {
-  uint32_t hsts = ioreg32_read(SDHOST_HSTS);
-  if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
-    uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
+  uint32_t hsts;
+  uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
+
+  if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
+    hsts = ioreg32_read(SDHOST_HSTS);
+    if (hsts & SDHOST_HSTS_TRANSFER_ERROR_MASK) {
+      printf("bcm_sdhost transfer error: HSTS:%08x\r\n", hsts);
+      while(1) {
+        asm volatile("wfe");
+      }
+    }
+
+    hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
+    hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
+    ioreg32_write(SDHOST_HCFG, hcfg);
+    os_event_notify(&bcm_sdhost_cmd_done_event);
+    return;
+  }
+
+  if (hcfg & SDHOST_CFG_BLOCK_IRPT_EN) {
+    hsts = ioreg32_read(SDHOST_HSTS);
+    if (!(hsts & SDHOST_HSTS_BLOCK_IRPT)) {
+      printf("bcm_sdhost unexpected BLOCK interrupt: HSTS:%08x\r\n", hsts);
+      while(1) {
+        asm volatile("wfe");
+      }
+    }
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-    os_event_notify(&bcm_sdhost_event);
+    os_event_notify(&bcm_sdhost_block_done_event);
+    return;
   }
-  if (hsts & ~SDHOST_HSTS_BLOCK_IRPT) {
-    printf("Unexpected irq: HSTS: %08x\r\n", hsts);
+
+  if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
+    printf("bcm_sdhost unexpected BLOCK interrupt: HSTS:%08x\r\n", hsts);
+    while(1) {
+      asm volatile("wfe");
+    }
+  }
+
+  if (hsts & SDHOST_HSTS_BUSY_IRPT) {
+    printf("bcm_sdhost unexpected BUSY interrupt: HSTS:%08x\r\n", hsts);
+    while(1) {
+      asm volatile("wfe");
+    }
+  }
+
+  while(1) {
+    for (volatile uint32_t j = 0; j < 0xfffff; ++j) {
+      for (volatile uint32_t i = 0; i < 0x7fffffff; ++i) {
+        printf(".");
+        asm volatile("wfi");
+      }
+    }
   }
 }
 
@@ -406,12 +462,14 @@ static void bcm_sdhost_on_data_done(void)
     ioreg32_read(SDHOST_EDM));
 }
 
-static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
+static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
   int ret;
   uint32_t reg_cmd;
   uint32_t reg_hsts;
+  uint32_t hsts;
+  uint32_t hcfg;
   bool is_write;
   bool has_data;
 
@@ -431,7 +489,18 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
-  os_event_clear(&bcm_sdhost_event);
+  if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA && is_write) {
+    irq_disable();
+    hcfg = ioreg32_read(SDHOST_HCFG);
+    hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
+    hcfg |= SDHOST_CFG_DATA_IRPT_EN;
+    ioreg32_write(SDHOST_HCFG, hcfg);
+    irq_enable();
+  }
+
+  os_event_clear(&bcm_sdhost_block_done_event);
+  os_event_clear(&bcm_sdhost_cmd_done_event);
+  os_event_clear(&bcm_sdhost_dma_done_event);
 
   if (bcm_sdhost_log_level >= LOG_LEVEL_DEBUG2)
     BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
@@ -441,20 +510,28 @@ static int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA) {
-    os_event_wait(&bcm_sdhost_event);
     if (is_write) {
-      uint32_t hsts = ioreg32_read(SDHOST_HSTS);
-      if (hsts & SDHSTS_DATA_FLAG) {
-        uint32_t hcfg;
-        irq_disable();
-        os_event_clear(&bcm_sdhost_event);
-        hcfg = ioreg32_read(SDHOST_HCFG);
-        hcfg |= SDHOST_CFG_BUSY_IRPT_EN | SDHOST_CFG_BLOCK_IRPT_EN;
-        ioreg32_write(SDHOST_HCFG, hcfg);
-        irq_enable();
-        os_event_wait(&bcm_sdhost_event);
+      /*
+       * First cmd_done_event signals that command is transferred and ACKed
+       * Next dma_done_event and block_done_event signal that all data has
+       * been clocked into sdhost's fifo by DMA, last bytes are in the
+       * sdhost's fifo and in the process of transfer to SD card.
+       * Finally, we have to monitor HSTS data bit(0) and EDM FSM state is
+       * to go back to DATAMODE, with EDM FIFO showing 0, which would mean all
+       * data is on SD card's side.
+       */
+      os_event_wait(&bcm_sdhost_block_done_event);
+      if (ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG || (ioreg32_read(SDHOST_EDM) & 0xf) != 1) {
+        while(1) {
+          hsts = ioreg32_read(SDHOST_HSTS);
+          if (!(hsts & SDHSTS_DATA_FLAG) && (ioreg32_read(SDHOST_EDM) & 0xf) == 1)
+            break;
+          printf("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM), hsts);
+        }
+        printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM), hsts);
       }
     } else {
+      os_event_wait(&bcm_sdhost_dma_done_event);
       /* IS DMA READ */
       /* Read steps should be carefully arranged, because we will need to
        * invalidate cache + clear FSM in time + add 2 last 32bit words to the
@@ -551,7 +628,8 @@ static int bcm_sdhost_acmd(struct sdhc *s, struct sd_cmd *c,
   return ret;
 }
 
-int bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c, uint64_t timeout_usec)
+int OPTIMIZED bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c,
+  uint64_t timeout_usec)
 {
   int ret;
   uint32_t reg_cmd;
@@ -719,7 +797,9 @@ static int bcm_sdhost_init(void)
   irq_set(BCM2835_IRQNR_SDHOST, bcm_sdhost_irq);
   bcm2835_ic_disable_irq(BCM2835_IRQNR_SDHOST);
 
-  os_event_init(&bcm_sdhost_event);
+  os_event_init(&bcm_sdhost_cmd_done_event);
+  os_event_init(&bcm_sdhost_block_done_event);
+  os_event_init(&bcm_sdhost_dma_done_event);
   return SUCCESS;
 }
 
@@ -740,7 +820,7 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
 
 static void bcm_sdhost_notify_dma(struct sdhc *s)
 {
-  os_event_notify(&bcm_sdhost_event);
+  os_event_notify(&bcm_sdhost_dma_done_event);
 }
 
 struct sdhc_ops bcm_sdhost_ops = {
