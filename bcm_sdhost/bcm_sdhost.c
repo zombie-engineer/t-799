@@ -135,6 +135,11 @@ static struct event bcm_sdhost_cmd_done_event;
 static struct event bcm_sdhost_block_done_event;
 static struct event bcm_sdhost_dma_done_event;
 
+uint64_t sdhost_ts_cmd_start = 0;
+uint64_t sdhost_ts_cmd_end = 0;
+uint64_t sdhost_ts_data_end = 0;
+uint64_t sdhost_ts_cmd_finished = 0;
+
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
   BCM_SDHOST_STATE_CMD_INIT      = 0x1,
@@ -215,6 +220,7 @@ static void bcm_sdhost_irq(void)
     hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
     hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
+    sdhost_ts_cmd_end = arm_timer_get_count();
     os_event_notify(&bcm_sdhost_cmd_done_event);
     return;
   }
@@ -489,6 +495,8 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
+  sdhost_ts_cmd_start = arm_timer_get_count();
+
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA && is_write) {
     irq_disable();
     hcfg = ioreg32_read(SDHOST_HCFG);
@@ -530,6 +538,8 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
         }
         printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM), hsts);
       }
+
+      sdhost_ts_cmd_finished = arm_timer_get_count();
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
       /* IS DMA READ */
@@ -820,6 +830,7 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
 
 static void bcm_sdhost_notify_dma(struct sdhc *s)
 {
+  sdhost_ts_data_end = arm_timer_get_count();
   os_event_notify(&bcm_sdhost_dma_done_event);
 }
 
