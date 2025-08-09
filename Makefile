@@ -116,7 +116,7 @@ clean:
 help:
 	@echo j  - run OpenOCD to attach Raspberry PI via JTAG and wait for GDB connection
 	@echo dj - start GDB to debug Raspberry PI over JTAG
-	@echo e: - run QEMU and wait for GDB connection
+	@echo e - run QEMU and wait for GDB connection
 	@echo de - start GDB to debug Raspberry PI in QEMU
 	@echo db - Disassemble raw binary file
 	@echo dbe - Disassemble elf file
