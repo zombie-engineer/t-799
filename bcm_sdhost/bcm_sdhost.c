@@ -207,6 +207,7 @@ static void bcm_sdhost_irq(void)
 {
   uint32_t hsts;
   uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
+  bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
 
   if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
     hsts = ioreg32_read(SDHOST_HSTS);
@@ -221,7 +222,8 @@ static void bcm_sdhost_irq(void)
     hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
     sdhost_ts_cmd_end = arm_timer_get_count();
-    os_event_notify(&bcm_sdhost_cmd_done_event);
+    if (!is_write)
+      os_event_notify(&bcm_sdhost_cmd_done_event);
     return;
   }
 
@@ -235,7 +237,10 @@ static void bcm_sdhost_irq(void)
     }
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-    os_event_notify(&bcm_sdhost_block_done_event);
+    if (is_write) {
+      sdhost_ts_data_end = arm_timer_get_count();
+      os_event_notify(&bcm_sdhost_block_done_event);
+    }
     return;
   }
 
@@ -468,6 +473,33 @@ static void bcm_sdhost_on_data_done(void)
     ioreg32_read(SDHOST_EDM));
 }
 
+static OPTIMIZED inline void bcm_sdhost_wait_last_op_complete(void)
+{
+  bool hsts_data_is_set;
+  int fsm_state;
+  bool done = false;
+  bool waited = false;
+
+repeat:
+
+  hsts_data_is_set = ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG;
+  if (!hsts_data_is_set) {
+    fsm_state = ioreg32_read(SDHOST_EDM) & SDHOST_EDM_FSM_MASK;
+    done = fsm_state == SDHOST_EDM_FSM_DATAMODE;
+  }
+
+  if (!done) {
+    printf("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
+      ioreg32_read(SDHOST_HSTS));
+    waited = true;
+    goto repeat;
+  }
+
+  if (waited)
+    printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
+      ioreg32_read(SDHOST_HSTS));
+}
+
 static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
@@ -529,17 +561,8 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
        * data is on SD card's side.
        */
       os_event_wait(&bcm_sdhost_block_done_event);
-      if (ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG || (ioreg32_read(SDHOST_EDM) & 0xf) != 1) {
-        while(1) {
-          hsts = ioreg32_read(SDHOST_HSTS);
-          if (!(hsts & SDHSTS_DATA_FLAG) && (ioreg32_read(SDHOST_EDM) & 0xf) == 1)
-            break;
-          printf("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM), hsts);
-        }
-        printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM), hsts);
-      }
-
       sdhost_ts_cmd_finished = arm_timer_get_count();
+      bcm_sdhost_wait_last_op_complete();
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
       /* IS DMA READ */
@@ -830,8 +853,9 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
 
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
-  sdhost_ts_data_end = arm_timer_get_count();
-  os_event_notify(&bcm_sdhost_dma_done_event);
+  bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
+  if (!is_write)
+    os_event_notify(&bcm_sdhost_dma_done_event);
 }
 
 struct sdhc_ops bcm_sdhost_ops = {

@@ -57,7 +57,7 @@ static inline const char *sdhc_op_to_str(sdhc_op_t op)
 
 static void sdhc_dma_irq(void)
 {
-  sdhc_current->ops->notify_dma(sdhc_current);
+  sdhc_current->ops->notify_dma_isr(sdhc_current);
 }
 
 /*
