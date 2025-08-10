@@ -18,6 +18,7 @@
 #include "memory_map.h"
 #include <os_api.h>
 #include <sched.h>
+// #include <sched_mon.h>
 #include <irq.h>
 #include <bcm2835/bcm2835_ic.h>
 
@@ -238,6 +239,7 @@ static void bcm_sdhost_irq(void)
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
     if (is_write) {
+      // sched_mon_start();
       sdhost_ts_data_end = arm_timer_get_count();
       os_event_notify(&bcm_sdhost_block_done_event);
     }
@@ -562,6 +564,7 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
        */
       os_event_wait(&bcm_sdhost_block_done_event);
       sdhost_ts_cmd_finished = arm_timer_get_count();
+      // sched_mon_stop("waitdone", sdhost_ts_data_end, sdhost_ts_cmd_finished);
       bcm_sdhost_wait_last_op_complete();
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
