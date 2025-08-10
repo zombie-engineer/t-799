@@ -13,6 +13,7 @@ typedef enum {
 
 static int sdhc_log_level;
 static struct sdhc *sdhc_current;
+extern struct sdhc_cmd_stat bcm_sdhost_cmd_stats;
 
 #define __SDHC_LOG(__level, __fmt, ...) \
   LOG(sdhc_log_level, __level, "sdhc", __fmt, ##__VA_ARGS__)
@@ -521,14 +522,16 @@ wait:
   if (err)
     return err;
 #endif
-
+  s->ops->wait_prev_done(s);
   sdhc_current = s;
   /*
    * CMD18 READ_MULTIPLE_BLOCKS or CMD25 WRITE_MULTIPLE_BLOCKS must follow
    * CMD23 SET_BLOCK_COUNT in strict sequence, other CMDs not allowed inside
    */
   if (num_blocks > 1) {
+    bcm_sdhost_cmd_stats.multiblock_start_time = arm_timer_get_count();
     err = sdhc_cmd23(s, num_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
+    bcm_sdhost_cmd_stats.multiblock_end_time = arm_timer_get_count();
     SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
   }
 

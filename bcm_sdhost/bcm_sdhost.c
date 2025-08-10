@@ -131,16 +131,6 @@
     }\
   } while(0)
 
-static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
-static struct event bcm_sdhost_cmd_done_event;
-static struct event bcm_sdhost_block_done_event;
-static struct event bcm_sdhost_dma_done_event;
-
-uint64_t sdhost_ts_cmd_start = 0;
-uint64_t sdhost_ts_cmd_end = 0;
-uint64_t sdhost_ts_data_end = 0;
-uint64_t sdhost_ts_cmd_finished = 0;
-
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
   BCM_SDHOST_STATE_CMD_INIT      = 0x1,
@@ -160,6 +150,14 @@ typedef enum {
   BCM_SDHOST_STATE_AUTO_RESPONSE = 0xf,
   BCM_SDHOST_STATE_UNKNOWN       = 0x10 
 } bcm_sdhost_state_t;
+
+static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
+static int bcm_sdhost_should_wait_last_io = false;
+struct sdhc_cmd_stat bcm_sdhost_cmd_stats = { 0 };
+
+static struct event bcm_sdhost_cmd_done_event;
+static struct event bcm_sdhost_block_done_event;
+static struct event bcm_sdhost_dma_done_event;
 
 const char* bcm_sdhost_edm_state_to_string(uint32_t edm)
 {
@@ -222,7 +220,7 @@ static void bcm_sdhost_irq(void)
     hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
     hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-    sdhost_ts_cmd_end = arm_timer_get_count();
+    bcm_sdhost_cmd_stats.cmd_end_time = arm_timer_get_count();
     if (!is_write)
       os_event_notify(&bcm_sdhost_cmd_done_event);
     return;
@@ -240,7 +238,7 @@ static void bcm_sdhost_irq(void)
     ioreg32_write(SDHOST_HCFG, hcfg);
     if (is_write) {
       // sched_mon_start();
-      sdhost_ts_data_end = arm_timer_get_count();
+      bcm_sdhost_cmd_stats.data_end_irq_time = arm_timer_get_count();
       os_event_notify(&bcm_sdhost_block_done_event);
     }
     return;
@@ -475,15 +473,17 @@ static void bcm_sdhost_on_data_done(void)
     ioreg32_read(SDHOST_EDM));
 }
 
+#define BCM_SDHOST_LOG_WAITERS 0
 static OPTIMIZED inline void bcm_sdhost_wait_last_op_complete(void)
 {
   bool hsts_data_is_set;
   int fsm_state;
   bool done = false;
+#if BCM_SDHOST_LOG_WAITERS
   bool waited = false;
+#endif
 
 repeat:
-
   hsts_data_is_set = ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG;
   if (!hsts_data_is_set) {
     fsm_state = ioreg32_read(SDHOST_EDM) & SDHOST_EDM_FSM_MASK;
@@ -491,15 +491,19 @@ repeat:
   }
 
   if (!done) {
-    printf("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
+#if BCM_SDHOST_LOG_WAITERS
+    BCM_SDHOST_LOG_DBG2("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
       ioreg32_read(SDHOST_HSTS));
     waited = true;
+#endif
     goto repeat;
   }
 
+#if BCM_SDHOST_LOG_WAITERS
   if (waited)
     printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
       ioreg32_read(SDHOST_HSTS));
+#endif
 }
 
 static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
@@ -529,8 +533,7 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
-  sdhost_ts_cmd_start = arm_timer_get_count();
-
+  bcm_sdhost_cmd_stats.cmd_start_time = arm_timer_get_count();
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA && is_write) {
     irq_disable();
     hcfg = ioreg32_read(SDHOST_HCFG);
@@ -563,9 +566,9 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
        * data is on SD card's side.
        */
       os_event_wait(&bcm_sdhost_block_done_event);
-      sdhost_ts_cmd_finished = arm_timer_get_count();
+
       // sched_mon_stop("waitdone", sdhost_ts_data_end, sdhost_ts_cmd_finished);
-      bcm_sdhost_wait_last_op_complete();
+      bcm_sdhost_should_wait_last_io = true;
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
       /* IS DMA READ */
@@ -701,6 +704,7 @@ int OPTIMIZED bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c,
     is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, ret,
     c->resp0, c->resp1, c->resp2, c->resp3);
 
+  bcm_sdhost_cmd_stats.data_end_time = arm_timer_get_count();
   return ret;
 }
 
@@ -854,6 +858,16 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
   return SUCCESS;
 }
 
+static void bcm_sdhost_wait_prev_done(struct sdhc *s)
+{
+  bcm_sdhost_cmd_stats.wait_rdy_time = arm_timer_get_count();
+  if (!bcm_sdhost_should_wait_last_io)
+    return;
+
+  bcm_sdhost_wait_last_op_complete();
+  bcm_sdhost_should_wait_last_io = false;
+}
+
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
@@ -871,5 +885,6 @@ struct sdhc_ops bcm_sdhost_ops = {
   .set_high_speed_clock = bcm_sdhost_set_high_speed_clock,
   .set_io_mode = bcm_sdhost_set_io_mode,
   .cmd = bcm_sdhost_cmd,
-  .notify_dma_isr = bcm_sdhost_notify_dma_isr
+  .notify_dma_isr = bcm_sdhost_notify_dma_isr,
+  .wait_prev_done = bcm_sdhost_wait_prev_done
 };
