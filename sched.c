@@ -6,6 +6,7 @@
 #include <bcm2835/bcm2835_systimer.h>
 #include "armv8_cpuctx.h"
 #include <printf.h>
+#include <sched_mon.h>
 #if 0
 #define SCHED_PRINTF(__fmt, ...) printf(__fmt, ##__VA_ARGS__)
 #else
@@ -169,6 +170,9 @@ static void __schedule(void)
   sched.needs_resched = true;
   scheduler_drop_current();
   scheduler_select_next();
+
+  sched_mon_schedule(sched.current->task_id);
+
   SCHED_PRINTF("__schedule end, new task:%s\r\n", sched.current->name);
 }
 

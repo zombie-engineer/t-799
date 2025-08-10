@@ -53,6 +53,7 @@ OBJS := \
   printf \
   sdhc \
   sched \
+  sched_mon \
   semaphore \
   sprintf \
   start \
@@ -74,7 +75,7 @@ kernel8.elf: $(OBJS) link.ld
 	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map -print-memory-usage
 
 %.o: %.S
-	$(CC) -g -c $? -o $@
+	$(CC) -Iinclude -g -c $? -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $? -o $@
