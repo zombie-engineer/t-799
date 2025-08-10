@@ -9,11 +9,6 @@ armv8_handle_exception_sync:
   add sp, sp, #16
   ret
 
-.globl armv8_handle_exception_irq
-armv8_handle_exception_irq:
-bl __handle_irq
-ret
-
 .globl armv8_handle_exception_fiq
 armv8_handle_exception_fiq:
 bl fiq_handler
