@@ -185,6 +185,7 @@ task_pstate .req x3
 .unreq task_pc
   str   task_pstate, [ctx_ptr]
 .unreq task_pstate
+.unreq ctx_ptr
   /*
    * Context completely stored, pass execution to instruciton address, written
    * by a caller to sp
