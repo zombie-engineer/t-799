@@ -249,6 +249,7 @@ tmp_3_reg .req x6
   bl   __handle_irq
   b    1b
 1:
+  bl   __sched_try_reschedule
   b     __armv8_cpuctx_restore
 .unreq base_reg
 .endm

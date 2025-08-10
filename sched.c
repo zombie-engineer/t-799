@@ -34,6 +34,7 @@ struct scheduler {
   int timer_interval_ms;
   struct task *idle_task;
   uint64_t ticks;
+  bool needs_resched;
 };
 
 static struct scheduler sched;
@@ -165,15 +166,24 @@ done:
 static void __schedule(void)
 {
   SCHED_PRINTF("__schedule, task:%s\r\n", sched.current->name);
+  sched.needs_resched = true;
   scheduler_drop_current();
   scheduler_select_next();
   SCHED_PRINTF("__schedule end, new task:%s\r\n", sched.current->name);
 }
 
+void __sched_try_reschedule(void)
+{
+  if (!sched.needs_resched)
+    return;
+
+  __schedule();
+}
+
 static void sched_timer_irq_cb(void *arg)
 {
   sched.ticks++;
-  __schedule();
+  sched.needs_resched = true;
   bcm2835_systimer_start_oneshot(
     MS_TO_US(SCHED_MS_PER_TICK),
     sched_timer_irq_cb, NULL);
@@ -234,6 +244,7 @@ void sched_event_wait_isr(struct event *ev)
 void sched_event_notify(struct event *ev)
 {
   int irqflags;
+  bool needs_resched = false;
   struct list_head *node;
   struct list_head *tmp;
 
@@ -245,13 +256,16 @@ void sched_event_notify(struct event *ev)
 
   list_for_each_safe(node, tmp, &sched.blocked_on_event) {
     t = container_of(node, struct task, scheduler_list);
-    if (t->wait_event == ev)
+    if (t->wait_event == ev) {
       list_move(node, &tmp_head);
+      needs_resched = true;
+    }
   }
 
   list_for_each_safe(node, tmp, &tmp_head)
     list_move(node, &sched.blocked_on_event);
 
+  sched.needs_resched = needs_resched;
   restore_irq_flags(irqflags);
 }
 
