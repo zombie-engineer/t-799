@@ -1,8 +1,10 @@
 #include <task.h>
 #include <common.h>
 #include <string.h>
+#include <logger.h>
 
 static uint32_t tasks_busymask = 0;
+static int task_id_generator = 0;
 
 #define NUM_STACK_WORDS 512
 struct stack {
@@ -144,9 +146,11 @@ struct task *task_create(task_fn fn, const char *task_name)
   t->stack = s;
   t->scheduler_request = 0;
   t->cpuctx = ctx;
+  t->task_id = task_id_generator++;
   task_init_cpuctx(t, fn, stack_base);
   memset(t->name, 0, sizeof(t->name));
   strncpy(t->name, task_name, sizeof(t->name));
+  os_log("new task: %s, task_id:%d\r\n", t->name, t->task_id);
   return t;
 }
 
