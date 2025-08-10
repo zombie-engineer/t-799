@@ -37,7 +37,7 @@ void blockdev_scheduler_push_io(struct blockdev_io *io)
 
   blockdev_sched.nr_requests++;
   irq_enable();
-  os_event_notify(&blockdev_sched.req_event);
+  os_event_notify_and_yield(&blockdev_sched.req_event);
 }
 
 struct block_device *partition_dev = NULL;
@@ -135,7 +135,7 @@ void blockdev_scheduler_fn(void)
     blockdev_sched.nr_done++;
     irq_enable();
     // printf("IO %d done\r\n", next_req);
-    os_event_notify(&blockdev_sched.done_event);
+    os_event_notify_and_yield(&blockdev_sched.done_event);
     next_req++;
   }
 }

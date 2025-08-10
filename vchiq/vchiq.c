@@ -1782,22 +1782,16 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   b->flags = r->buffer_header.flags;
   list_add_tail(&b->list, &p->buffers_pending);
   p->nr_busy--;
-//  p->nr_busy++;
-//  list_del(&b->list);
-//  list_add_tail(&b->list, &p->buffers_busy);
   restore_irq_flags(irqflags);
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
-//  err = mmal_port_buffer_send_one(p, b);
-  uint32_t freq = 19200000;
   uint64_t ts = arm_timer_get_count();
-  float d = (float)ts / freq;
   os_log("%ld %ld %ld %08x\r\n", ts, r->buffer_header.pts,
     r->buffer_header.length, r->buffer_header.flags);
 
   // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
-  os_event_notify(&mmal_io_work_waitflag);
+  os_event_notify_and_yield(&mmal_io_work_waitflag);
 
 out_err:
   return err;
@@ -2758,7 +2752,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_component *encoder;
   struct mmal_parameter_video_profile video_profile;
   struct encoder_h264_params p = {
-    .quantization = 20
+    .quantization = 25
   };
  
   encoder = component_create(mmal_service, "ril.video_encode");
