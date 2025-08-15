@@ -1,3 +1,45 @@
+Building SD card
+Clone his repo:
+https://github.com/raspberrypi/firmware.git
+At least this commit worked 5c83250276c4fa9d79a93ebc5a739a5ab6a4d6a7
+In the repo go to boot dir and copy these files
+- start_x.elf
+- fixup_x.dat
+- bootcode.bin
+All files that should be present:
+bootcode.bin - from repo above - this is VideoCore's bootloader
+fixup_x.dat  - from repo above - fixups? with save suffix as main firmware start_x.elf
+start_x.elf  - from repo above - main VideoCore's firmware , 'x' means support camera stuff
+kernel8.img  - binary that we are building here, (here it is named kernel8.bin and should be renamed to kernel8.img)
+cmdline.txt  - firmware, that starts kernel on arm will put contents of this file as kernel arguments
+config.txt   - config contents, very important, will be listed below
+UART         - just an empty file, bootcode.bin checks for its presence to turn on debug logs
+
+
+config.txt contents:
+start_x=1
+enable_uart=1
+uart_2ndstage=1
+arm_64bit=1
+enable_jtag_gpio=1
+dtoverlay=pi3-disable-bt
+dtoverlay=sdhost
+dtparam=sdhci=off
+init_uart_baud=115200
+
+Context of MBR that worked:
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0x99873050
+
+Device     Boot   Start      End  Sectors  Size Id Type
+/dev/sda1          8192  1056767  1048576  512M  c W95 FAT32 (LBA)
+/dev/sda2       1056768 15564799 14508032  6,9G 83 Linux
+
+
+
 [JTAG support]
 This section describes steps to take to be able to debug binary execution
 on Raspberry PI 3B+. Below is a list of general steps to make it work:
