@@ -7,6 +7,12 @@
 #include <printf.h>
 #include "armv8_cpuctx.h"
 
+extern char __bss_start;
+extern char __bss_end;
+extern char __text_start;
+extern char __text_end;
+extern char __stacks_start;
+extern char __stacks_end;
 #define EXCEPTION_VECTOR __attribute__((section(".exception_vector")))
 
 /*
@@ -125,12 +131,30 @@ SYNC_HANDLER(granule_protect)
 {
 }
 
+#define ADDR_IN_SECTION(__addr, __section) \
+  ((__addr) >= ((void *)&__ ## __section ## _start) && \
+  (__addr) < ((void *)&__ ## __section ## _end))
+static const char *addr_to_section_name(uint64_t addr)
+{
+  void *p = (void *)addr;
+  if (ADDR_IN_SECTION(p, bss))
+    return ".bss";
+  if (ADDR_IN_SECTION(p, text))
+    return ".text";
+  if (ADDR_IN_SECTION(p, stacks))
+    return ".stacks";
+  return NULL;
+}
+
 static inline void dump_exception_context(bool dump_far, const char *exception)
 {
   uint64_t pc;
   uint64_t sp;
   uint64_t far;
+  uint64_t value;
   size_t i;
+  const char *section_name;
+  char mem_desc[64];
 
   struct task *t = sched_get_current_task();
   const struct armv8_cpuctx *c;
@@ -147,22 +171,38 @@ static inline void dump_exception_context(bool dump_far, const char *exception)
     exception, t->name, pc, sp);
   if (dump_far) {
     aarch64_get_far_el1(far);
-    printf("far_el1: %016x\r\n", far);
+    printf("far_el1: %016lx\r\n", far);
   }
 
   printf("Registers: \r\n");
   for (i = 0; i < ARRAY_SIZE(c->gpregs); ++i) {
-    printf("x%d: %016x ", i, c->gpregs[i]);
+    value = c->gpregs[i];
+    section_name = addr_to_section_name(value);
+    if (section_name)
+      snprintf(mem_desc, sizeof(mem_desc), ", '%s'", section_name);
+    else
+      mem_desc[0] = 0;
+    printf("x%d: %016lx%s\r\n", i, value, mem_desc);
+#if 0
     if (((i + 1) % 3) == 0)
       printf("\r\n");
+#endif
   }
 
-  if ((i + 1)  % 3)
+  if ((i + 1) % 3)
     printf("\r\n");
 
   printf("Stack: \r\n");
-  for (i = 0; i < 32; ++i)
-    printf("  %016x: %016x\r\n", sp + i * 8, ((const uint64_t *)sp)[i]);
+  for (i = 0; i < 32; ++i) {
+    value = ((const uint64_t *)sp)[i];
+    section_name = addr_to_section_name(value);
+    if (section_name)
+      snprintf(mem_desc, sizeof(mem_desc), ", '%s'", section_name);
+    else
+      mem_desc[0] = 0;
+
+    printf("  %016lx: %016lx%s\r\n", sp + i * 8, value, mem_desc);
+  }
 }
 
 SYNC_HANDLER(inst_abrt_lo_el)

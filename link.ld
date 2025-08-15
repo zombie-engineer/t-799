@@ -78,8 +78,10 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   PHY_ADDR += SIZEOF(.rodata_nommu);
 
   .text KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
+    __text_start = .;
     start.o(.start_el1_mmu)
     *.o(.text)
+    __text_end = .;
     dma_memory.o(.text)
   }
 
@@ -108,7 +110,9 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   PHY_ADDR = ALIGN(PHY_ADDR, 0x10);
 
   .stacks KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
+    __stacks_start = .;
     *.o(.stacks)
+    __stacks_end = .;
   }
 
   PHY_ADDR += SIZEOF(.stacks);
