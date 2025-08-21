@@ -52,6 +52,7 @@ OBJS := \
   partition_table \
   printf \
   sdhc \
+  sdhc_test \
   sched \
   sched_mon \
   semaphore \
