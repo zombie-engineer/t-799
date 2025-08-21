@@ -131,6 +131,15 @@
     }\
   } while(0)
 
+#undef BCM_SDHOST_DEBUG_LOG_IRQ
+
+#if defined BCM_SDHOST_DEBUG_LOG_IRQ
+#define BCM_SDHOST_LOG_IRQ(__fmt, ...)\
+  BCM_SDHOST_LOG_INF("[IRQ]" __fmt, ## __VA_ARGS__);
+#else
+#define BCM_SDHOST_LOG_IRQ(__fmt, ...)
+#endif
+
 typedef enum {
   BCM_SDHOST_STATE_IDLE          = 0x0,
   BCM_SDHOST_STATE_CMD_INIT      = 0x1,
@@ -202,16 +211,30 @@ static void bcm_sdhost_dump_regs(bool full)
   BCM_SDHOST_LOG_INFO("resp3:0x%08x", ioreg32_read(SDHOST_RESP3));
 }
 
+int dma_channel;
+static int num_dmas = 0;
+
 static void bcm_sdhost_irq(void)
 {
   uint32_t hsts;
   uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
 
+#if defined(BCM_SDHOST_DEBUG_LOG_IRQ)
+  BCM_SDHOST_LOG_IRQ("hcfg:%08x, hsts:%08x, edm:%08x, cmd:%08x,w:%d",
+    ioreg32_read(SDHOST_HCFG),
+    ioreg32_read(SDHOST_HSTS),
+    ioreg32_read(SDHOST_EDM),
+    ioreg32_read(SDHOST_CMD),
+    is_write
+  );
+#endif
+
   if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
     hsts = ioreg32_read(SDHOST_HSTS);
     if (hsts & SDHOST_HSTS_TRANSFER_ERROR_MASK) {
       printf("bcm_sdhost transfer error: HSTS:%08x\r\n", hsts);
+      bcm2835_dma_dump_channel_regs("transfer err", dma_channel);
       while(1) {
         asm volatile("wfe");
       }
@@ -236,9 +259,12 @@ static void bcm_sdhost_irq(void)
     }
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
+    ioreg32_write(SDHOST_HSTS, SDHOST_HSTS_BLOCK_IRPT);
+
     if (is_write) {
       // sched_mon_start();
       bcm_sdhost_cmd_stats.data_end_irq_time = arm_timer_get_count();
+      BCM_SDHOST_LOG_IRQ("block_done");
       os_event_notify(&bcm_sdhost_block_done_event);
     }
     return;
@@ -426,24 +452,90 @@ static int bcm_sdhost_data_blocking(struct sdhc *s, struct sd_cmd *c,
   return bcm_sdhost_data_read_sw(s, ptr, end);
 }
 
+static void bcm_sdhost_setup_dma_chain(struct sdhc *s, struct sd_cmd *c)
+{
+  struct bcm2835_dma_request_param r = { 0 };
+  uint32_t data_reg = PERIPH_ADDR_TO_DMA(SDHOST_DATA);
+  int i = 0;
+  uint32_t total_io_size = 0;
+  struct write_stream_buf *b;
+
+  int dma_cb_idx_prev = -1;
+  int cb0;
+
+  list_for_each_entry(b, &s->write_stream_pending, list) {
+    b->dma_cb = bcm2835_dma_reserve_cb();
+    if (b->dma_cb == -1) {
+      printf("out of DMA control blocks\r\n");
+      while(1)
+        asm volatile ("wfe");
+    }
+
+    if (i == 0)
+      cb0 = b->dma_cb;
+    i++;
+
+    r.dreq      = DMA_DREQ_SD_HOST;
+    r.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+    r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    r.dst       = data_reg;
+    r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    r.src       = RAM_PHY_TO_BUS_UNCACHED(b->paddr + b->io_offset);
+    r.len       = b->io_size;
+    total_io_size += b->io_size;
+
+#if 0
+    printf("bcm_sdhost_setup_dma_chain cb:%d,off:%d,len:%d,max:%d\r\n",
+      b->dma_cb,
+      b->io_offset,
+      b->io_size,
+      b->size,
+      total_io_size);
+#endif
+
+    r.enable_irq = false;
+    bcm2835_dma_program_cb(&r, b->dma_cb);
+    if (dma_cb_idx_prev != -1)
+      bcm2835_dma_link_cbs(dma_cb_idx_prev, b->dma_cb);
+    dma_cb_idx_prev = b->dma_cb;
+    b->io_offset += b->io_size;
+  }
+
+  if (total_io_size % 512) {
+    os_log("split to chunks is broken, io_size:%d\r\n", total_io_size);
+    while(1) {
+      asm volatile ("wfe");
+    }
+  }
+
+  bcm2835_dma_set_cb(s->io.dma_channel, cb0);
+}
+
 static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
   bool is_write)
 {
   s->io.c = c;
 
-  /* Setup DMA control block: destination, source, number of copies, etc. */
-  bcm_sdhost_setup_dma_transfer(
-    &s->io,
-    s->io.dma_control_block_idx,
-    s->io.c->databuf,
-    s->io.c->block_size,
-    s->io.c->num_blocks, is_write);
+  dma_channel = s->io.dma_channel;
 
-  /* Assign DMA control block to channel */
-  bcm2835_dma_set_cb(s->io.dma_channel, s->io.dma_control_block_idx);
+  if (is_write && s->dma_stream_mode) {
+    bcm_sdhost_setup_dma_chain(s, c);
+  }
+  else {
+    /* Setup DMA control block: destination, source, number of copies, etc. */
+    bcm_sdhost_setup_dma_transfer(
+      &s->io,
+      s->io.dma_control_block_idx,
+      s->io.c->databuf,
+      s->io.c->block_size,
+      s->io.c->num_blocks, is_write);
 
-  if (is_write && s->invalidate_before_write)
-    dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
+    /* Assign DMA control block to channel */
+    bcm2835_dma_set_cb(s->io.dma_channel, s->io.dma_control_block_idx);
+
+    if (is_write && s->invalidate_before_write)
+      dcache_invalidate(c->databuf, c->num_blocks * c->block_size);
+  }
 
   /*
    * Activates DMA channel, DMA will copy 4byte word each time sdhost asserts
@@ -540,6 +632,10 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     hcfg |= SDHOST_CFG_DATA_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
+#if 0
+    if (ioreg32_read(SDHOST_HSTS) & 0x200)
+      ioreg32_write(SDHOST_HSTS, 0x200);
+#endif
     irq_enable();
   }
 
@@ -551,6 +647,7 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
     BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
       ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
 
+  num_dmas = 0;
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
@@ -871,6 +968,7 @@ static void bcm_sdhost_wait_prev_done(struct sdhc *s)
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
+  num_dmas++;
   if (!is_write)
     os_event_notify(&bcm_sdhost_dma_done_event);
 }

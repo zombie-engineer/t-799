@@ -31,11 +31,11 @@ static int partition_block_erase(struct block_device *b,
 }
 
 int partition_emmc_write_stream_open(struct block_device *b,
-  struct block_dev_write_stream *s, size_t start_sector)
+  size_t start_sector)
 {
   struct partition *p = container_of(b, struct partition, bdev);
 
-  return p->blockdev->ops.write_stream_open(p->blockdev, s,
+  return p->blockdev->ops.write_stream_open(p->blockdev,
     p->start_sector + start_sector);
 }
 
@@ -47,6 +47,13 @@ int partition_emmc_write_stream_write(struct block_device *bd,
   return p->blockdev->ops.write_stream_write(p->blockdev, s, buf, bufsz);
 }
 
+int partition_emmc_write_stream_push(struct block_device *bd,
+    struct list_head *buflist)
+{
+  struct partition *p = container_of(bd, struct partition, bdev);
+  return p->blockdev->ops.write_stream_push(p->blockdev, buflist);
+}
+
 void partition_init(struct partition *p, struct block_device *b,
   size_t start_sector, size_t end_sector)
 {
@@ -56,6 +63,7 @@ void partition_init(struct partition *p, struct block_device *b,
   p->bdev.ops.block_erase = partition_block_erase;
   p->bdev.ops.write_stream_open = partition_emmc_write_stream_open;
   p->bdev.ops.write_stream_write = partition_emmc_write_stream_write;
+  p->bdev.ops.write_stream_push = partition_emmc_write_stream_push;
   p->blockdev = b;
   p->start_sector = start_sector;
   p->end_sector = end_sector;

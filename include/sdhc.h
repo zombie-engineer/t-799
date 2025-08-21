@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sdhc_io.h>
+#include <list.h>
 #include <block_device.h>
 
 typedef enum {
@@ -306,6 +307,13 @@ struct sdhc {
   uint32_t timeout_us;
   int block_size;
   bool invalidate_before_write;
+  bool dma_stream_mode;
+  int write_stream_num_pending_bufs;
+  uint32_t write_stream_pending_size;
+  struct list_head write_stream_pending;
+  struct list_head write_stream_release_list;
+  uint64_t write_stream_next_block_idx;
+  bool write_stream_opened;
 };
 
 int sdhc_init(struct block_device *blockdev, struct sdhc *s,

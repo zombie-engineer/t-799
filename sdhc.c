@@ -5,6 +5,7 @@
 #include <bitops.h>
 #include <os_api.h>
 #include <log.h>
+#include <list_fifo.h>
 
 typedef enum {
   SDHC_OP_READ = 0,
@@ -418,7 +419,6 @@ static void sdhc_parse_csd(struct sdhc *s, const uint8_t *csd)
   s->block_size = 1 << read_bl_len;
 }
 
-
 static int sdhc_to_data_transfer_mode(struct sdhc *s)
 {
   uint8_t sd_status[64];
@@ -604,10 +604,146 @@ int sdhc_blockdev_erase(struct block_device *blockdev,
   return ERR_NOTSUPP;
 }
 
+int sdhc_write_stream_open(struct block_device *blockdev,
+  uint64_t start_block_idx)
+{
+  struct sdhc *s = blockdev->priv;
+  s->write_stream_next_block_idx = start_block_idx;
+  s->write_stream_opened = true;
+  return SUCCESS;
+}
+
+static void sdhc_write_stream_release_after_wr(struct sdhc *s,
+  uint32_t num_blocks_written)
+{
+  struct write_stream_buf *b;
+  struct write_stream_buf *tmp;
+
+  list_for_each_entry_safe(b, tmp, &s->write_stream_pending, list) {
+    uint32_t remaining_size = b->size - b->io_offset;
+    bcm2835_dma_release_cb(b->dma_cb);
+    s->write_stream_pending_size -= b->io_size;
+    if (s->write_stream_num_pending_bufs == 1 && remaining_size) {
+      if (s->write_stream_pending_size) {
+        os_log("Value of write_stream_pending_size not as expected %d vs %d\r\n",
+          s->write_stream_pending_size, b->size - b->io_offset);
+        while(1)
+          asm volatile("wfe");
+      }
+      if (s->write_stream_num_pending_bufs != 1) {
+        os_log("Value of write_stream_num_pending_bufs not as expected 1 vs %d\r\n",
+          s->write_stream_num_pending_bufs);
+        while(1)
+          asm volatile("wfe");
+      }
+
+      b->io_size = remaining_size;
+      s->write_stream_pending_size = remaining_size;
+      break;
+    }
+
+    s->write_stream_num_pending_bufs--;
+
+    list_del(&b->list);
+    list_fifo_push_tail_locked(&s->write_stream_release_list, &b->list);
+  }
+}
+
+static int sdhc_write_stream_one(struct sdhc *s, struct write_stream_buf *b)
+{
+  int err;
+  uint32_t num_wr_blocks;
+  uint32_t new_pending_size;
+  uint32_t out_of_bound_size;
+  uint32_t buf_io_capacity;
+
+  s->dma_stream_mode = true;
+
+  if (s->block_size != 512) {
+    os_log("FAILED block size not 512\r\n");
+    while(1)
+      asm volatile ("wfe");
+  }
+
+  buf_io_capacity = b->size - b->io_offset;
+  new_pending_size = s->write_stream_pending_size + buf_io_capacity;
+  s->write_stream_num_pending_bufs++;
+  list_fifo_push_tail(&s->write_stream_pending, &b->list);
+
+  if (new_pending_size < s->block_size) {
+    b->io_size = buf_io_capacity;
+    s->write_stream_pending_size = new_pending_size;
+    err = SUCCESS;
+    goto out;
+  }
+
+  num_wr_blocks = new_pending_size / s->block_size;
+  s->write_stream_pending_size = num_wr_blocks * s->block_size;
+  out_of_bound_size = new_pending_size - s->write_stream_pending_size;
+  b->io_size = buf_io_capacity - out_of_bound_size;
+
+  s->ops->wait_prev_done(s);
+  sdhc_current = s;
+  err = sdhc_cmd23(s, num_wr_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed to SET_BLOCK_LEN for write stream to %d",
+    num_wr_blocks);
+
+  err = sdhc_cmd25(s, s->write_stream_next_block_idx, num_wr_blocks, NULL,
+    SDHC_TIMEOUT_DEFAULT_USEC);
+  SDHC_CHECK_ERR("Failed to WRITE MULTIPLE BLOCKS to write stream");
+  s->write_stream_next_block_idx += num_wr_blocks;
+  sdhc_write_stream_release_after_wr(s, num_wr_blocks);
+
+out:
+  return err;
+}
+
+int sdhc_write_stream_push(struct block_device *blockdev,
+  struct list_head *buflist)
+{
+  int err;
+  struct sdhc *s = blockdev->priv;
+  struct write_stream_buf *b;
+  struct write_stream_buf *tmp;
+  struct list_head *node;
+  struct list_head *tmp_node;
+
+  if (!s->write_stream_opened) {
+    SDHC_LOG_ERR("Attempted to write to non-existing stream");
+    return ERR_INVAL;
+  }
+
+  list_for_each_entry_safe(b, tmp, buflist, list) {
+    list_del_init(&b->list);
+    err = sdhc_write_stream_one(s, b);
+    SDHC_CHECK_ERR("Failed to push buffer to stream");
+  }
+
+  if (!list_empty(buflist)) {
+    SDHC_LOG_ERR("write stream logic error, buflist not empty");
+    while (1)
+      asm volatile ("wfe");
+  }
+
+  list_for_each_safe(node, tmp_node, &s->write_stream_release_list) {
+    list_del_init(node);
+    list_fifo_push_tail_locked(buflist, node);
+  }
+  return SUCCESS;
+}
+
 int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   struct sdhc_ops *ops)
 {
   int err;
+  INIT_LIST_HEAD(&s->write_stream_pending);
+  INIT_LIST_HEAD(&s->write_stream_release_list);
+  s->write_stream_opened = false;
+  s->write_stream_num_pending_bufs = 0;
+  s->write_stream_pending_size = 0;
+  s->write_stream_next_block_idx = 0;
+  s->dma_stream_mode = false;
+  s->invalidate_before_write = false;
 
   s->bus_width_4 = false;
   s->bus_width_4_supported = false;
@@ -652,13 +788,16 @@ int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   blockdev->ops.read = sdhc_blockdev_read;
   blockdev->ops.write = sdhc_blockdev_write;
   blockdev->ops.block_erase = sdhc_blockdev_erase;
+  blockdev->ops.write_stream_open = sdhc_write_stream_open;
+  blockdev->ops.write_stream_push = sdhc_write_stream_push;
   SDHC_LOG_INFO("SD host controller initialized, block_size:%d",
     blockdev->sector_size);
 
   return SUCCESS;
 }
 
-int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode, bool invalidate_before_write)
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
+  bool invalidate_before_write)
 {
   int err;
   err = sdhc->ops->set_io_mode(sdhc, mode, invalidate_before_write);

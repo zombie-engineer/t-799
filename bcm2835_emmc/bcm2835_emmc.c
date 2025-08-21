@@ -194,10 +194,7 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
   return SUCCESS;
 }
 
-int bcm2835_emmc_write_stream_open(
-    struct block_device *b,
-    struct block_dev_write_stream *s,
-    size_t start_sector)
+int bcm2835_emmc_write_stream_open(struct block_device *b, size_t start_sector)
 {
   int err;
 

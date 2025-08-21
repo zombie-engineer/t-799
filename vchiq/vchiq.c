@@ -3,6 +3,7 @@
 #include <string.h>
 #include <compiler.h>
 #include <list.h>
+#include <list_fifo.h>
 #include <atomic.h>
 #include <kmalloc.h>
 #include <printf.h>
@@ -203,6 +204,7 @@ struct vchiq_mmal_port {
 
   /* callback context */
   void *cb_ctx;
+  struct list_head iobufs;
 };
 
 #define MAX_PORT_COUNT 4
@@ -596,87 +598,165 @@ static inline void vchiq_init_fragments(void *baseaddr, int num_fragments,
 
 static struct vchiq_mmal_port *port_to_sdcard = NULL;
 
-static void camera_io_process_new_data(const uint8_t *data,
-  size_t total_bytes);
-
 static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
   struct mmal_buffer *b);
 
-static int OPTIMIZED mmal_process_port_buffers(struct vchiq_mmal_port *p)
+static OPTIMIZED int mmal_port_buffer_submit(struct vchiq_mmal_port *p,
+  struct mmal_buffer *b)
+{
+  int irqflags;
+
+  disable_irq_save_flags(irqflags);
+  list_del(&b->list);
+  list_add_tail(&b->list, &p->buffers_busy);
+  p->nr_busy++;
+  restore_irq_flags(irqflags);
+  return mmal_port_buffer_send_one(p, b);
+}
+
+static OPTIMIZED int mmal_port_buffer_submit_list(struct vchiq_mmal_port *p,
+  struct list_head *l)
+{
+  int err = SUCCESS;
+  struct mmal_buffer *b;
+
+  while (!list_empty(l)) {
+    b = list_first_entry(l, struct mmal_buffer, list);
+    err = mmal_port_buffer_submit(p, b);
+    CHECK_ERR("Failed to submit buffer");
+  }
+
+out_err:
+  return err;
+}
+
+static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
+{
+  struct list_head *node;
+  node = list_fifo_pop_head(l);
+  return node ? list_entry(node, struct mmal_buffer, list) : NULL;
+}
+
+static inline void mmal_buf_fifo_push(struct list_head *l,
+  struct mmal_buffer *b)
+{
+  list_fifo_push_tail(l, &b->list);
+}
+
+static inline void mmal_buf_fifo_dump(const char *tag, struct list_head *l)
+{
+  struct list_head *node;
+  return;
+
+  printf("(%s) mmal_buf_fifo: %p,n:%p,p:%p\r\n", tag, l, l->next, l->prev);
+  list_for_each(node, l) {
+    printf("(%s) mmal_buf_fifo:node:%p,next:%p, prev:%p\r\n", tag, node, node->next, node->prev);
+  }
+}
+
+#if 0
+static OPTIMIZED int mmal_port_buffer_process_display(
+  struct vchiq_mmal_port *p)
+{
+  int err;
+  int irqflags;
+  bool should_draw;
+  struct mmal_buffer *b = mmal_buf_fifo_pop(&p->buffers_pending);
+  if (!b)
+    return SUCCESS;
+
+  if (!(b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END))
+    return SUCCESS;
+
+  should_draw = false;
+
+  disable_irq_save_flags(irqflags);
+  while(1) {
+    list_del(&b->list);
+    if (list_empty(&p->buffers_pending))
+      break;
+
+    list_add_tail(&b->list, &p->buffers_free);
+    b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
+  }
+  restore_irq_flags(irqflags);
+
+  disable_irq_save_flags(irqflags);
+  should_draw = list_empty(&p->buffers_in_process);
+  if (should_draw)
+    list_add_tail(&b->list, &p->buffers_in_process);
+
+  restore_irq_flags(irqflags);
+
+  if (!should_draw)
+    return SUCCESS;
+
+  err = ili9341_draw_dma_buf(b->user_handle);
+  return err;
+}
+#endif
+
+static int OPTIMIZED mmal_port_buf_to_sdcard(struct vchiq_mmal_port *p)
 {
   int irqflags;
   int err;
   struct mmal_buffer *b;
   uint64_t vcos_systime;
   bool buffer_processed = false;
+  bool is_empty;
+  struct list_head iobufs = LIST_HEAD_INIT(iobufs);
+  struct list_head *node;
+  struct write_stream_buf *iobuf;
+  struct write_stream_buf *iobuf_tmp;
 
-  if (list_empty(&p->buffers_pending))
-    goto buffer_return;
-
-  b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
-
-  if (p != port_to_display) {
-    camera_io_process_new_data(b->buffer, b->length);
-    buffer_processed = true;
+  mmal_buf_fifo_dump("before received", &p->buffers_pending);
+  b = mmal_buf_fifo_pop(&p->buffers_pending);
+  if (!b) {
+    MMAL_ERR("unexpected buffer not found");
+    while(1)
+      asm volatile("wfe");
   }
 
-  if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {
+  mmal_buf_fifo_dump("received", &p->buffers_pending);
+
+  if (!b->buffer) {
+    MMAL_ERR("buffer 0");
+    while(1)
+      asm volatile("wfe");
   }
 
-  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {
+  node = list_fifo_pop_head(&p->iobufs);
+  if (!node) {
+    MMAL_ERR("Not enough io bufs to continue");
+    while(1)
+      asm volatile("wfe");
   }
 
-  /* Buffer payload */
-  if (b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    if (p == port_to_display) {
-      bool should_draw = false;
+  iobuf = list_entry(node, struct write_stream_buf, list);
+  iobuf->paddr = (uint32_t)(uint64_t)b->buffer;
+  iobuf->size = ALIGN_UP_4(b->length);
+  iobuf->io_offset = 0;
+  iobuf->priv = b;
+  list_fifo_push_tail(&iobufs, &iobuf->list);
 
-      /* Drop all unprocessed buffers except for the last one */
-      disable_irq_save_flags(irqflags);
+  err = bdev->ops.write_stream_push(bdev, &iobufs);
+  CHECK_ERR("failed to write to sd card stream");
 
-      while(1) {
-        list_del(&b->list);
-        if (list_empty(&p->buffers_pending))
-          break;
-
-        list_add_tail(&b->list, &p->buffers_free);
-        b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
-      }
-
-      should_draw = list_empty(&p->buffers_in_process);
-      if (should_draw)
-        list_add_tail(&b->list, &p->buffers_in_process);
-
-      restore_irq_flags(irqflags);
-      if (!should_draw)
-        goto buffer_return;
-
-      err = ili9341_draw_dma_buf(b->user_handle);
-      if (err == SUCCESS)
-        buffer_processed = true;
-    }
-  }
-
-  if (buffer_processed) {
+  /* iobufs after steam_push hold list of released buffers */
+  list_for_each_entry_safe(iobuf, iobuf_tmp, &iobufs, list) {
     disable_irq_save_flags(irqflags);
+    list_del_init(&iobuf->list);
+    list_fifo_push_tail_locked(&p->iobufs, &iobuf->list);
+    b = iobuf->priv;
     list_del(&b->list);
     list_add_tail(&b->list, &p->buffers_free);
     restore_irq_flags(irqflags);
   }
-
-buffer_return:
-  while (!list_empty(&p->buffers_free)) {
-    b = list_first_entry(&p->buffers_free, struct mmal_buffer, list);
-    disable_irq_save_flags(irqflags);
-    list_del(&b->list);
-    list_add_tail(&b->list, &p->buffers_busy);
-    p->nr_busy++;
-    restore_irq_flags(irqflags);
-    err = mmal_port_buffer_send_one(p, b);
-    CHECK_ERR("Failed to submit buffer");
-  }
-
-  return SUCCESS;
+#if 0
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {}
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {}
+#endif
+  err = mmal_port_buffer_submit_list(p, &p->buffers_free);
 out_err:
   return err;
 }
@@ -684,11 +764,11 @@ out_err:
 static void vchiq_io_thread(void)
 {
   struct mmal_io_work *w;
+  bdev->ops.write_stream_open(bdev, 0);
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
     os_event_clear(&mmal_io_work_waitflag);
-    mmal_process_port_buffers(port_to_sdcard);
-    // mmal_process_port_buffers(port_to_display);
+    mmal_port_buf_to_sdcard(port_to_sdcard);
   }
 }
 
@@ -1616,66 +1696,14 @@ static struct camera cam = {
   0
 };
 
-static void h264_sectors_write_complete(int err)
-{
-  os_event_notify(&cam.next_buf_avail);
-}
-
-static inline void camera_io_on_buffer_filled(void)
-{
-  struct blockdev_io io = {
-    .dev = bdev,
-    .is_write = true,
-    .addr = cam.current_buf,
-    .start_sector = cam.write_sector_offset,
-    .num_sectors = IO_MIN_SECTORS,
-    .cb = h264_sectors_write_complete
-  };
-
-  if (cam.current_buf == cam.io_buffers[0])
-    cam.current_buf = cam.io_buffers[1];
-  else
-    cam.current_buf = cam.io_buffers[0];
-
-  cam.current_buf_ptr = cam.current_buf;
-
-  os_event_wait(&cam.next_buf_avail);
-  os_event_clear(&cam.next_buf_avail);
-
-  MMAL_INFO("wr_req#%d, from:%ld,num:%ld", sdcard_io_count,
-    cam.write_sector_offset, IO_MIN_SECTORS);
-
-  sdcard_io_count++;
-  blockdev_scheduler_push_io(&io);
-  cam.write_sector_offset += IO_MIN_SECTORS;
-}
-
-static inline void OPTIMIZED camera_io_process_new_data(const uint8_t *data,
-  size_t total_bytes)
-{
-  size_t bytes_left = total_bytes;
-  const char *src = data;
-  size_t buffer_left, io_sz;
-
-  while (bytes_left) {
-    buffer_left = cam.current_buf + H264BUF_SIZE - cam.current_buf_ptr;
-    io_sz = MIN(bytes_left, buffer_left);
-    memcpy(cam.current_buf_ptr, src, io_sz);
-    cam.current_buf_ptr += io_sz;
-    bytes_left -= io_sz;
-    src += io_sz;
-
-    if (cam.current_buf_ptr == cam.current_buf + H264BUF_SIZE)
-      camera_io_on_buffer_filled();
-  }
-}
-
+#if 0
 static int mmal_port_io_work_display_buf_release(
   struct vchiq_mmal_component *c,
   struct vchiq_mmal_port *p, struct mmal_buffer_header *h, uint32_t handle)
 {
   int irqflags;
   int err;
+
   struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
     &p->buffers_in_process, handle);
 
@@ -1698,6 +1726,7 @@ static int mmal_port_io_work_display_buf_release(
   }
   return SUCCESS;
 }
+#endif
 
 uint64_t last_draw_time;
 uint64_t last_draw_start;
@@ -1771,25 +1800,29 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
     &p->buffers_busy, r->buffer_header.data);
 
-  if (!b) {
+  if (!b || !b->buffer) {
+    os_log("Bad buffer %p->%p\r\n", b, b ? b->buffer : NULL);
     while(1)
       asm volatile ("wfe");
   }
 
   disable_irq_save_flags(irqflags);
-  list_del(&b->list);
+  list_del_init(&b->list);
   b->length = r->buffer_header.length;
   b->flags = r->buffer_header.flags;
-  list_add_tail(&b->list, &p->buffers_pending);
+  mmal_buf_fifo_push(&p->buffers_pending, b);
+  mmal_buf_fifo_dump("submitted", &p->buffers_pending);
   p->nr_busy--;
   restore_irq_flags(irqflags);
+  // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
   uint64_t ts = arm_timer_get_count();
-  os_log("%ld %ld %ld %08x\r\n", ts, r->buffer_header.pts,
+#if 0
+  os_log("[%ld] port:%p pts:%ld, len:%ld, flags:%08x\r\n", p, ts,
+    r->buffer_header.pts,
     r->buffer_header.length, r->buffer_header.flags);
-
-  // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
+#endif
 
   os_event_notify_and_yield(&mmal_io_work_waitflag);
 
@@ -1987,6 +2020,7 @@ static int mmal_port_create(struct vchiq_mmal_component *c,
   err = vchiq_mmal_port_info_get(p);
   CHECK_ERR("Failed to get port info");
 
+  INIT_LIST_HEAD(&p->iobufs);
   INIT_LIST_HEAD(&p->buffers_free);
   INIT_LIST_HEAD(&p->buffers_busy);
   p->nr_pending = 0;
@@ -2578,7 +2612,7 @@ static int vc_sm_cma_import_dmabuf(struct vchiq_service_common *mems_service,
   err = vc_sm_cma_vchi_import(mems_service, &import, &result, &cur_trans_id);
   CHECK_ERR("Failed to import buffer to vc");
 
-  MMAL_INFO("imported_dmabuf: addr:%08x, size: %d, trans_id: %08x,"
+  MMAL_DEBUG("imported_dmabuf: addr:%08x, size: %d, trans_id: %08x,"
     " res.trans_id: %08x, res.handle: %08x",
     import.addr, import.size, cur_trans_id, result.trans_id,
     result.res_handle);
@@ -2606,6 +2640,7 @@ static int mmal_port_add_buffer(struct vchiq_service_common *mems_service,
 
   buf->buffer = dma_buf;
   buf->buffer_size = dma_buf_size;
+  // MMAL_INFO("--- buf:%p, buffer:%p, sz:(%d)", buf,  buf->buffer);
   buf->user_handle = user_handle;
   err = vc_sm_cma_import_dmabuf(mems_service, buf, &buf->vcsm_handle);
   CHECK_ERR("failed to import dmabuf");
@@ -2622,13 +2657,14 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
   size_t i;
   size_t num_buffers = p->current_buffer.num;
   size_t dma_buf_size = p->current_buffer.size;
+  struct write_stream_buf *iobuf;
   void *dma_buf;
 
   if (num_buffers < min_buffers)
     num_buffers = min_buffers;
 
-  MMAL_INFO("%s: allocating buffers %dx%d to port %s", p->name, num_buffers,
-    p->minimum_buffer.size, p->name);
+  MMAL_INFO("port %p (%s): allocating %d buffers (%d bytes) to port %s", p,
+    p->name, num_buffers, p->minimum_buffer.size, p->name);
 
   for (i = 0; i < num_buffers; ++i) {
     dma_buf = dma_alloc(dma_buf_size, 0);
@@ -2637,16 +2673,18 @@ static int mmal_alloc_port_buffers(struct vchiq_service_common *mems_service,
       return ERR_RESOURCE;
     }
 
+    iobuf = kmalloc(sizeof(struct write_stream_buf));
+    if (!iobuf) {
+      MMAL_ERR("Failed to allocate iobuf");
+      return ERR_RESOURCE;
+    }
+
+    INIT_LIST_HEAD(&iobuf->list);
+    list_fifo_push_tail_locked(&p->iobufs, &iobuf->list);
     err = mmal_port_add_buffer(mems_service, p, dma_buf, dma_buf_size, 0);
     CHECK_ERR("failed to import dmabuf");
+    //MMAL_INFO("-- %p (%d), iob:%p", dma_buf,  dma_buf_size, iobuf);
   }
-
-  MMAL_INFO("%s: port buf alloc: nr:%d, size:%d, align:%d, port_enabled:%s",
-    p->name,
-    p->minimum_buffer.num,
-    p->minimum_buffer.size,
-    p->minimum_buffer.alignment,
-    p->enabled ? "yes" : "no");
 
   return SUCCESS;
 
@@ -2672,7 +2710,10 @@ static int mmal_port_buffer_send_all(struct vchiq_mmal_port *p)
   restore_irq_flags(irqflags);
 
   list_for_each_entry(b, &p->buffers_busy, list) {
-    MMAL_DEBUG("Submitting buffer %08x to port:%s", b->vcsm_handle, p->name);
+    MMAL_DEBUG("Submitting buf: %p, buffer:%p, handle:%08x to port %p (%s)",
+      b, b->buffer,
+      b->vcsm_handle, p,
+      p->name);
     err = vchiq_mmal_buffer_from_host(p, b);
     CHECK_ERR("failed to submit port buffer to VC");
   }
@@ -2712,6 +2753,7 @@ out_err:
   return err;
 }
 
+#if 0
 static int mmal_apply_display_buffers(
   struct vchiq_service_common *mems_service,
   struct vchiq_mmal_port *p, struct ili9341_buffer_info *buffers,
@@ -2737,6 +2779,7 @@ static int mmal_apply_display_buffers(
 out_err:
   return err;
 }
+#endif
 
 struct encoder_h264_params {
   uint32_t quantization;
@@ -2806,17 +2849,17 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
       MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT, &uint32_arg,
       sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
-    printf("Set quantization to %d\r\n", uint32_arg);
+    MMAL_INFO("Set quantization to %d", uint32_arg);
 
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
       MMAL_PARAMETER_VIDEO_ENCODE_MIN_QUANT, &uint32_arg, sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
-    printf("Set min quantization to %d\r\n", uint32_arg);
+    MMAL_INFO("Set min quantization to %d", uint32_arg);
 
     err = vchiq_mmal_port_parameter_set(&encoder->output[0],
       MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT, &uint32_arg, sizeof(uint32_arg));
     CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT param");
-    printf("Set max quantization to %d\r\n", uint32_arg);
+    MMAL_INFO("Set max quantization to %d", uint32_arg);
   }
 
   video_profile.profile = MMAL_VIDEO_PROFILE_H264_HIGH;
@@ -2978,7 +3021,6 @@ static int create_resizer_component(struct vchiq_service_common *mmal_service,
 out_err:
   return err;
 }
-
 
 static int create_camera_component(struct vchiq_service_common *mmal_service,
   int frame_width ,int frame_height, int frame_rate,
@@ -3166,9 +3208,9 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
 
   err = mmal_apply_display_buffers(mems_service, resizer_out, display_buffers,
     ARRAY_SIZE(display_buffers));
-#endif
 
   CHECK_ERR("Failed to add display buffers");
+#endif
 
   err = mmal_camera_capture_frames(cam_video);
   CHECK_ERR("Failed to start camera capture");

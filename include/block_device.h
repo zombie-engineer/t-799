@@ -2,11 +2,22 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <list.h>
 
 struct block_device;
 
 struct block_dev_write_stream {
   struct block_device *bd;
+};
+
+struct write_stream_buf {
+  struct list_head list;
+  uint32_t paddr;
+  uint32_t size;
+  uint32_t io_size;
+  uint32_t io_offset;
+  void *priv;
+  int dma_cb;
 };
 
 struct block_device_ops {
@@ -16,11 +27,13 @@ struct block_device_ops {
   int (*write)(struct block_device *, const uint8_t *src, uint64_t start_sector,
     uint32_t num_sectors);
 
-  int (*write_stream_open)(struct block_device *,
-    struct block_dev_write_stream *, uint64_t start_sector);
+  int (*write_stream_open)(struct block_device *, uint64_t start_sector);
 
   int (*write_stream_write)(struct block_device *,
     struct block_dev_write_stream *, const void *data, size_t num_bytes);
+
+  int (*write_stream_push)(struct block_device *,
+    struct list_head *buflist);
 
   int (*block_erase)(struct block_device *, uint64_t start_sector,
     uint32_t num_sectors);

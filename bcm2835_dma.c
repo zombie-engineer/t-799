@@ -3,6 +3,7 @@
 #include <errcode.h>
 #include <common.h>
 #include <kmalloc.h>
+#include <printf.h>
 #include <bcm2835/bcm2835_ic.h>
 #include <irq.h>
 #include "bcm2835_dma_regs.h"
@@ -11,6 +12,7 @@
 #define BCM2835_DMA_NUM_CHANNELS 12
 
 #define BCM2835_DMA_MAX_PER_CHANNEL_IRQ_CBS 4
+#define DMA_CB0_PADDR  RAM_PHY_TO_BUS_UNCACHED(bcm2835_dma.cbs)
 
 struct bcm2835_dma_cb {
   uint32_t transfer_info;
@@ -92,19 +94,7 @@ BCM2835_DMA_IRQ_HANDLER(9);
 BCM2835_DMA_IRQ_HANDLER(10);
 BCM2835_DMA_IRQ_HANDLER(11);
 
-#if 0
-static inline struct bcm2835_dma_cb *bcm2835_dma_cb_alloc(void)
-{
-  int bitmap_idx;
-  struct bcm2835_dma_cb *cb = NULL;
-  bitmap_idx = bitmap_set_next_free(&bcm2835_dma.cb_bitmap);
-  if (bitmap_idx != -1)
-    cb = &bcm2835_dma.cbs[bitmap_idx];
-
-  return cb;
-}
-
-static inline void bcm2835_dma_cb_free(struct bcm2835_dma_cb *cb)
+static inline int  bcm2835_dma_cb_addr_to_handle(struct bcm2835_dma_cb *cb)
 {
   struct bcm2835_dma_cb *cb_first = bcm2835_dma.cbs;
   struct bcm2835_dma_cb *cb_end = cb_first + bcm2835_dma.cb_bitmap.num_entries;
@@ -113,11 +103,8 @@ static inline void bcm2835_dma_cb_free(struct bcm2835_dma_cb *cb)
   BUG_IF((uint64_t)cb & 0xff || cb < cb_first || cb >= cb_end,
     "Trying to free invalid cb");
 
-  bitmap_idx = cb - cb_first;
-  bitmap_clear_entry(&bcm2835_dma.cb_bitmap, bitmap_idx);
+  return cb - cb_first;
 }
-
-#endif
 
 static inline uint32_t bcmd2835_dma_gen_ti(
   int dreq,
@@ -191,6 +178,7 @@ bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   cb->source_addr = p->src;
   cb->dest_addr = p->dst;
   cb->transfer_len = p->len;
+  cb->next_cb_addr = 0;
   return true;
 }
 
@@ -205,40 +193,6 @@ bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src)
   cb->source_addr = src;
   return true;
 }
-
-#if 0
-static void bcm2835_dma_request(const struct bcm2835_dma_request_param *p,
-  struct bcm2835_dma_cb **next_cb)
-{
-  struct bcm2835_dma_cb *cb = bcm2835_dma_cb_alloc();
-  memset(cb, 0, sizeof(*cb));
-  cb->transfer_info = bcmd2835_dma_gen_ti(
-    p->dreq,
-    p->dreq_type,
-    p->src_type,
-    p->dst_type,
-    true,
-    p->enable_irq);
-
-  cb->source_addr = p->src;
-  cb->dest_addr = p->dst;
-  cb->transfer_len = p->len;
-  cb->mode_2d_stride = 0;
-  cb->next_cb_addr = *next_cb ? RAM_PHY_TO_BUS_UNCACHED(*next_cb) : 0;
-  *next_cb = cb;
-}
-
-int bcm2835_dma_requests(const struct bcm2835_dma_request_param *p, size_t n)
-{
-  size_t i;
-  struct bcm2835_dma_cb *next_cb = NULL;
-
-  for (i = n; i > 0; --i)
-    bcm2835_dma_request(&p[i - 1], &next_cb);
-
-  *DMA_CONBLK_AD(p->channel) = RAM_PHY_TO_BUS_UNCACHED(next_cb);
-}
-#endif
 
 int bcm2835_dma_request_channel(void)
 {
@@ -274,6 +228,11 @@ void bcm2835_dma_set_cb(int channel, int cb_handle)
 int bcm2835_dma_reserve_cb(void)
 {
   return bitmap_set_next_free(&bcm2835_dma.cb_bitmap);
+}
+
+void bcm2835_dma_release_cb(int cb_idx)
+{
+  bitmap_clear_entry(&bcm2835_dma.cb_bitmap, cb_idx);
 }
 
 bool bcm2835_dma_set_irq_callback(int channel, void (*cb)(void))
@@ -341,4 +300,49 @@ void bcm2835_dma_init(void)
   irq_set(BCM2835_IRQNR_DMA_9, bcm2835_dma_irq_handler_ch_9);
   irq_set(BCM2835_IRQNR_DMA_10, bcm2835_dma_irq_handler_ch_10);
   irq_set(BCM2835_IRQNR_DMA_11, bcm2835_dma_irq_handler_ch_11);
+}
+
+static inline int cb_paddr_to_cb_idx(uint32_t paddr)
+{
+  return (paddr - DMA_CB0_PADDR) / sizeof(struct bcm2835_dma_cb);
+}
+
+void bcm2835_dma_dump_channel_regs(const char *tag, int channel)
+{
+  struct bcm2835_dma_cb *cb;
+  uint32_t next_cb_addr = *DMA_NEXT_CONBLK(channel);
+  uint32_t paddr = *DMA_CONBLK_AD(channel);
+
+  printf("dma [%s] cb#%d, cs:%08x,conblk:%08x,ti:%08x,len:%d,nxt:%08x\r\n",
+    tag, cb_paddr_to_cb_idx(paddr), *DMA_CS(channel), paddr, *DMA_TI(channel),
+    *DMA_TXFR_LEN(channel), next_cb_addr);
+
+  paddr = next_cb_addr;
+
+  while (paddr) {
+    cb = PADDR_UNCACHED_TO_PTR(paddr);
+    printf("->cb#%d %p, ti:%08x,s:%08x->%08x,len:%d\r\n",
+      cb_paddr_to_cb_idx(paddr),
+      cb, cb->transfer_info, cb->source_addr, cb->dest_addr,
+      cb->transfer_len, cb->next_cb_addr);
+    paddr = cb->next_cb_addr;
+  }
+}
+
+void bcm2835_dma_dump_control_block(const char *tag, int cb_handle)
+{
+  struct bcm2835_dma_cb *cb;
+
+  if (cb_handle == -1 || cb_handle >= BCM2835_DMA_NUM_SCBS)
+    return;
+
+  cb = &bcm2835_dma.cbs[cb_handle];
+
+repeat:
+  printf("dmacb#%d [%s] %p, ti:%08x,s:%08x->%08x,len:%08x\r\n", cb_handle, tag,
+    cb, cb->transfer_info, cb->source_addr, cb->dest_addr, cb->transfer_len,
+    cb->next_cb_addr);
+
+  cb_handle = bcm2835_dma_cb_addr_to_handle(
+    PADDR_UNCACHED_TO_PTR(cb->next_cb_addr));
 }

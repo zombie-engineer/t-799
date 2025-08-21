@@ -27,6 +27,7 @@
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <logger.h>
+#include <list_fifo.h>
 
 static struct block_device *fs_blockdev;
 static char sdhc_testbuf[512 * 512] = { 0 };
@@ -106,8 +107,78 @@ static inline void hexdump(const uint8_t *buffer, uint32_t size)
 
   for (i = 0; i < size; i += 16) {
     for (j = 0; j < 16 && i + j < size; j++)
-      os_log("%02x ", buffer[i + j]);
-    os_log("\r\n");
+      printf("%02x ", buffer[i + j]);
+    printf("\r\n");
+  }
+}
+
+struct write_stream_buf iobufs[128];
+
+static void write_stream_init(struct write_stream_buf *b, void *data,
+  uint32_t buf_size)
+{
+  memset(b, 0, sizeof(*b));
+  INIT_LIST_HEAD(&b->list);
+
+  b->paddr = (uint32_t)(uint64_t)data | 0xc0000000;
+  b->size = buf_size;
+  b->io_size = 0;
+  b->io_offset = 0;
+}
+
+static void sdhc_test_write_stream(struct sdhc *s)
+{
+  int err;
+  char *buf;
+  const uint32_t initial_sector = 1056768;
+  struct write_stream_buf *b;
+  struct write_stream_buf *tmp;
+  uint32_t io_tasks[] = {
+    28,
+    1575,
+    655
+  };
+
+  buf = (char *)dma_alloc(512 * 128, 0);
+
+  memset(buf, 0x77, 512 * 128);
+  memset(buf +    0, 0x11, 512);
+  memset(buf +  512, 0x22, 512);
+  memset(buf + 1024, 0x33, 512);
+  memset(buf + 1536, 0x44, 512);
+  hexdump(buf, 512);
+
+  LIST_HEAD(bufs);
+
+  err = bdev_sdcard.ops.write_stream_open(&bdev_sdcard, initial_sector);
+  if (err != SUCCESS)
+    goto error;
+
+  for (int i = 0; i < ARRAY_SIZE(io_tasks); ++i) {
+    b = &iobufs[i];
+    write_stream_init(b, buf, io_tasks[i]);
+    list_fifo_push_tail(&bufs, &b->list);
+    printf("writing %d bytes \r\n", b->size);
+    err = bdev_sdcard.ops.write_stream_push(&bdev_sdcard, &bufs);
+    list_for_each_entry_safe(b, tmp, &bufs, list) {
+      printf("buf with size %d released\r\n", b->size);
+      list_del(&b->list);
+    }
+    printf("write_stream_push returned %d\r\n", err);
+    if (err != SUCCESS)
+      goto error;
+  }
+
+  printf("sdhc_test_write_stream done\r\n");
+  
+  while(1) {
+    asm volatile("wfi");
+  }
+
+error:
+  printf("sdhc_test_write_stream failed\r\n");
+  while(1) {
+    asm volatile("wfi");
   }
 }
 
@@ -282,7 +353,7 @@ static void app_main(void)
   os_log("SDHC intialized\r\n");
   blockdev_scheduler_init();
 
-#if 0
+#if 1
   err = sdhc_test_io(&sdhc, false);
   if (err != SUCCESS)
     goto out;
@@ -293,6 +364,11 @@ static void app_main(void)
     os_log("Failed to set sdhc io mode IT_DMA\r\n");
     goto out;
   }
+
+#if 0
+  os_wait_ms(500);
+  sdhc_test_write_stream(&sdhc);
+#endif
 
   err = fs_init(&bdev_sdcard, &bdev_partition);
   if (err != SUCCESS) {

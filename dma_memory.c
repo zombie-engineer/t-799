@@ -21,6 +21,7 @@ struct dma_mem_area {
   struct list_head busy_list;
 };
 
+#undef DEBUG_DMA_ALLOC
 #define __DEFINE_MEM(__log_sz, __n, __align, __section) \
   SECTION(__section) \
   ALIGNED(__align) \
@@ -168,7 +169,9 @@ void *dma_alloc(size_t sz, bool zero)
   struct dma_mem_header *c;
   struct dma_mem_area *a;
   a = chunk_area_get_by_sz(sz);
+#if DEBUG_DMA_ALLOC
   os_log("dma_alloc: %d, area: %016lx, log:%d\r\n", sz, a, a->chunk_sz_log);
+#endif
   BUG_IF(!a, "dma_alloc: size too big");
   if (list_empty(&a->free_list))
   {
