@@ -28,19 +28,11 @@
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <logger.h>
-#include <list_fifo.h>
 
 static struct block_device *fs_blockdev;
 static struct sdhc sdhc;
 struct block_device bdev_sdcard;
 struct block_device *bdev_partition;
-
-#if 0
-volatile char buf1[1024];
-volatile char buf2[1024];
-#endif
-
-// volatile int myvar = 10;
 
 EXCEPTION void fiq_handler(void)
 {
@@ -133,17 +125,10 @@ out:
   }
 }
 
-// atomic_t test_atomic;
-
-// struct event test_ev;
-
-// char *readbuf;
-
-// extern uint64_t sdhost_ts_cmd_start;
-
 static void app_main(void)
 {
   int err;
+
   os_log("Application main\r\n");
 
   err = sdhc_init(&bdev_sdcard, &sdhc, &bcm_sdhost_ops);
@@ -151,11 +136,10 @@ static void app_main(void)
     printf("Failed to init sdhc, %d\r\n", err);
     goto out;
   }
-  os_log("SDHC intialized\r\n");
-  blockdev_scheduler_init();
 
-  err = sdhc_run_self_test(&sdhc, &bdev_sdcard);
-  if (err != SUCCESS)
+  os_log("SDHC intialized\r\n");
+
+  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard))
     goto out;
 
   err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA, false);
@@ -164,6 +148,7 @@ static void app_main(void)
     goto out;
   }
 
+  blockdev_scheduler_init();
   err = fs_init(&bdev_sdcard, &bdev_partition);
   if (err != SUCCESS) {
     os_log("Failed to init fs block device, err: %d\r\n", err);

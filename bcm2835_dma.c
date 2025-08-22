@@ -307,7 +307,7 @@ static inline int cb_paddr_to_cb_idx(uint32_t paddr)
   return (paddr - DMA_CB0_PADDR) / sizeof(struct bcm2835_dma_cb);
 }
 
-void bcm2835_dma_dump_channel_regs(const char *tag, int channel)
+void bcm2835_dma_dump_channel(const char *tag, int channel)
 {
   struct bcm2835_dma_cb *cb;
   uint32_t next_cb_addr = *DMA_NEXT_CONBLK(channel);
@@ -327,22 +327,4 @@ void bcm2835_dma_dump_channel_regs(const char *tag, int channel)
       cb->transfer_len, cb->next_cb_addr);
     paddr = cb->next_cb_addr;
   }
-}
-
-void bcm2835_dma_dump_control_block(const char *tag, int cb_handle)
-{
-  struct bcm2835_dma_cb *cb;
-
-  if (cb_handle == -1 || cb_handle >= BCM2835_DMA_NUM_SCBS)
-    return;
-
-  cb = &bcm2835_dma.cbs[cb_handle];
-
-repeat:
-  printf("dmacb#%d [%s] %p, ti:%08x,s:%08x->%08x,len:%08x\r\n", cb_handle, tag,
-    cb, cb->transfer_info, cb->source_addr, cb->dest_addr, cb->transfer_len,
-    cb->next_cb_addr);
-
-  cb_handle = bcm2835_dma_cb_addr_to_handle(
-    PADDR_UNCACHED_TO_PTR(cb->next_cb_addr));
 }

@@ -34,6 +34,16 @@ struct sdhc_cmd_stat {
   uint64_t multiblock_end_time;
 };
 
+static inline const char *sdhc_io_mode_to_str(sdhc_io_mode_t m)
+{
+  switch (m) {
+    case SDHC_IO_MODE_BLOCKING_PIO: return "BLOCKING_PIO";
+    case SDHC_IO_MODE_BLOCKING_DMA: return "BLOCKING_DMA";
+    case SDHC_IO_MODE_IT_DMA      : return "INTERRUPT_DMA";
+    default: return "UNKNOWN";
+  }
+}
+
 static inline const char *sd_card_state_to_str(sd_card_state_t c)
 {
   switch (c) {
@@ -319,10 +329,13 @@ struct sdhc {
 int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   struct sdhc_ops *ops);
 
-int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode, bool invalidate_before_write);
+int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
+  bool invalidate_before_write);
 
 int sdhc_read(struct sdhc *s, uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);
 
 int sdhc_write(struct sdhc *s, const uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);
+
+void sdhc_set_log_level(int l);

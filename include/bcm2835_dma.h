@@ -82,5 +82,4 @@ void bcm2835_dma_poll(int channel);
 void bcm2835_dma_activate(int channel);
 
 bool bcm2835_dma_set_irq_callback(int channel, void (*cb)(void));
-void bcm2835_dma_dump_channel_regs(const char *tag, int channel);
-void bcm2835_dma_dump_control_block(const char *tag, int cb_idx);
+void bcm2835_dma_dump_channel(const char *tag, int channel);

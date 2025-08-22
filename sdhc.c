@@ -486,6 +486,7 @@ static int sdhc_io_init(struct sdhc_io *io, void (*on_dma_done)(void))
 {
   io->dma_channel = bcm2835_dma_request_channel();
   io->dma_control_block_idx = bcm2835_dma_reserve_cb();
+  printf("sdhc_io_init: DMA chan:%d, cb:%d\r\n", io->dma_channel, io->dma_control_block_idx);
 
   if (io->dma_channel == -1 || io->dma_control_block_idx == -1)
     return ERR_GENERIC;
@@ -512,7 +513,7 @@ wait:
     return err;
 
   card_state = (sd_card_state_t)err;
-  SDHC_LOG_DBG2("card state: %d(%s)", card_state,
+  SDHC_LOG_INFO("card state: %d(%s)", card_state,
     sd_card_state_to_str(card_state));
 
   if (card_state == SD_CARD_STATE_PROG)
@@ -757,6 +758,7 @@ int sdhc_init(struct block_device *blockdev, struct sdhc *s,
   s->UHS_II_support = false;
   sdhc_log_level = LOG_LEVEL_INFO;
 
+  s->io_mode = SDHC_IO_MODE_BLOCKING_PIO;
   s->ops = ops;
 
   err = sdhc_io_init(&s->io, sdhc_dma_irq);
@@ -806,7 +808,18 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
     return err;
   }
 
+
   sdhc->io_mode = mode;
   sdhc->invalidate_before_write = invalidate_before_write;
+
+  SDHC_LOG_INFO("io mode set to %d(%s), invalidate_wr:%d", mode,
+    sdhc_io_mode_to_str(mode), invalidate_before_write);
+
   return SUCCESS;
+}
+
+void sdhc_set_log_level(int l)
+{
+  SDHC_LOG_INFO("log level set from %d to %d\r\n", sdhc_log_level, l);
+  sdhc_log_level = l;
 }

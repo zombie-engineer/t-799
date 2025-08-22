@@ -135,7 +135,7 @@
 
 #if defined BCM_SDHOST_DEBUG_LOG_IRQ
 #define BCM_SDHOST_LOG_IRQ(__fmt, ...)\
-  BCM_SDHOST_LOG_INF("[IRQ]" __fmt, ## __VA_ARGS__);
+  BCM_SDHOST_LOG_INFO("[IRQ]" __fmt, ## __VA_ARGS__);
 #else
 #define BCM_SDHOST_LOG_IRQ(__fmt, ...)
 #endif
@@ -160,6 +160,7 @@ typedef enum {
   BCM_SDHOST_STATE_UNKNOWN       = 0x10 
 } bcm_sdhost_state_t;
 
+bool sd_extra_log = false;
 static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
 static int bcm_sdhost_should_wait_last_io = false;
 struct sdhc_cmd_stat bcm_sdhost_cmd_stats = { 0 };
@@ -542,6 +543,10 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
    * DREQ signal
    */
   bcm2835_dma_activate(s->io.dma_channel);
+  if (sd_extra_log) {
+    printf("prep dma: channel:%d, cb:%d\r\n", s->io.dma_channel, s->io.dma_control_block_idx);
+    bcm2835_dma_dump_channel_regs("after activate", s->io.dma_channel);
+  }
 }
 
 /*
@@ -598,7 +603,7 @@ repeat:
 #endif
 }
 
-static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
+static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
   int ret;
@@ -632,9 +637,11 @@ static OPTIMIZED int bcm_sdhost_cmd_step0(struct sdhc *s, struct sd_cmd *c,
     hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
     hcfg |= SDHOST_CFG_DATA_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-#if 0
-    if (ioreg32_read(SDHOST_HSTS) & 0x200)
+#if 1
+    if (ioreg32_read(SDHOST_HSTS) & 0x200) {
+      printf("\r\nPROBLEM\r\n\r\n");
       ioreg32_write(SDHOST_HSTS, 0x200);
+    }
 #endif
     irq_enable();
   }
@@ -784,6 +791,7 @@ int OPTIMIZED bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c,
     reg_cmd = ioreg32_read(SDHOST_CMD);
     if (BIT_IS_CLEAR(reg_cmd, SDHOST_CMD_BIT_NEW))
       break;
+
     BCM_SDHOST_LOG_DBG2("--wait_prev:-cmd %08x, hsts:%08x", reg_cmd,
       ioreg32_read(SDHOST_HSTS));
   }
@@ -795,7 +803,7 @@ int OPTIMIZED bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c,
     ioreg32_write(SDHOST_HSTS, reg_hsts);
   }
 
-  ret = bcm_sdhost_cmd_step0(s, c, timeout_usec);
+  ret = bcm_sdhost_cmd_execute(s, c, timeout_usec);
 
   BCM_SDHOST_LOG_DBG("%sCMD%d done, ret: %d, resp:%08x|%08x|%08x|%08x",
     is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, ret,
@@ -986,3 +994,11 @@ struct sdhc_ops bcm_sdhost_ops = {
   .notify_dma_isr = bcm_sdhost_notify_dma_isr,
   .wait_prev_done = bcm_sdhost_wait_prev_done
 };
+
+void bcm_sdhost_set_log_level(int l)
+{
+  BCM_SDHOST_LOG_INFO("log level set from %d to %d\r\n", bcm_sdhost_log_level,
+    l);
+
+  bcm_sdhost_log_level = l;
+}
