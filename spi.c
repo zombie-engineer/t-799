@@ -125,12 +125,11 @@ struct spi_bitbang_state {
 struct spi_bitbang_state spi_bb_state = { 0 };
 
 static struct spi_gpio_group_desc spi_bb_gpio_desc = { 0 };
-static bool spi_bb_gpio_desc_filled = false;
+// static bool spi_bb_gpio_desc_filled = false;
 
 int spi_configure_bitbang(struct spi_device *d, int sck, int mosi,
   int miso, const int *cs, int num_cs_pins)
 {
-  int i;
   struct spi_gpio_pin_desc *p = spi_bb_gpio_desc.pins;
 
   spi_gpio_pin_desc_set(p++, sck, GPIO_FUNCTION_OUTPUT, GPIO_FUNCTION_INPUT);
@@ -232,12 +231,7 @@ static int spi0_do_transfer(struct spi_device *d,
   size_t len,
   size_t *actual_len)
 {
-  int ret;
   size_t i;
-  const uint8_t *src_byte = src;
-  uint8_t *dst_byte = dst;
-  uint8_t stub_src = 0;
-  uint8_t stub_dst = 0;
 
   if (!d || !actual_len)
     return ERR_INVAL;
@@ -401,16 +395,6 @@ static int spi_bb_start_transfer(struct spi_device *d, int io_flags,
   return SUCCESS;
 }
 
-static bool spi_bb_write_possible(void)
-{
-  return *SPI_CS & SPI_CS_TXD;
-}
-
-static bool spi_bb_read_possible(void)
-{
-  return *SPI_CS & SPI_CS_RXD;
-}
-
 /*
  * Let's do 100Khz 
  * At this freq 1 clock period = 1/100000 sec = 1/100 ms = 10 microseconds
@@ -419,8 +403,6 @@ static bool spi_bb_read_possible(void)
  */
 static void spi_bb_clock_byte(uint8_t b)
 {
-  bool is_set;
-
   for (int i = 7; i >= 0; i--) {
     if (b & (1 << i)) {
       SPI_MOSI_HIGH();
@@ -440,12 +422,7 @@ static int spi_bb_do_transfer(struct spi_device *d,
   size_t len,
   size_t *actual_len)
 {
-  int ret;
   int i;
-  const uint8_t *src_byte = src;
-  uint8_t *dst_byte = dst;
-  uint8_t stub_src = 0;
-  uint8_t stub_dst = 0;
 
   if (!d || !actual_len)
     return ERR_INVAL;

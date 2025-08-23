@@ -56,27 +56,7 @@ static void fat_scratchbuf_free(char *scratchbuf)
   fat_scratchbuf_mask &= ~(1<<idx);
 }
 
-/*
- * Simple implementation of copying wide chars into 1-byte ASCII string. This
- * assumes wide chars are combined as 0 byte + ascii byte actually
- */
-static size_t wide_to_simple_char(char *dst, size_t dst_sz,
-  const char *src,
-  size_t src_sz)
-{
-  size_t i, max_idx;
-  if (dst_sz < 1)
-    return 0;
-
-  max_idx = MIN(src_sz / 2, dst_sz - 1);
-  for (i = 0; i < max_idx && src[i * 2]; ++i)
-    dst[i] = src[i * 2];
-
-  dst[i] = 0;
-  return i;
-}
-
-static const char *fat_lfn_fill_name(struct vfat_lfn_entry *lfn,
+static void fat_lfn_fill_name(struct vfat_lfn_entry *lfn,
   const char *src)
 {
   size_t i;
@@ -117,7 +97,6 @@ static const char *fat_lfn_fill_name(struct vfat_lfn_entry *lfn,
     if (c) {
       *dst++ = c;
       *dst++ = 0;
-      i;
     } else {
       *dst++ = 0;
       *dst++ = 0;
@@ -187,8 +166,8 @@ static int fat32_get_next_cluster_num(const struct fat32_fs *f,
     return ERR_MEMALLOC;
   }
 
-  err = f->bdev->ops.read(f->bdev, buf, fat_start_sector + fat_entry_sector,
-    1);
+  err = f->bdev->ops.read(f->bdev, (uint8_t *)buf,
+    fat_start_sector + fat_entry_sector, 1);
   if (err < 0) {
     printf("fat32_get_next_cluster_num: error reading first sector\r\n");
     fat_scratchbuf_free(buf);
@@ -234,7 +213,7 @@ int fat32_fs_open(struct block_device *bdev, struct fat32_fs *f)
   int err;
   int root_cluster_idx;
   uint32_t cluster_size;
-  err = bdev->ops.read(bdev, (char*)&fat32_boot_sector, 0,
+  err = bdev->ops.read(bdev, (uint8_t *)&fat32_boot_sector, 0,
     1);
   if (err < 0) {
     printf("fat32_open: error reading first sector\r\n");
@@ -261,7 +240,6 @@ static inline size_t fat32_fill_long_filename(char *dst, size_t dst_sz,
   struct vfat_lfn_entry *le)
 {
   size_t field_idx, max_dst_len;
-  size_t num_copied;
   const char *src;
   const char *dst_orig = dst;
   const struct {
@@ -430,20 +408,6 @@ static size_t filepath_get_next_element(const char **path)
   return len;
 }
 
-static void filepath_get_last_element(const char *filepath, const char **fname)
-{
-  const char *p = filepath;
-  const char *last_start = p;
-
-  while(*p) {
-    if (*p == '/') {
-      last_start = p + 1;
-    }
-    p++;
-  }
-  *fname = last_start;
-}
-
 typedef fat_dir_iter_result (*fat_dir_iter_cb)(size_t sector_idx,
   size_t first_dentry_idx, struct fat_dentry *dentries, size_t num_dentries,
   void *);
@@ -485,7 +449,7 @@ static bool fat_iter_dents_in_cluster(const struct fat32_fs *fs,
   }
 
   while(sect_idx < end_sect_idx) {
-    err = fs->bdev->ops.read(fs->bdev, buf, sect_idx, 1);
+    err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, sect_idx, 1);
     if (err < 0) {
       ctx->err = err;
       printf("Error reading sector %ld, err: %d\n", sect_idx, err);
@@ -702,13 +666,13 @@ static int fat_set_cluster_entry(const struct fat32_fs *fs,
   }
 
   uint32_t *fat = (uint32_t *)buf;
-  err = fs->bdev->ops.read(fs->bdev, buf, fat_sector_idx, 1);
+  err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, fat_sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error reading sector %ld, err:%d\n", fat_sector_idx, err);
     goto out;
   }
   fat[fat_entry_idx] = next_cluster_idx;
-  err = fs->bdev->ops.write(fs->bdev, buf, fat_sector_idx, 1);
+  err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, fat_sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error writing to sector %ld, err:%d\n", fat_sector_idx, err);
     goto out;
@@ -741,7 +705,7 @@ static int fat_dir_entry_mod(const struct fat32_fs *fs,
   dentry_sector_idx = l->start_sector_idx +
     last_dentry_idx / dentries_per_sector;
 
-  err = fs->bdev->ops.read(fs->bdev, buf, dentry_sector_idx, 1);
+  err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, dentry_sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error reading sector %ld\n", dentry_sector_idx);
     goto out;
@@ -750,7 +714,7 @@ static int fat_dir_entry_mod(const struct fat32_fs *fs,
   fat_dentry_set_cluster(dentry, first_cluster_idx);
   fat_dentry_set_file_size(dentry, file_size);
 
-  err = fs->bdev->ops.write(fs->bdev, buf, dentry_sector_idx, 1);
+  err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, dentry_sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error writing to sector %ld, err:%d\n", dentry_sector_idx, err);
     goto out;
@@ -807,7 +771,7 @@ int fat32_resize(const struct fat32_fs *fs, const char *filepath,
   sect_idx = sect_idx_fat_start;
 
   for (;num_clusters && sect_idx < sect_idx_fat_end; sect_idx++) {
-    err = fs->bdev->ops.read(fs->bdev, buf, sect_idx, 1);
+    err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, sect_idx, 1);
     if (err != SUCCESS) {
       printf("Error reading sector %ld, err:%d\n", sect_idx, err);
       goto out;
@@ -869,7 +833,7 @@ int fat32_resize(const struct fat32_fs *fs, const char *filepath,
     }
 
     if (sector_has_updates) {
-      err = fs->bdev->ops.write(fs->bdev, buf, sect_idx, 1);
+      err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, sect_idx, 1);
       if (err != SUCCESS) {
         printf("Failed to write to block device, err:%d\n", err);
         goto out;
@@ -939,7 +903,7 @@ static bool fat_iter_file_on_cluster(const struct fat32_fs *f,
   }
 
   while(sect_idx < end_sect_idx) {
-    ctx->err = f->bdev->ops.read(f->bdev, buf, sect_idx, 1);
+    ctx->err = f->bdev->ops.read(f->bdev, (uint8_t *)buf, sect_idx, 1);
     if (ctx->err != SUCCESS) {
       printf("Error reading sector %ld, err:%d\n", sect_idx, ctx->err);
       goto out;
@@ -997,8 +961,7 @@ int fat32_dump_file_cluster_chain(const struct fat32_fs *fs,
   const char *filename)
 {
   int err;
-  struct fat_dentry d, d_parent;
-  uint32_t tmp;
+  struct fat_dentry d;
   struct fat_dentry_loc loc;
 
   err = fat32_lookup(fs, filename, &loc, &d);
@@ -1042,7 +1005,7 @@ void fat32_dump_fat(const struct fat32_fs *f, int fat_idx)
   }
   printf("Dumping FAT #%d, staring at sector %ld\n", fat_idx, fat_start_idx);
   for (sect_idx = fat_start_idx; sect_idx < fat_end_idx; ++sect_idx) {
-    err = f->bdev->ops.read(f->bdev, buf, sect_idx, 1);
+    err = f->bdev->ops.read(f->bdev, (uint8_t *)buf, sect_idx, 1);
     if (err != SUCCESS) {
       printf("Block device reading not successful, err:%d\n", err);
       goto out;
@@ -1075,7 +1038,6 @@ static bool fat_iter_cluster_read_cb(const struct fat32_fs *f,
   size_t cluster_idx, void *arg)
 {
   bool should_continue = false;
-  char *read_dst;
   size_t rel_sector_idx;
   struct fat_iter_cluster_read_ctx *ctx = arg;
   size_t physical_sector_idx;
@@ -1114,7 +1076,9 @@ static bool fat_iter_cluster_read_cb(const struct fat32_fs *f,
     size_t sector_space = fat32_sector_size(f) - ctx->first_read_offset;
     io_size = MIN(sector_space, ctx->read_size_bytes);
 
-    ctx->err = f->bdev->ops.read(f->bdev, buf, physical_sector_idx, 1);
+    ctx->err = f->bdev->ops.read(f->bdev, (uint8_t *)buf, physical_sector_idx,
+      1);
+
     if (ctx->err != SUCCESS)
       goto out;
 
@@ -1143,13 +1107,8 @@ int fat32_read(const struct fat32_fs *f, const struct fat_dentry *d,
 {
   int err;
   size_t sect_sz = fat32_sector_size(f);
-  size_t io_size;
 
-  uint8_t *dst_orig = dst;
   size_t file_size = fat32_get_file_size(d);
-  int cluster_idx;
-  uint64_t data_sector_idx;
-  size_t seek = 0;
 
   if (offset > file_size)
     return 0;
@@ -1266,7 +1225,8 @@ static fat_iter_fat_sectors_result fat_extend_cluster_chain_fn(
   uint32_t *fat = (uint32_t *)ctx->scratchbuf;
 
   /* Scan FAT sector for next free cluster entry, that can be allocated */
-  ctx->err = fs->bdev->ops.read(fs->bdev, ctx->scratchbuf, sector_idx, 1);
+  ctx->err = fs->bdev->ops.read(fs->bdev, (uint8_t *)ctx->scratchbuf,
+    sector_idx, 1);
   if (ctx->err != SUCCESS) {
     printf("block device reading not successful, err:%d\n", ctx->err);
     return FAT_ITER_FAT_SECTORS_STOP;
@@ -1284,7 +1244,8 @@ static fat_iter_fat_sectors_result fat_extend_cluster_chain_fn(
 
   /* Found non busy cluster (entry value eq. 0) */
   fat[i] = FAT32_ENTRY_END_OF_CHAIN;
-  ctx->err = fs->bdev->ops.write(fs->bdev, ctx->scratchbuf, sector_idx, 1);
+  ctx->err = fs->bdev->ops.write(fs->bdev, (uint8_t *)ctx->scratchbuf,
+    sector_idx, 1);
   if (ctx->err != SUCCESS) {
     printf("Failed to write to block device, err:%d\n", ctx->err);
     return FAT_ITER_FAT_SECTORS_STOP;
@@ -1307,7 +1268,7 @@ static fat_iter_fat_sectors_result fat_extend_cluster_chain_fn(
 
     size_t entry_idx = ctx->prev_last_cluster_idx % entries_per_fat_sector;
 
-    ctx->err = fs->bdev->ops.read(fs->bdev, ctx->scratchbuf,
+    ctx->err = fs->bdev->ops.read(fs->bdev, (uint8_t *)ctx->scratchbuf,
       prev_last_cluster_entry_sector, 1);
     if (ctx->err != SUCCESS) {
       printf("Failed to read from block device, err:%d\n", ctx->err);
@@ -1315,7 +1276,7 @@ static fat_iter_fat_sectors_result fat_extend_cluster_chain_fn(
     }
 
     fat[entry_idx] = ctx->new_last_cluster_idx; 
-    ctx->err = fs->bdev->ops.write(fs->bdev, ctx->scratchbuf,
+    ctx->err = fs->bdev->ops.write(fs->bdev, (uint8_t *)ctx->scratchbuf,
       prev_last_cluster_entry_sector, 1);
     if (ctx->err != SUCCESS) {
       printf("Failed to write to block device, err:%d\n", ctx->err);
@@ -1366,7 +1327,7 @@ static int fat_populate_dir_start_cluster(const struct fat32_fs *fs,
     return ERR_MEMALLOC;
   }
 
-  err = fs->bdev->ops.read(fs->bdev, buf, sector_idx, 1);
+  err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error reading sector %ld\n", sector_idx);
     goto out;
@@ -1390,14 +1351,14 @@ static int fat_populate_dir_start_cluster(const struct fat32_fs *fs,
 
   d->file_attributes = FAT_FILE_ATTR_SUBDIRECTORY;
 
-  err = fs->bdev->ops.write(fs->bdev, buf, sector_idx, 1);
+  err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, sector_idx, 1);
   if (err != SUCCESS) {
     printf("Error writing to sector %ld, err:%d\n", sector_idx, err);
     goto out;
   }
   memset(buf, 0, fat32_sector_size(fs));
   for (size_t i = 1; i < 4; ++i) {
-    err = fs->bdev->ops.write(fs->bdev, buf, sector_idx + i, 1);
+    err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, sector_idx + i, 1);
     if (err != SUCCESS) {
       printf("Error writing to sector %ld, err:%d\n", sector_idx, err);
       goto out;
@@ -1490,7 +1451,7 @@ static bool fat_alloc_dentries(const struct fat32_fs *fs, size_t cluster_idx,
   end_sect_idx = sect_idx + fat32_sectors_per_cluster(fs);
 
   while(sect_idx < end_sect_idx) {
-    err = fs->bdev->ops.read(fs->bdev, buf, sect_idx, 1);
+    err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, sect_idx, 1);
     if (err != SUCCESS) {
       ctx->err = err;
       printf("Error reading sector %ld\n", sect_idx);
@@ -1525,7 +1486,6 @@ static void fat_lfn_fill_entries(struct vfat_lfn_entry *lfn_array,
 {
   size_t lfn_idx = 0;
   struct vfat_lfn_entry *lfn;
-  const char *filename_part;
 
   for (lfn_idx = 0; lfn_idx < num_lfns; ++lfn_idx) {
     lfn = &lfn_array[lfn_idx];
@@ -1549,11 +1509,9 @@ static void fat_gen_8_3_shortname(struct fat_dentry *d, const char *longname)
 {
   size_t len = strnlen(longname, 255);
   size_t len_no_ext = len;
-  size_t dotpos = 0;
   size_t basename_len;
   size_t i;
 
-  char *ptr;
   const char *ext = NULL;
 
   for (i = len; i > 0; --i) {
@@ -1616,7 +1574,6 @@ static int fat_dir_create_entry2(const struct fat32_fs *fs,
   int err;
 
   struct fat_dentry *d, *main_dentry;
-  struct vfat_lfn_entry *lfn_entry;
   const size_t dentries_per_sector = fat32_get_dentries_per_sector(fs);
 
   size_t cluster_idx;
@@ -1645,7 +1602,7 @@ static int fat_dir_create_entry2(const struct fat32_fs *fs,
     return ERR_MEMALLOC;
   }
 
-  err = fs->bdev->ops.read(fs->bdev, buf, sector_idx, 1);
+  err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, sector_idx, 1);
   if (err < 0) {
     printf("Error reading sector %ld %d\n", sector_idx, err);
     goto out;
@@ -1665,7 +1622,7 @@ static int fat_dir_create_entry2(const struct fat32_fs *fs,
     fat_lfn_fill_entries((struct vfat_lfn_entry *)d, l->num_dentries - 1,
       filename, fat_calc_shortname_checksum(d + l->num_dentries - 1));
 
-  err = fs->bdev->ops.write(fs->bdev, buf, sector_idx, 1);
+  err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, sector_idx, 1);
   if (err != SUCCESS) {
     printf("Failed to write to block device, err:%d\n", err);
     goto out;
@@ -1992,18 +1949,17 @@ static int fat32_write_one_sect(const struct fat32_fs *fs,
     return ERR_MEMALLOC;
   }
 
-  err = fs->bdev->ops.read(fs->bdev, buf, io_sector, 1);
+  err = fs->bdev->ops.read(fs->bdev, (uint8_t *)buf, io_sector, 1);
   if (err < 0) {
     printf("fat32_write: error reading sector %ld, err: %d\r\n", io_sector,
       err);
   }
 
   memcpy(buf + pos->sector_offset, src, io_sz);
-  err = fs->bdev->ops.write(fs->bdev, buf, io_sector, 1);
+  err = fs->bdev->ops.write(fs->bdev, (uint8_t *)buf, io_sector, 1);
   if (err < 0)
     printf("fat32_write: error write sector %ld, err: %d\r\n", io_sector, err);
 
-out:
   fat_scratchbuf_free(buf);
   return err;
 }
@@ -2018,10 +1974,7 @@ int fat32_write(const struct fat32_fs *fs, const char *filepath, size_t offset,
 {
   int err;
   struct fat_file f = { .fs = fs };
-  size_t sect_sz = fat32_sector_size(fs);
   size_t size_left = size;
-  size_t logic_sector_idx;
-  size_t sector_byte_offset;
   size_t new_cluster_idx;
   size_t io_size;
   const uint8_t *src = data;

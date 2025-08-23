@@ -120,11 +120,11 @@ static inline int bcm2835_emmc_cmd2(uint32_t *device_id, bool blocking)
 static inline int bcm2835_emmc_cmd3(uint32_t *out_rca, bool blocking)
 {
   uint32_t rca;
-  bool crc_error;
-  bool illegal_cmd;
+  bool __attribute__((unused)) crc_error;
+  bool __attribute__((unused)) illegal_cmd;
   bool error;
-  bool status;
-  bool ready;
+  bool __attribute__((unused)) status;
+  bool __attribute__((unused)) ready;
 
   int cmd_ret;
   struct sd_cmd c;

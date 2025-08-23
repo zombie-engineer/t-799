@@ -235,7 +235,7 @@ static void bcm_sdhost_irq(void)
     hsts = ioreg32_read(SDHOST_HSTS);
     if (hsts & SDHOST_HSTS_TRANSFER_ERROR_MASK) {
       printf("bcm_sdhost transfer error: HSTS:%08x\r\n", hsts);
-      bcm2835_dma_dump_channel_regs("transfer err", dma_channel);
+      bcm2835_dma_dump_channel("transfer err", dma_channel);
       while(1) {
         asm volatile("wfe");
       }
@@ -271,6 +271,7 @@ static void bcm_sdhost_irq(void)
     return;
   }
 
+  hsts = ioreg32_read(SDHOST_HSTS);
   if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
     printf("bcm_sdhost unexpected BLOCK interrupt: HSTS:%08x\r\n", hsts);
     while(1) {
@@ -374,7 +375,6 @@ static inline void bcm_sdhost_wait_bytes_in_fifo(int i, bool dump)
 static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
   const uint32_t *end)
 {
-  int err;
   int wr_idx = 0;
   uint32_t hsts;
   uint32_t data;
@@ -416,7 +416,6 @@ static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
 {
   int num_words;
   uint32_t edm;
-  int err;
   uint32_t data;
 
   int i = 0;
@@ -436,7 +435,6 @@ static int bcm_sdhost_data_read_sw(struct sdhc *s, uint32_t *ptr,
 static int bcm_sdhost_data_blocking(struct sdhc *s, struct sd_cmd *c,
   bool is_write)
 {
-  int ret;
   uint32_t *ptr;
   uint32_t *end;
 
@@ -542,11 +540,17 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
    * Activates DMA channel, DMA will copy 4byte word each time sdhost asserts
    * DREQ signal
    */
+ //    printf("EDM: %08x, STS:%08x, CMD:%08x\r\n",
+ //        ioreg32_read(SDHOST_EDM),
+ //        ioreg32_read(SDHOST_HSTS),
+ //        ioreg32_read(SDHOST_CMD));
+ //    printf("EDM: %08x, STS:%08x, CMD:%08x\r\n",
+ //        ioreg32_read(SDHOST_EDM),
+ //        ioreg32_read(SDHOST_HSTS),
+ //        ioreg32_read(SDHOST_CMD));
   bcm2835_dma_activate(s->io.dma_channel);
-  if (sd_extra_log) {
-    printf("prep dma: channel:%d, cb:%d\r\n", s->io.dma_channel, s->io.dma_control_block_idx);
-    bcm2835_dma_dump_channel_regs("after activate", s->io.dma_channel);
-  }
+  bcm2835_dma_dump_channel("after activate", s->io.dma_channel);
+  // while(1);
 }
 
 /*
@@ -608,8 +612,6 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
 {
   int ret;
   uint32_t reg_cmd;
-  uint32_t reg_hsts;
-  uint32_t hsts;
   uint32_t hcfg;
   bool is_write;
   bool has_data;
@@ -744,8 +746,6 @@ static int bcm_sdhost_acmd(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
   int ret;
-  int acmd_idx;
-  int status;
   struct sd_cmd acmd;
   struct sd_cmd cmd;
 

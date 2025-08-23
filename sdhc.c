@@ -504,7 +504,7 @@ static OPTIMIZED int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
   size_t start_block_idx, size_t num_blocks)
 {
   int err = ERR_INVAL;
-  sd_card_state_t card_state;
+//  sd_card_state_t card_state;
 
 #if 0
 wait:

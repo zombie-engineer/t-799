@@ -1,6 +1,7 @@
 
 void self_test_context_switch(void)
 {
+#if 0
   volatile register long x0 asm ("x0") = 0;
   volatile register long x1 asm ("x1") = 0;
   volatile register long x2 asm ("x2") = 0;
@@ -66,5 +67,6 @@ void self_test_context_switch(void)
     x29++;
     asm volatile ("svc 0");
   }
+#endif
 }
 

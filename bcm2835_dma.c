@@ -98,7 +98,6 @@ static inline int  bcm2835_dma_cb_addr_to_handle(struct bcm2835_dma_cb *cb)
 {
   struct bcm2835_dma_cb *cb_first = bcm2835_dma.cbs;
   struct bcm2835_dma_cb *cb_end = cb_first + bcm2835_dma.cb_bitmap.num_entries;
-  int bitmap_idx;
 
   BUG_IF((uint64_t)cb & 0xff || cb < cb_first || cb >= cb_end,
     "Trying to free invalid cb");

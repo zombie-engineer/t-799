@@ -55,7 +55,6 @@ static OPTIMIZED void sdhc_dump_io_stats(int io_idx, uint64_t io_start,
 void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
 {
   int err;
-  int i;
   uint64_t io_start_time;
   uint64_t io_end_time;
 
@@ -80,7 +79,7 @@ void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
     // os_wait_ms(2);
 
     io_start_time = arm_timer_get_count();
-    err = bdev->ops.write(bdev, sdhc_testbuf, i * 512, 512);
+    err = bdev->ops.write(bdev, (uint8_t *)sdhc_testbuf, i * 512, 512);
     if (err) {
       os_log("failed to write to SD partition\r\n");
       while(1)
@@ -105,7 +104,7 @@ static void write_stream_init(struct write_stream_buf *b, void *data,
   b->io_offset = 0;
 }
 
-static void sdhc_test_write_stream(struct block_device *bdev)
+static __attribute__((unused)) void sdhc_test_write_stream(struct block_device *bdev)
 {
   int err;
   char *buf;
@@ -125,7 +124,7 @@ static void sdhc_test_write_stream(struct block_device *bdev)
   memset(buf +  512, 0x22, 512);
   memset(buf + 1024, 0x33, 512);
   memset(buf + 1536, 0x44, 512);
-  hexdump(buf, 512);
+  hexdump((uint8_t *)buf, 512);
 
   LIST_HEAD(bufs);
 
@@ -179,14 +178,14 @@ static bool sdhc_self_test_read(struct sdhc *s)
 
     memset(sdhc_testbuf, 0, sizeof(sdhc_testbuf));
     sd_extra_log = true;
-    err = sdhc_read(s, sdhc_testbuf, from_sector, num_sectors);
+    err = sdhc_read(s, (uint8_t *)sdhc_testbuf, from_sector, num_sectors);
     if (err) {
       os_log("failed to read from SD\r\n");
       return false;
     }
     os_log("Reading done\r\n");
   
-    hexdump(sdhc_testbuf, 32);
+    hexdump((uint8_t *)sdhc_testbuf, 32);
   }
   os_log("Completed self-test read\r\n");
   return true;
@@ -205,7 +204,7 @@ static bool sdhc_self_test_write(struct sdhc *s, uint32_t from_block)
     sdhc_testbuf[i * 4 + 3] = 0xd7;
   }
   
-  err = sdhc_write(s, sdhc_testbuf, from_block, 2);
+  err = sdhc_write(s, (uint8_t *)sdhc_testbuf, from_block, 2);
   if (err) {
     os_log("failed to write to SD\r\n");
     return false;

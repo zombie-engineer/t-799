@@ -25,7 +25,7 @@ const struct mbr_entry *mbr_get_partition(const struct mbr *mbr,
 
 int mbr_read(struct block_device *b, struct mbr *mbr)
 {
-  return b->ops.read(b, (char*)mbr, 0, 1);
+  return b->ops.read(b, (uint8_t *)mbr, 0, 1);
 }
 
 void mbr_print_summary(struct mbr *mbr)

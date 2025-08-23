@@ -24,7 +24,7 @@ int fs_init(struct block_device *blockdev,
   if (!mbr)
     return ERR_MEMALLOC;
 
-  err = blockdev->ops.read(blockdev, (char *)mbr, 0, 1);
+  err = blockdev->ops.read(blockdev, (uint8_t *)mbr, 0, 1);
   if (err != SUCCESS)
     goto out;
 

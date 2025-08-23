@@ -50,7 +50,7 @@ bool sched_run_task_isr(struct task *t)
   struct list_head *node;
   struct task *old_task;
 
-  uint32_t s = offsetof(struct task, scheduler_list);
+  // uint32_t s = offsetof(struct task, scheduler_list);
   if (sched.current == t)
     return false;
 
@@ -209,14 +209,14 @@ void NORETURN scheduler_start(void)
     asm volatile("wfe");
 }
 
-bool sched_exit_current_task_isr(void)
+void sched_exit_current_task_isr(void)
 {
   struct task *t = sched.current;
   t->scheduler_request = TASK_SCHED_RQ_EXIT;
   __schedule();
 }
 
-bool sched_exit_task_isr(struct task *t)
+void sched_exit_task_isr(struct task *t)
 {
   if (t == sched.current) {
     t->scheduler_request = TASK_SCHED_RQ_EXIT;
@@ -227,7 +227,6 @@ bool sched_exit_task_isr(struct task *t)
     task_delete_isr(t);
   }
 }
-
 
 void sched_delay_current_ms_isr(uint64_t ms)
 {

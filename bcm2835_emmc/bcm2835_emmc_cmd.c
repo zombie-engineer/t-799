@@ -241,7 +241,6 @@ bool emmc_should_log = false;
 void bcm2835_emmc_irq_handler(void)
 {
   uint32_t r;
-  int cmd_idx;
   bool cmd_done = false;
   bcm2835_emmc.io.num_irqs++;
 
@@ -561,7 +560,7 @@ static inline int bcm2835_emmc_cmd_polled(struct sd_cmd *c,
 {
   int data_status;
   int err;
-  uint32_t intval, intval_cmp;
+  uint32_t intval;
   uint32_t cmdreg = bcm2835_emmc.io.cmdreg;
 
   if (irq_is_enabled()) {
@@ -632,9 +631,6 @@ static inline int bcm2835_emmc_run_cmd(struct sd_cmd *c, uint32_t cmdreg,
   uint64_t timeout_usec, bool polling)
 {
   uint32_t blksizecnt;
-  uint32_t status;
-
-  int i;
 
   SDHC_LOG_CMD();
   SDHC_WAIT_CMD_DAT_AVAIL();
@@ -664,7 +660,8 @@ static int bcm2835_emmc_run_acmd(struct sd_cmd *c,
   int status;
   struct sd_cmd acmd;
 
-  uint32_t cmd_idx = c->cmd_idx & (((uint32_t)1)<<31) - 1;
+  uint32_t cmd_idx = (c->cmd_idx & (((uint32_t)1)<<31)) - 1;
+  if (cmd_idx);
   sd_cmd_init(&acmd, BCM2835_EMMC_CMD55, c->rca << 16);
 
   acmd.num_blocks = c->num_blocks;
@@ -687,7 +684,7 @@ int bcm2835_emmc_cmd(struct sd_cmd *c, uint64_t timeout_usec,
   uint32_t intval;
 
   int is_acmd = (c->cmd_idx >> 31) & 1;
-  int cmd_idx = c->cmd_idx & (((uint32_t)1)<<31) - 1;
+  int cmd_idx = (c->cmd_idx & (((uint32_t)1)<<31)) - 1;
 
   intval = bcm2835_emmc_read_reg(BCM2835_EMMC_INTERRUPT);
   if (intval) {

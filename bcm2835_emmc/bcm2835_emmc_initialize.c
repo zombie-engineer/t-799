@@ -361,8 +361,6 @@ static int bcm2835_sdhc_data_transfer_mode(uint32_t rca, bool blocking)
   struct sd_cmd6_response_raw r = { 0 };
 
   char scrbuf[8] = { 0 };
-  char scrbuf_le[8] = { 0 };
-  uint64_t scr;
 
   err = bcm2835_emmc_cmd9(rca, blocking);
   BCM2835_EMMC_CHECK_ERR("CMD9 (SEND_CSD) failed");
@@ -394,7 +392,7 @@ static int bcm2835_sdhc_data_transfer_mode(uint32_t rca, bool blocking)
     CMD6_ARG_CMD_SYSTEM_DEFAULT,
     CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
     CMD6_ARG_POWER_LIMIT_DEFAULT,
-    r.data,
+    (char *)r.data,
     blocking);
   BCM2835_EMMC_CHECK_ERR("CMD6");
 
@@ -417,7 +415,7 @@ static int bcm2835_sdhc_data_transfer_mode(uint32_t rca, bool blocking)
     CMD6_ARG_CMD_SYSTEM_DEFAULT,
     CMD6_ARG_DRIVER_STRENGTH_DEFAULT,
     CMD6_ARG_POWER_LIMIT_DEFAULT,
-    r.data,
+    (char *)r.data,
     blocking);
   BCM2835_EMMC_CHECK_ERR("CMD6");
 
@@ -429,7 +427,6 @@ static int bcm2835_sdhc_data_transfer_mode(uint32_t rca, bool blocking)
 int bcm2835_emmc_reset(bool blocking, uint32_t *rca, uint32_t *device_id)
 {
   int err;
-  uint32_t bcm2835_emmc_state;
 
   bcm2835_emmc_dump_mbox_info();
   bcm2835_sdhc_reset();

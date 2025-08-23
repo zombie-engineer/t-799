@@ -223,6 +223,7 @@ static int OPTIMIZED get_num_digit_chars_base10(uint64_t val)
   return num_digit_chars;
 }
 
+#if 0
 static int OPTIMIZED closest_round_base10_nodiv(uint64_t val)
 {
   const int max_idx = ARRAY_SIZE(__decimal_table); /* 20 */
@@ -248,6 +249,7 @@ static int OPTIMIZED closest_round_base10_nodiv(uint64_t val)
 
   return pivot - 1;
 }
+#endif
 
 static OPTIMIZED int get_digit(unsigned long long num,
   unsigned long long powered_base, unsigned long *out_round)

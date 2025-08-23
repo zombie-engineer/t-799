@@ -29,7 +29,6 @@
 #include <fs/fat32.h>
 #include <logger.h>
 
-static struct block_device *fs_blockdev;
 static struct sdhc sdhc;
 struct block_device bdev_sdcard;
 struct block_device *bdev_partition;
@@ -45,14 +44,14 @@ EXCEPTION void serror_handler(void)
 void print_mbox_props(void)
 {
   uint64_t val64;
-  uint32_t val, val2, i;
+  int val, val2, i;
   unsigned clock_rate;
   char buf[6];
-  mbox_get_firmware_rev(&val);
+  mbox_get_firmware_rev((uint32_t *)&val);
   printf("firmware rev:    %08x\r\n", val);
-  mbox_get_board_model(&val);
+  mbox_get_board_model((uint32_t *)&val);
   printf("board model:     %08x\r\n", val);
-  mbox_get_board_rev(&val);
+  mbox_get_board_rev((uint32_t *)&val);
   printf("board rev:       %08x\r\n", val);
   mbox_get_board_serial(&val64);
   printf("board serial:    %08x\r\n", val64);

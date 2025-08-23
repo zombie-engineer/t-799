@@ -361,12 +361,12 @@ static inline int sdhc_cmd24(struct sdhc *s, uint32_t block_idx,
 }
 
 static inline int sdhc_cmd25(struct sdhc *s, uint32_t block_idx,
-  size_t num_blocks, char *srcbuf, uint64_t timeout_usec)
+  size_t num_blocks, uint8_t *srcbuf, uint64_t timeout_usec)
 {
   struct sd_cmd c;
 
   sd_cmd_init(&c, SDHC_CMD25, block_idx);
-  c.databuf = srcbuf;
+  c.databuf = (char *)srcbuf;
   c.num_blocks = num_blocks;
   c.block_size = 512;
 

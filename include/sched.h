@@ -27,9 +27,9 @@ void sched_delay_current_ms_isr(uint64_t ms);
 
 bool sched_run_task_isr(struct task *t);
 
-bool sched_exit_task_isr(struct task *t);
+void sched_exit_task_isr(struct task *t);
 
-bool sched_exit_current_task_isr(void);
+void sched_exit_current_task_isr(void);
 
 void sched_event_wait_isr(struct event *ev);
 

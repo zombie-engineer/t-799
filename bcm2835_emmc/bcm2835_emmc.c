@@ -196,7 +196,7 @@ static inline int bcm2835_emmc_data_io(bcm2835_emmc_io_type_t io_type,
 
 int bcm2835_emmc_write_stream_open(struct block_device *b, size_t start_sector)
 {
-  int err;
+  int err = SUCCESS;
 
 #if 0
   err = bcm2835_emmc_cmd23(0xffff, bcm2835_emmc.is_blocking_mode);
@@ -205,7 +205,7 @@ int bcm2835_emmc_write_stream_open(struct block_device *b, size_t start_sector)
 
   return bcm2835_emmc_cmd25_nonstop(start_sector);
 #endif
-  return SUCCESS;
+  return err;
 }
 
 int bcm2835_emmc_block_erase(struct block_device *blockdev,
@@ -249,7 +249,7 @@ int bcm2835_emmc_write_stream_write(
 static int bcm2835_emmc_read(struct block_device *blockdev, uint8_t *buf,
   uint64_t start_block_idx, uint32_t num_blocks)
 {
-  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ, buf, start_block_idx,
+  return bcm2835_emmc_data_io(BCM2835_EMMC_IO_READ,(char*) buf, start_block_idx,
     num_blocks);
 }
 
@@ -266,6 +266,7 @@ int bcm2835_emmc_set_interrupt_mode(void)
   bcm2835_emmc.is_blocking_mode = false;
   irq_set(BCM2835_IRQNR_ARASAN_SDIO, bcm2835_emmc_irq_handler);
   bcm2835_ic_enable_irq(BCM2835_IRQNR_ARASAN_SDIO);
+  return 0;
 }
 
 #ifdef ENABLE_JTAG
@@ -283,4 +284,5 @@ int bcm2835_emmc_block_device_init(struct block_device *bdev)
   bdev->ops.write_stream_open = bcm2835_emmc_write_stream_open;
   bdev->ops.write_stream_write = bcm2835_emmc_write_stream_write;
   bdev->ops.block_erase = bcm2835_emmc_block_erase;
+  return 0;
 }

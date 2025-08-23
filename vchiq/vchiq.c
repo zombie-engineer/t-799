@@ -58,8 +58,8 @@ static inline void wmb(void)
 
 #define CHECK_ERR_PTR(__ptr, __fmt, ...) \
   if (!(__ptr)) { \
-    MMAL_ERR("err: %d, " __fmt, err, ##__VA_ARGS__); \
     err = ERR_GENERIC; \
+    MMAL_ERR("err: %d, " __fmt, err, ##__VA_ARGS__); \
     goto out_err; \
   }
 
@@ -236,12 +236,9 @@ struct vchiq_mmal_component {
 };
 
 
-static struct block_dev_write_stream sd_stream;
 static int vc_trans_id = 0;
 static int frame_num = 0;
-static size_t frame_offset = 0;
 static struct block_device *bdev = NULL;
-static int sdcard_io_count = 0;
 static struct vchiq_mmal_port *port_to_display = NULL;
 
 static struct vchiq_state vchiq_state;
@@ -701,9 +698,8 @@ static int OPTIMIZED mmal_port_buf_to_sdcard(struct vchiq_mmal_port *p)
   int irqflags;
   int err;
   struct mmal_buffer *b;
-  uint64_t vcos_systime;
-  bool buffer_processed = false;
-  bool is_empty;
+  // uint64_t vcos_systime;
+  // bool buffer_processed = false;
   struct list_head iobufs = LIST_HEAD_INIT(iobufs);
   struct list_head *node;
   struct write_stream_buf *iobuf;
@@ -763,7 +759,7 @@ out_err:
 
 static void vchiq_io_thread(void)
 {
-  struct mmal_io_work *w;
+  // struct mmal_io_work *w;
   bdev->ops.write_stream_open(bdev, 0);
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
@@ -1476,8 +1472,8 @@ static inline void mmal_buffer_print_meta(size_t nr_busy,
   char flagsbuf[256];
   int pts_sec = 0;
   int pts_frac = 0;
-  int dts_sec = 0;
-  int dts_frac = 0;
+  // int dts_sec = 0;
+  // int dts_frac = 0;
 
   mmal_buffer_flags_to_string(h, flagsbuf, sizeof(flagsbuf));
 
@@ -1489,8 +1485,8 @@ static inline void mmal_buffer_print_meta(size_t nr_busy,
 
   if (h->dts != MMAL_TIME_UNKNOWN)
   {
-    dts_sec = h->dts / 1000000;
-    dts_frac = h->dts % 1000000;
+    // dts_sec = h->dts / 1000000;
+    // dts_frac = h->dts % 1000000;
   }
 
   disable_irq_save_flags(irqflags);
@@ -1576,7 +1572,8 @@ struct mmal_port_param_core_stats {
 static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_port *port,
   int parameter_id, void *value, uint32_t *value_size);
 
-static int mmal_port_get_systime(struct vchiq_mmal_port *p, uint64_t *time)
+static __attribute__((unused)) int mmal_port_get_systime(
+  struct vchiq_mmal_port *p, uint64_t *time)
 {
   int err;
   uint64_t systime;
@@ -1595,13 +1592,14 @@ out_err:
   return SUCCESS;
 }
 
-static int mmal_port_get_stats(struct vchiq_mmal_port *p)
+static __attribute__((unused))
+int mmal_port_get_stats(struct vchiq_mmal_port *p)
 {
   int err;
   struct mmal_port_param_stats stats;
   uint32_t size;
-  struct mmal_port_param_core_stats core_stats;
-  uint32_t pool_mem_alloc_size;
+  // struct mmal_port_param_core_stats core_stats;
+  // uint32_t pool_mem_alloc_size;
 
   size = sizeof(stats);
   err = vchiq_mmal_port_parameter_get(p,
@@ -1670,13 +1668,9 @@ static int vchiq_mmal_port_parameter_set(struct vchiq_mmal_port *p,
   return SUCCESS;
 }
 
-static int num_capture_frames = 0;
-
 static int mmal_camera_capture_frames(struct vchiq_mmal_port *p)
 {
   uint32_t frame_count = 1;
-
-  // MMAL_INFO("capture_frames %d", num_capture_frames++);
   return vchiq_mmal_port_parameter_set(p, MMAL_PARAMETER_CAPTURE,
     &frame_count, sizeof(frame_count));
 }
@@ -1817,8 +1811,8 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
-  uint64_t ts = arm_timer_get_count();
 #if 0
+  uint64_t ts = arm_timer_get_count();
   os_log("[%ld] port:%p pts:%ld, len:%ld, flags:%08x\r\n", p, ts,
     r->buffer_header.pts,
     r->buffer_header.length, r->buffer_header.flags);
@@ -1826,7 +1820,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
 
   os_event_notify_and_yield(&mmal_io_work_waitflag);
 
-out_err:
+// out_err:
   return err;
 }
 
@@ -2033,7 +2027,8 @@ out_err:
   return err;
 }
 
-static int mmal_get_version(struct vchiq_service_common *mmal_service)
+static __attribute__((unused)) int mmal_get_version(
+  struct vchiq_service_common *mmal_service)
 {
   struct mmal_msg_context ctx = {
     .u.sync = {
@@ -2137,8 +2132,6 @@ struct vchiq_mmal_component *component_create(
   return c;
 err_component_destroy:
   mmal_component_destroy(mmal_service, c);
-
-err_component_free:
   kfree(c);
   return NULL;
 }
@@ -2236,7 +2229,6 @@ static int vchiq_mmal_get_cam_info(struct vchiq_service_common *ms,
 {
   int err;
   struct vchiq_mmal_component *camera_info;
-  struct vchiq_mmal_component *cam;
   struct mmal_parameter_logging l = { .set = 0x1, .clear = 0 };
 
   camera_info = vchiq_mmal_create_camera_info(ms);
@@ -2422,9 +2414,6 @@ static int mmal_component_enable(struct vchiq_mmal_component *cam)
   int err;
   err = vchiq_mmal_component_enable(cam);
   os_wait_ms(300);
-  return SUCCESS;
-
-out_err:
   return err;
 }
 
@@ -2479,8 +2468,9 @@ out_err:
   return err;
 }
 
-static int create_port_connection(struct vchiq_mmal_port *in,
-  struct vchiq_mmal_port *out, struct vchiq_mmal_port *out2)
+static __attribute__((unused)) int create_port_connection(
+  struct vchiq_mmal_port *in, struct vchiq_mmal_port *out,
+  struct vchiq_mmal_port *out2)
 {
   int err;
   out->format.encoding = in->format.encoding;
@@ -2729,8 +2719,8 @@ out_err:
   return err;
 }
 
-static void mmal_format_copy(struct mmal_es_format_local *to,
-  const struct mmal_es_format_local *from)
+static __attribute__((unused)) void mmal_format_copy(
+  struct mmal_es_format_local *to, const struct mmal_es_format_local *from)
 {
   void *tmp = to->es;
   *to->es = *from->es;
@@ -2789,7 +2779,6 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port **encoder_in,
   struct vchiq_mmal_port **encoder_out, int width, int height)
 {
-  bool bool_arg;
   uint32_t uint32_arg;
   int err = SUCCESS;
   struct vchiq_mmal_component *encoder;
@@ -2892,7 +2881,8 @@ out_err:
   return err;
 }
 
-static int create_splitter_component(struct vchiq_service_common *mmal_service,
+static __attribute__((unused)) int create_splitter_component(
+  struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port **splitter_in,
   struct vchiq_mmal_port **splitter_out0,
   struct vchiq_mmal_port **splitter_out1,
@@ -2967,13 +2957,13 @@ static void mmal_port_dump(const char *tag, const struct vchiq_mmal_port *p)
   printf("%s: es:%p\r\n", tag);
 }
 
-static int create_resizer_component(struct vchiq_service_common *mmal_service,
+static __attribute__((unused)) int create_resizer_component(
+  struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port **resizer_in,
   struct vchiq_mmal_port **resizer_out,
   int in_width, int in_height,
   int out_width, int out_height)
 {
-  bool bool_arg;
   int err = SUCCESS;
   struct vchiq_mmal_component *resizer;
   uint32_t supported_encodings[MAX_SUPPORTED_ENCODINGS];
@@ -3110,7 +3100,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port *cam_still   = NULL;
 
   struct vchiq_mmal_port *encoder_in, *encoder_out;
-  struct vchiq_mmal_port *resizer_in, *resizer_out;
+  // struct vchiq_mmal_port *resizer_in, *resizer_out;
   struct ili9341_buffer_info display_buffers[2];
 
   cam.io_buffers[0] = dma_alloc(H264BUF_SIZE, 0);
@@ -3291,7 +3281,6 @@ void vchiq_init(struct block_device *b)
   uint32_t slot_phys;
   uint32_t channelbase;
   int slot_mem_size, frag_mem_size;
-  int err;
   uint32_t fragment_size;
   struct vchiq_state *s = &vchiq_state;
   char *fragments_baseaddr;
