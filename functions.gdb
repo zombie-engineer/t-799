@@ -32,6 +32,27 @@ set $emmc_tune_steps_ddr = (int *)(0x3f300090)
 set $emmc_spi_int_spt = (int *)(0x3f3000f0)
 set $emmc_slotisr_ver = (int *)(0x3f3000fc)
 
+set $sdhost_cmd = (int *)0x3f202000
+set $sdhost_arg = (int *)0x3f202004
+set $sdhost_hsts = (int *)0x3f202020
+set $sdhost_cnt = (int *)0x3f202028
+set $sdhost_edm = (int *)0x3f202034
+set $sdhost_hcfg = (int *)0x3f202038
+set $sdhost_hbct = (int *)0x3f20203c
+set $sdhost_data = (int *)0x3f202040
+set $sdhost_hblc = (int *)0x3f202050
+
+define lssdhost
+  printf "CMD %08x" , *$sdhost_cmd
+  printf ",ARG %08x" , *$sdhost_arg
+  printf ",HSTS %08x" , *$sdhost_hsts
+  printf ",EDM %08x" , *$sdhost_edm
+  printf ",HCFG %08x" , *$sdhost_hcfg
+  printf ",HBCT %08x" , *$sdhost_hbct
+  printf ",HBLC %08x" , *$sdhost_hblc
+  printf "\n"
+end
+
 define lspi
   printf "SPI_CS:%08x", *$spi_cs
   printf ",CHIPSELECT:%d", *$spi_cs & 3
