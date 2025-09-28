@@ -338,4 +338,4 @@ int sdhc_read(struct sdhc *s, uint8_t *buf, uint64_t from_sector,
 int sdhc_write(struct sdhc *s, const uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);
 
-void sdhc_set_log_level(int l);
+int sdhc_set_log_level(int l);

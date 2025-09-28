@@ -818,8 +818,10 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
   return SUCCESS;
 }
 
-void sdhc_set_log_level(int l)
+int sdhc_set_log_level(int l)
 {
-  SDHC_LOG_INFO("log level set from %d to %d\r\n", sdhc_log_level, l);
+  int old = sdhc_log_level;
+  SDHC_LOG_INFO("log level set from %d to %d", sdhc_log_level, l);
   sdhc_log_level = l;
+  return old;
 }
