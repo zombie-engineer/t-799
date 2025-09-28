@@ -995,10 +995,10 @@ struct sdhc_ops bcm_sdhost_ops = {
   .wait_prev_done = bcm_sdhost_wait_prev_done
 };
 
-void bcm_sdhost_set_log_level(int l)
+int bcm_sdhost_set_log_level(int l)
 {
-  BCM_SDHOST_LOG_INFO("log level set from %d to %d\r\n", bcm_sdhost_log_level,
-    l);
-
+  int old = bcm_sdhost_log_level;
+  BCM_SDHOST_LOG_INFO("log level set from %d to %d", bcm_sdhost_log_level, l);
   bcm_sdhost_log_level = l;
+  return old;
 }

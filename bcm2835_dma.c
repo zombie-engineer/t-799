@@ -6,6 +6,7 @@
 #include <printf.h>
 #include <bcm2835/bcm2835_ic.h>
 #include <irq.h>
+#include <logger.h>
 #include "bcm2835_dma_regs.h"
 
 #define BCM2835_DMA_NUM_SCBS 32
@@ -13,6 +14,13 @@
 
 #define BCM2835_DMA_MAX_PER_CHANNEL_IRQ_CBS 4
 #define DMA_CB0_PADDR  RAM_PHY_TO_BUS_UNCACHED(bcm2835_dma.cbs)
+
+#undef BCM2835_DMA_ENABLE_LOG
+#if BCM2835_DMA_ENABLE_LOG
+#define BCM2835_DMA_LOG(__fmt, ...) os_log(__fmt "\r\n", ##__VA_ARGS__)
+#else
+#define BCM2835_DMA_LOG(__fmt, ...)
+#endif
 
 struct bcm2835_dma_cb {
   uint32_t transfer_info;
@@ -178,6 +186,7 @@ bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   cb->dest_addr = p->dst;
   cb->transfer_len = p->len;
   cb->next_cb_addr = 0;
+  BCM2835_DMA_LOG("bcm2835_dma_program_cb #%d, %p", cb_handle, cb);
   return true;
 }
 
@@ -195,21 +204,26 @@ bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src)
 
 int bcm2835_dma_request_channel(void)
 {
-  return bitmap_set_next_free(&bcm2835_dma.channel_bitmap);
+  int ret = bitmap_set_next_free(&bcm2835_dma.channel_bitmap);
+  BCM2835_DMA_LOG("bcm2835_dma_request_channel, ret:#%d", ret);
+  return ret;
 }
 
 void bcm2835_dma_enable(int channel)
 {
+  BCM2835_DMA_LOG("bcm2835_dma_enable, ch:%d", channel);
   *DMA_ENABLE |= 1 << channel;
 }
 
 void bcm2835_dma_activate(int channel)
 {
+  BCM2835_DMA_LOG("bcm2835_dma_activate, ch:%d", channel);
   *DMA_CS(channel) |= DMA_CS_ACTIVE;
 }
 
 void bcm2835_dma_reset(int channel)
 {
+  BCM2835_DMA_LOG("bcm2835_dma_reset, ch:%d", channel);
   *DMA_CS(channel) |= DMA_CS_RESET;
 }
 
@@ -221,16 +235,21 @@ void bcm2835_dma_poll(int channel)
 void bcm2835_dma_set_cb(int channel, int cb_handle)
 {
   uint64_t cb_addr = (uint64_t)&bcm2835_dma.cbs[cb_handle];
-  *DMA_CONBLK_AD(channel) = RAM_PHY_TO_BUS_UNCACHED(cb_addr);
+  uint32_t paddr = RAM_PHY_TO_BUS_UNCACHED(cb_addr);
+  BCM2835_DMA_LOG("bcm2835_dma_set_cb, ch:%d, cb#%d, va:%lx, pa:%08x", channel, cb_handle, cb_addr, paddr);
+  *DMA_CONBLK_AD(channel) = paddr;
 }
 
 int bcm2835_dma_reserve_cb(void)
 {
-  return bitmap_set_next_free(&bcm2835_dma.cb_bitmap);
+  int ret = bitmap_set_next_free(&bcm2835_dma.cb_bitmap);
+  BCM2835_DMA_LOG("bcm2835_dma_reserve_cb, cb#%d", ret);
+  return ret;
 }
 
 void bcm2835_dma_release_cb(int cb_idx)
 {
+  BCM2835_DMA_LOG("bcm2835_dma_release_cb, cb#%d", cb_idx);
   bitmap_clear_entry(&bcm2835_dma.cb_bitmap, cb_idx);
 }
 
@@ -312,7 +331,7 @@ void bcm2835_dma_dump_channel(const char *tag, int channel)
   uint32_t next_cb_addr = *DMA_NEXT_CONBLK(channel);
   uint32_t paddr = *DMA_CONBLK_AD(channel);
 
-  printf("dma [%s] cb#%d, cs:%08x,conblk:%08x,ti:%08x,len:%d,nxt:%08x\r\n",
+  BCM2835_DMA_LOG("dma [%s] cb#%d, cs:%08x,conblk:%08x,ti:%08x,len:%d,nxt:%08x",
     tag, cb_paddr_to_cb_idx(paddr), *DMA_CS(channel), paddr, *DMA_TI(channel),
     *DMA_TXFR_LEN(channel), next_cb_addr);
 
@@ -320,7 +339,7 @@ void bcm2835_dma_dump_channel(const char *tag, int channel)
 
   while (paddr) {
     cb = PADDR_UNCACHED_TO_PTR(paddr);
-    printf("->cb#%d %p, ti:%08x,s:%08x->%08x,len:%d\r\n",
+    BCM2835_DMA_LOG("->cb#%d %p, ti:%08x,s:%08x->%08x,len:%d",
       cb_paddr_to_cb_idx(paddr),
       cb, cb->transfer_info, cb->source_addr, cb->dest_addr,
       cb->transfer_len, cb->next_cb_addr);
