@@ -231,14 +231,17 @@ void bcm2835_dma_reset(int channel)
 
 void bcm2835_dma_poll(int channel)
 {
-  while(((*DMA_CS(channel)) & DMA_CS_END) == 0);
+  while (((*DMA_CS(channel)) & DMA_CS_END) == 0);
 }
 
 void bcm2835_dma_set_cb(int channel, int cb_handle)
 {
   uint64_t cb_addr = (uint64_t)&bcm2835_dma.cbs[cb_handle];
   uint32_t paddr = RAM_PHY_TO_BUS_UNCACHED(cb_addr);
-  BCM2835_DMA_LOG("bcm2835_dma_set_cb, ch:%d, cb#%d, va:%lx, pa:%08x", channel, cb_handle, cb_addr, paddr);
+
+  BCM2835_DMA_LOG("bcm2835_dma_set_cb, ch:%d, cb#%d, va:%lx, pa:%08x",
+    channel, cb_handle, cb_addr, paddr);
+
   *DMA_CONBLK_AD(channel) = paddr;
 }
 

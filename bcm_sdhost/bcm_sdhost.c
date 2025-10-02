@@ -212,15 +212,8 @@ static void bcm_sdhost_dump_regs(bool full)
   BCM_SDHOST_LOG_INFO("resp3:0x%08x", ioreg32_read(SDHOST_RESP3));
 }
 
-int dma_channel;
-static int num_dmas = 0;
-
-static void bcm_sdhost_irq(void)
+static inline void bcm_sdhost_irq_log()
 {
-  uint32_t hsts;
-  uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
-  bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
-
 #if defined(BCM_SDHOST_DEBUG_LOG_IRQ)
   BCM_SDHOST_LOG_IRQ("hcfg:%08x, hsts:%08x, edm:%08x, cmd:%08x,w:%d",
     ioreg32_read(SDHOST_HCFG),
@@ -230,12 +223,20 @@ static void bcm_sdhost_irq(void)
     is_write
   );
 #endif
+}
+
+static void bcm_sdhost_irq(void)
+{
+  uint32_t hsts;
+  uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
+  bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
+
+  bcm_sdhost_irq_log();
 
   if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
     hsts = ioreg32_read(SDHOST_HSTS);
     if (hsts & SDHOST_HSTS_TRANSFER_ERROR_MASK) {
       printf("bcm_sdhost transfer error: HSTS:%08x\r\n", hsts);
-      bcm2835_dma_dump_channel("transfer err", dma_channel);
       while(1) {
         asm volatile("wfe");
       }
@@ -324,7 +325,10 @@ static void bcm_sdhost_setup_dma_transfer(struct sdhc_io *io,
     r.src_type   = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
     r.src        = data_reg;
   }
-  bcm2835_dma_program_cb(&r, control_block);
+
+  if (!bcm2835_dma_program_cb(&r, control_block)) {
+    while (1);
+  }
 }
 
 static int bcm_sdhost_dma_io(struct sd_cmd *c, bool is_write)
@@ -493,7 +497,10 @@ static void bcm_sdhost_setup_dma_chain(struct sdhc *s, struct sd_cmd *c)
 #endif
 
     r.enable_irq = false;
-    bcm2835_dma_program_cb(&r, b->dma_cb);
+
+    if (!bcm2835_dma_program_cb(&r, b->dma_cb)) {
+      while (1);
+    }
     if (dma_cb_idx_prev != -1)
       bcm2835_dma_link_cbs(dma_cb_idx_prev, b->dma_cb);
     dma_cb_idx_prev = b->dma_cb;
@@ -514,8 +521,6 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
   bool is_write)
 {
   s->io.c = c;
-
-  dma_channel = s->io.dma_channel;
 
   if (is_write && s->dma_stream_mode) {
     bcm_sdhost_setup_dma_chain(s, c);
@@ -540,17 +545,7 @@ static void bcm_sdhost_cmd_prep_dma(struct sdhc *s, struct sd_cmd *c,
    * Activates DMA channel, DMA will copy 4byte word each time sdhost asserts
    * DREQ signal
    */
- //    printf("EDM: %08x, STS:%08x, CMD:%08x\r\n",
- //        ioreg32_read(SDHOST_EDM),
- //        ioreg32_read(SDHOST_HSTS),
- //        ioreg32_read(SDHOST_CMD));
- //    printf("EDM: %08x, STS:%08x, CMD:%08x\r\n",
- //        ioreg32_read(SDHOST_EDM),
- //        ioreg32_read(SDHOST_HSTS),
- //        ioreg32_read(SDHOST_CMD));
   bcm2835_dma_activate(s->io.dma_channel);
-  bcm2835_dma_dump_channel("after activate", s->io.dma_channel);
-  // while(1);
 }
 
 /*
@@ -656,7 +651,6 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
     BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
       ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
 
-  num_dmas = 0;
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
 
@@ -976,7 +970,6 @@ static void bcm_sdhost_wait_prev_done(struct sdhc *s)
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
-  num_dmas++;
   if (!is_write)
     os_event_notify(&bcm_sdhost_dma_done_event);
 }
