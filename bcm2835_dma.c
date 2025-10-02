@@ -186,7 +186,9 @@ bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   cb->dest_addr = p->dst;
   cb->transfer_len = p->len;
   cb->next_cb_addr = 0;
+
   BCM2835_DMA_LOG("bcm2835_dma_program_cb #%d, %p", cb_handle, cb);
+  asm volatile ("dsb sy");
   return true;
 }
 
