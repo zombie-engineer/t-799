@@ -5,6 +5,7 @@
 #include <list.h>
 #include <list_fifo.h>
 #include <logger.h>
+#include <bcm2835/bcm_sdhost.h>
 #include <string.h>
 #include <kmalloc.h>
 #include <printf.h>
@@ -23,8 +24,8 @@ static inline void hexdump(const uint8_t *buffer, uint32_t size)
 
   for (i = 0; i < size; i += 16) {
     for (j = 0; j < 16 && i + j < size; j++)
-      printf("%02x ", buffer[i + j]);
-    printf("\r\n");
+      os_log("%02x ", buffer[i + j]);
+    os_log("\r\n");
   }
 }
 
@@ -168,12 +169,8 @@ static bool sdhc_self_test_read(struct sdhc *s)
   int i;
   const uint32_t num_sectors = 2;
   const uint64_t from_sector = 8192;
-  int old_log_level_sdhc;
-  int old_log_level_bcm_sdhost;
 
   os_log("Running self-test read\r\n");
-  old_log_level_sdhc = sdhc_set_log_level(LOG_LEVEL_DEBUG3);
-  old_log_level_bcm_sdhost = bcm_sdhost_set_log_level(LOG_LEVEL_DEBUG3);
 
   for (i = 0; i < 4; ++i) {
     os_log("Reading %d blocks, starting from block #%ld, iteration #%d\r\n",
@@ -191,8 +188,6 @@ static bool sdhc_self_test_read(struct sdhc *s)
     hexdump((uint8_t *)sdhc_testbuf, 32);
   }
   os_log("Completed self-test read\r\n");
-  sdhc_set_log_level(old_log_level_sdhc);
-  bcm_sdhost_set_log_level(old_log_level_bcm_sdhost);
   return true;
 }
 
