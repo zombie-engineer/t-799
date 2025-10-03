@@ -698,8 +698,6 @@ static int OPTIMIZED mmal_port_buf_to_sdcard(struct vchiq_mmal_port *p)
   int irqflags;
   int err;
   struct mmal_buffer *b;
-  // uint64_t vcos_systime;
-  // bool buffer_processed = false;
   struct list_head iobufs = LIST_HEAD_INIT(iobufs);
   struct list_head *node;
   struct write_stream_buf *iobuf;
@@ -759,7 +757,6 @@ out_err:
 
 static void vchiq_io_thread(void)
 {
-  // struct mmal_io_work *w;
   bdev->ops.write_stream_open(bdev, 0);
   while(1) {
     os_event_wait(&mmal_io_work_waitflag);
