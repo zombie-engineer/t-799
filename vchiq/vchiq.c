@@ -1647,7 +1647,7 @@ static int mmal_port_buffer_send_one(struct vchiq_mmal_port *p,
 }
 
 static int vchiq_mmal_port_parameter_set(struct vchiq_mmal_port *p,
-  uint32_t parameter_id, void *value, int value_size)
+  uint32_t parameter_id, const void *value, int value_size)
 {
   VCHIQ_MMAL_MSG_DECL(p->component->ms, PORT_PARAMETER_SET, port_parameter_set,
     port_parameter_set_reply);
@@ -2151,6 +2151,8 @@ static int vchiq_mmal_port_parameter_get(struct vchiq_mmal_port *p,
   m->size = 2 * sizeof(uint32_t) + *value_size;
 
   VCHIQ_MMAL_MSG_COMMUNICATE_SYNC();
+  MMAL_INFO("port_parameter_get: id:%d,resp:status:%d,id:%d,size:%d\n",
+    parameter_id, r->status, r->id, r->size);
 
   memcpy(value, r->value, MIN(r->size, *value_size));
   *value_size = r->size;
@@ -2313,7 +2315,7 @@ out_err:
 }
 
 static void mmal_format_set(struct mmal_es_format_local *f,
-  int encoding, int encoding_variant, int width, int height, int framerate,
+  int encoding, int encoding_variant, int width, int height, int frame_rate,
   int bitrate)
 {
   f->encoding = encoding;
@@ -2326,7 +2328,7 @@ static void mmal_format_set(struct mmal_es_format_local *f,
   f->es->video.crop.height = height;
 
   /* frame rate taken from RaspiVid.c */
-  f->es->video.frame_rate.num = framerate;
+  f->es->video.frame_rate.num = frame_rate;
   f->es->video.frame_rate.den = 1;
 
   f->bitrate = bitrate;
@@ -2769,19 +2771,108 @@ out_err:
 #endif
 
 struct encoder_h264_params {
-  uint32_t quantization;
+  uint32_t q_initial;
+  uint32_t q_min;
+  uint32_t q_max;
+  uint32_t intraperiod;
+  uint32_t bitrate;
+  enum mmal_video_profile profile;
+  enum mmal_video_level level;
 };
+
+static int encoder_set_params(struct vchiq_mmal_port *e,
+  const struct encoder_h264_params *p)
+{
+  int err = SUCCESS;
+  uint32_t v32;
+
+  const struct mmal_parameter_video_profile video_profile = {
+    .profile = p->profile,
+    .level = p->level
+  };
+
+#define MMAL_PARAM_SET32(__p, __v) \
+  v32 = __v; \
+  err = vchiq_mmal_port_parameter_set(e, MMAL_PARAMETER_ ## __p, &v32, \
+    sizeof(v32)); \
+    CHECK_ERR("Failed to set param MMAL_PARAMETER_ "#__p); \
+  MMAL_INFO(#__p" set to %d", v32)
+
+  MMAL_PARAM_SET32(VIDEO_ENCODE_INITIAL_QUANT, p->q_initial);
+  MMAL_PARAM_SET32(VIDEO_ENCODE_MIN_QUANT, p->q_min);
+  MMAL_PARAM_SET32(VIDEO_ENCODE_MAX_QUANT, p->q_max);
+  MMAL_PARAM_SET32(INTRAPERIOD, p->intraperiod);
+  MMAL_PARAM_SET32(VIDEO_BIT_RATE, p->bitrate);
+  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_HEADER, 1);
+
+  err = vchiq_mmal_port_parameter_set(e, MMAL_PARAMETER_PROFILE,
+    &video_profile, sizeof(video_profile));
+  CHECK_ERR("Failed to set h264 MMAL_PARAMETER_PROFILE param");
+
+#if 0
+  v32 = 1;
+  err = vchiq_mmal_port_parameter_set(e,
+    MMAL_PARAMETER_VIDEO_ENCODE_INLINE_HEADER, &v32, sizeof(v32));
+  CHECK_ERR("Failed to set h264 encoder parameter");
+#endif
+
+#if 0
+  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
+    MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING, &bool_arg, sizeof(bool_arg));
+  CHECK_ERR("Failed to set h264 encoder param 'sps timing'");
+
+  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
+    MMAL_PARAMETER_VIDEO_ENCODE_INLINE_VECTORS, &bool_arg, sizeof(bool_arg));
+  CHECK_ERR("Failed to set h264 encoder param 'inline vectors'");
+
+  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
+    MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING, &bool_arg, sizeof(bool_arg));
+  CHECK_ERR("Failed to set h264 encoder param 'inline vectors'");
+#endif
+out_err:
+  return err;
+}
+
+static int encoder_out_dump_params(struct vchiq_mmal_port *e)
+{
+  int err = SUCCESS;
+
+  uint32_t v32;
+  uint32_t param_size;
+
+#define MMAL_PARAM_LOG32(__p) \
+  param_size = sizeof(v32); \
+  err = vchiq_mmal_port_parameter_get(e, MMAL_PARAMETER_ ## __p, &v32, \
+    &param_size); \
+    CHECK_ERR("Failed to get param MMAL_PARAMETER_ "#__p); \
+  MMAL_INFO(#__p" (%d): %d", param_size, v32)
+
+  MMAL_PARAM_LOG32(VIDEO_ENCODE_INITIAL_QUANT);
+  MMAL_PARAM_LOG32(VIDEO_ENCODE_MIN_QUANT);
+  MMAL_PARAM_LOG32(VIDEO_ENCODE_MAX_QUANT);
+  MMAL_PARAM_LOG32(INTRAPERIOD);
+  MMAL_PARAM_LOG32(VIDEO_BIT_RATE);
+  MMAL_PARAM_LOG32(VIDEO_ENCODE_INLINE_HEADER);
+out_err:
+  return err;
+}
 
 static int create_encoder_component(struct vchiq_service_common *mmal_service,
   struct vchiq_mmal_port **encoder_in,
-  struct vchiq_mmal_port **encoder_out, int width, int height)
+  struct vchiq_mmal_port **encoder_out, int width, int height, int frame_rate)
 {
-  uint32_t uint32_arg;
   int err = SUCCESS;
   struct vchiq_mmal_component *encoder;
-  struct mmal_parameter_video_profile video_profile;
-  struct encoder_h264_params p = {
-    .quantization = 25
+  const uint32_t bit_rate = 2 * 1000 * 1000;
+
+  const struct encoder_h264_params encoder_params = {
+    .q_initial = 25,
+    .q_min = 10,
+    .q_max = 30,
+    .profile = MMAL_VIDEO_PROFILE_H264_HIGH,
+    .level = MMAL_VIDEO_LEVEL_H264_4,
+    .intraperiod = frame_rate * 2,
+    .bitrate = bit_rate
   };
  
   encoder = component_create(mmal_service, "ril.video_encode");
@@ -2801,7 +2892,7 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   CHECK_ERR("failed to enable control port");
 
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
-    height, 0, 25000000);
+    height, frame_rate, bit_rate);
 
   size_t requested_buf_size = 256 * 1024;
   size_t requested_num_buffers = 128;
@@ -2829,51 +2920,15 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
   err = mmal_port_set_format(&encoder->input[0]);
   CHECK_ERR("Failed to set format for preview capture port");
 
-  if (p.quantization) {
-    uint32_arg = p.quantization;
-    err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-      MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT, &uint32_arg,
-      sizeof(uint32_arg));
-    CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
-    MMAL_INFO("Set quantization to %d", uint32_arg);
+  err = encoder_out_dump_params(&encoder->output[0]);
+  if (err)
+    goto out_err;
 
-    err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-      MMAL_PARAMETER_VIDEO_ENCODE_MIN_QUANT, &uint32_arg, sizeof(uint32_arg));
-    CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT param");
-    MMAL_INFO("Set min quantization to %d", uint32_arg);
+  err = encoder_set_params(&encoder->output[0], &encoder_params);
+  if (err)
+    goto out_err;
 
-    err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-      MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT, &uint32_arg, sizeof(uint32_arg));
-    CHECK_ERR("Failed to set MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT param");
-    MMAL_INFO("Set max quantization to %d", uint32_arg);
-  }
-
-  video_profile.profile = MMAL_VIDEO_PROFILE_H264_HIGH;
-  video_profile.level = MMAL_VIDEO_LEVEL_H264_4;
-
-  err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-    MMAL_PARAMETER_PROFILE, &video_profile, sizeof(video_profile));
-  CHECK_ERR("Failed to set h264 MMAL_PARAMETER_PROFILE param");
-
-#if 0
-  bool_arg = false;
-  err = vchiq_mmal_port_parameter_set(&encoder->output[0],
-    MMAL_PARAMETER_VIDEO_ENCODE_INLINE_HEADER, &bool_arg, sizeof(bool_arg));
-  CHECK_ERR("Failed to set h264 encoder parameter");
-
-  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
-    MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING, &bool_arg, sizeof(bool_arg));
-  CHECK_ERR("Failed to set h264 encoder param 'sps timing'");
-
-  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
-    MMAL_PARAMETER_VIDEO_ENCODE_INLINE_VECTORS, &bool_arg, sizeof(bool_arg));
-  CHECK_ERR("Failed to set h264 encoder param 'inline vectors'");
-
-  err = vchiq_mmal_port_parameter_set(&encoder->input[0],
-    MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING, &bool_arg, sizeof(bool_arg));
-  CHECK_ERR("Failed to set h264 encoder param 'inline vectors'");
-#endif
-
+  err = encoder_out_dump_params(&encoder->output[0]);
 out_err:
   return err;
 }
@@ -3121,12 +3176,13 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 
-  err = create_camera_component(mmal_service, frame_width, frame_height, 30,
-    &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
+  const int frame_rate = 25;
+  err = create_camera_component(mmal_service, frame_width, frame_height,
+    frame_rate, &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
   CHECK_ERR("Failed to create camera component");
 
   err = create_encoder_component(mmal_service, &encoder_in,
-    &encoder_out, frame_width, frame_height);
+    &encoder_out, frame_width, frame_height, frame_rate);
   CHECK_ERR("Failed to create encoder component");
 
 #if 0
