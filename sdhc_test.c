@@ -33,15 +33,6 @@ static OPTIMIZED void sdhc_dump_io_stats(int io_idx, uint64_t io_start,
   uint64_t io_end)
 {
   const struct sdhc_cmd_stat *const s = &bcm_sdhost_cmd_stats;
-#if 0
-  os_log("wr#%d: %d %d %d %d %d\r\n", io_idx,
-    (uint32_t)(io_end - io_start),
-    (uint32_t)(s->cmd_start_time - s->wait_rdy_time),
-    (uint32_t)(s->cmd_end_time - s->cmd_start_time),
-    (uint32_t)(s->data_end_time - s->cmd_end_time),
-    (uint32_t)(s->multiblock_end_time - s->multiblock_start_time));
-#endif
-
   os_log("%ld %ld %ld %ld %ld %ld %ld %ld\r\n",
     io_start,
     s->multiblock_start_time,
@@ -77,8 +68,6 @@ void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
   /* Total write = 100Mb = 100 * 1024 * 1024 */
 
   for (int i = 0; i < 400; ++i) {
-    // os_wait_ms(2);
-
     io_start_time = arm_timer_get_count();
     err = bdev->ops.write(bdev, (uint8_t *)sdhc_testbuf, i * 512, 512);
     if (err) {
@@ -91,7 +80,6 @@ void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
     sdhc_dump_io_stats(i, io_start_time, io_end_time);
   }
 }
-
 
 static void write_stream_init(struct write_stream_buf *b, void *data,
   uint32_t buf_size)
@@ -161,8 +149,6 @@ error:
   }
 }
 
-extern bool sd_extra_log;
-
 static bool sdhc_self_test_read(struct sdhc *s)
 {
   int err;
@@ -177,7 +163,6 @@ static bool sdhc_self_test_read(struct sdhc *s)
       num_sectors, from_sector, i);
 
     memset(sdhc_testbuf, 0, sizeof(sdhc_testbuf));
-    sd_extra_log = true;
     err = sdhc_read(s, (uint8_t *)sdhc_testbuf, from_sector, num_sectors);
     if (err) {
       os_log("failed to read from SD\r\n");

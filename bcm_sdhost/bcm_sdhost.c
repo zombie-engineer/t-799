@@ -160,7 +160,6 @@ typedef enum {
   BCM_SDHOST_STATE_UNKNOWN       = 0x10 
 } bcm_sdhost_state_t;
 
-bool sd_extra_log = false;
 static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
 static int bcm_sdhost_should_wait_last_io = false;
 struct sdhc_cmd_stat bcm_sdhost_cmd_stats = { 0 };
