@@ -246,7 +246,7 @@ static void bcm_sdhost_irq(void)
     ioreg32_write(SDHOST_HCFG, hcfg);
     bcm_sdhost_cmd_stats.cmd_end_time = arm_timer_get_count();
     if (!is_write)
-      os_event_notify(&bcm_sdhost_cmd_done_event);
+      os_event_notify_isr(&bcm_sdhost_cmd_done_event);
     return;
   }
 
@@ -266,7 +266,7 @@ static void bcm_sdhost_irq(void)
       // sched_mon_start();
       bcm_sdhost_cmd_stats.data_end_irq_time = arm_timer_get_count();
       BCM_SDHOST_LOG_IRQ("block_done");
-      os_event_notify(&bcm_sdhost_block_done_event);
+      os_event_notify_isr(&bcm_sdhost_block_done_event);
     }
     return;
   }
@@ -970,7 +970,7 @@ static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
   if (!is_write)
-    os_event_notify(&bcm_sdhost_dma_done_event);
+    os_event_notify_isr(&bcm_sdhost_dma_done_event);
 }
 
 struct sdhc_ops bcm_sdhost_ops = {

@@ -765,22 +765,24 @@ static void vchiq_io_thread(void)
   }
 }
 
-static inline void vchiq_event_check(struct event *ev, struct vchiq_remote_event *e)
+static inline void vchiq_event_check_isr(struct event *ev,
+  struct vchiq_remote_event *e)
 {
   dsb();
+
   if (e->armed && e->fired)
-    os_event_notify(ev);
+    os_event_notify_isr(ev);
 }
 
-static void vchiq_check_local_events()
+static void vchiq_check_local_events_isr(void)
 {
   struct vchiq_shared_state *local;
   local = vchiq_state.local;
 
-  vchiq_event_check(&vchiq_state.trigger_waitflag, &local->trigger);
-  vchiq_event_check(&vchiq_state.recycle_waitflag, &local->recycle);
-  vchiq_event_check(&vchiq_state.sync_trigger_waitflag, &local->sync_trigger);
-  vchiq_event_check(&vchiq_state.sync_release_waitflag, &local->sync_release);
+  vchiq_event_check_isr(&vchiq_state.trigger_waitflag, &local->trigger);
+  vchiq_event_check_isr(&vchiq_state.recycle_waitflag, &local->recycle);
+  vchiq_event_check_isr(&vchiq_state.sync_trigger_waitflag, &local->sync_trigger);
+  vchiq_event_check_isr(&vchiq_state.sync_release_waitflag, &local->sync_release);
 }
 
 static void vchiq_irq_handler(void)
@@ -826,7 +828,7 @@ static void vchiq_irq_handler(void)
    */
   bell_reg = ioreg32_read(BELL0);
   if (bell_reg & 4)
-    vchiq_check_local_events();
+    vchiq_check_local_events_isr();
 }
 
 static void vchiq_ring_bell(void)

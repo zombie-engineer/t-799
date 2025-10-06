@@ -70,6 +70,13 @@ void os_event_wait(struct event *ev)
   OSAPI_PUTS("[os_event_wait end slow]\r\n");
 }
 
+void os_event_notify_isr(struct event *ev)
+{
+  OSAPI_PUTS("[os_event_notify_isr]\r\n");
+  sched_event_notify_isr(ev);
+  OSAPI_PUTS("[os_event_notify_isr end]\r\n");
+}
+
 void os_event_notify(struct event *ev)
 {
   OSAPI_PUTS("[os_event_notify]\r\n");

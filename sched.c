@@ -239,38 +239,45 @@ void sched_delay_current_ms_isr(uint64_t ms)
 void sched_event_wait_isr(struct event *ev)
 {
   struct task *t = sched.current;
+
+  if (ev->ev == 1) {
+    return;
+  }
+
   t->scheduler_request = TASK_SCHED_RQ_BLOCK_ON_EVENT;
   t->wait_event = ev;
   __schedule();
 }
 
-void sched_event_notify(struct event *ev)
+void sched_event_notify_isr(struct event *ev)
 {
-  int irqflags;
   bool needs_resched = false;
   struct list_head *node;
   struct list_head *tmp;
-
-  struct list_head tmp_head = LIST_HEAD_INIT(tmp_head);
   struct task *t;
 
-  disable_irq_save_flags(irqflags);
   ev->ev = 1;
 
   list_for_each_safe(node, tmp, &sched.blocked_on_event) {
     t = container_of(node, struct task, scheduler_list);
     if (t->wait_event == ev) {
-      list_move(node, &tmp_head);
+      list_move(node, &sched.blocked_on_event);
       needs_resched = true;
     }
   }
 
-  list_for_each_safe(node, tmp, &tmp_head)
-    list_move(node, &sched.blocked_on_event);
-
   sched.needs_resched = needs_resched;
-  restore_irq_flags(irqflags);
 }
+
+void sched_event_notify(struct event *ev)
+{
+  int irq;
+
+  disable_irq_save_flags(irq);
+  sched_event_notify_isr(ev);
+  restore_irq_flags(irq);
+}
+
 
 void scheduler_init(void)
 {

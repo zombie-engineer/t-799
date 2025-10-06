@@ -28,6 +28,7 @@ void os_exit_task(struct task *t);
 void os_exit_current_task(void);
 
 void os_event_notify(struct event *ev);
+void os_event_notify_isr(struct event *ev);
 void os_event_notify_and_yield(struct event *ev);
 
 void svc_handler(uint32_t imm);
