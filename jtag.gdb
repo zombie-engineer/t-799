@@ -1,14 +1,14 @@
-target remote :3333
+target remote :1234
 set pagination off
 set print pretty on
 displ/8i $pc
 source functions.gdb
-p $pc += 4
-tb mmu_init
-c
-fin
+# p $pc += 4
+# tb mmu_init
+# c
+# fin
 
-source breakpoints.gdb
+#source breakpoints.gdb
 
  #commands
  #silent
@@ -20,4 +20,4 @@ source breakpoints.gdb
  #c
  #end
 
-c
+#c
