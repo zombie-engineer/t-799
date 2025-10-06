@@ -1808,16 +1808,14 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   // mmal_buffer_print_meta(p->nr_busy, &r->buffer_header, "to_host");
 
   r->buffer_header.user_data =(uint32_t)(uint64_t)b;
+
 #if 0
   uint64_t ts = arm_timer_get_count();
-  os_log("[%ld] port:%p pts:%ld, len:%ld, flags:%08x\r\n", p, ts,
-    r->buffer_header.pts,
-    r->buffer_header.length, r->buffer_header.flags);
+  os_log("%ld %ld %ld\r\n", ts, r->buffer_header.pts,
+    r->buffer_header.length);
 #endif
-
   os_event_notify_and_yield(&mmal_io_work_waitflag);
 
-// out_err:
   return err;
 }
 
