@@ -403,14 +403,6 @@ static int bcm_sdhost_data_write_sw(struct sdhc *s, const uint32_t *ptr,
     wr_idx++;
   }
 
-#if 0
-  for (int i = 0; i < 32; ++i) {
-    BCM_SDHOST_LOG_DBG2("wr_compl hsts:%08x, edm:%08x\r\n",
-      ioreg32_read(SDHOST_HSTS),
-      ioreg32_read(SDHOST_EDM));
-  }
-#endif
-
   return SUCCESS;
 }
 
@@ -486,15 +478,6 @@ static void bcm_sdhost_setup_dma_chain(struct sdhc *s, struct sd_cmd *c)
     r.len       = b->io_size;
     total_io_size += b->io_size;
 
-#if 0
-    printf("bcm_sdhost_setup_dma_chain cb:%d,off:%d,len:%d,max:%d\r\n",
-      b->dma_cb,
-      b->io_offset,
-      b->io_size,
-      b->size,
-      total_io_size);
-#endif
-
     r.enable_irq = false;
 
     if (!bcm2835_dma_program_cb(&r, b->dma_cb)) {
@@ -568,37 +551,19 @@ static void bcm_sdhost_on_data_done(void)
     ioreg32_read(SDHOST_EDM));
 }
 
-#define BCM_SDHOST_LOG_WAITERS 0
 static OPTIMIZED inline void bcm_sdhost_wait_last_op_complete(void)
 {
   bool hsts_data_is_set;
   int fsm_state;
-  bool done = false;
-#if BCM_SDHOST_LOG_WAITERS
-  bool waited = false;
-#endif
 
-repeat:
-  hsts_data_is_set = ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG;
-  if (!hsts_data_is_set) {
-    fsm_state = ioreg32_read(SDHOST_EDM) & SDHOST_EDM_FSM_MASK;
-    done = fsm_state == SDHOST_EDM_FSM_DATAMODE;
+  while (1) {
+    hsts_data_is_set = ioreg32_read(SDHOST_HSTS) & SDHSTS_DATA_FLAG;
+    if (!hsts_data_is_set) {
+      fsm_state = ioreg32_read(SDHOST_EDM) & SDHOST_EDM_FSM_MASK;
+      if (fsm_state == SDHOST_EDM_FSM_DATAMODE)
+        break;
+    }
   }
-
-  if (!done) {
-#if BCM_SDHOST_LOG_WAITERS
-    BCM_SDHOST_LOG_DBG2("w e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
-      ioreg32_read(SDHOST_HSTS));
-    waited = true;
-#endif
-    goto repeat;
-  }
-
-#if BCM_SDHOST_LOG_WAITERS
-  if (waited)
-    printf("wd e:%08x h:%08x\r\n", ioreg32_read(SDHOST_EDM),
-      ioreg32_read(SDHOST_HSTS));
-#endif
 }
 
 static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
@@ -962,8 +927,9 @@ static void bcm_sdhost_wait_prev_done(struct sdhc *s)
   if (!bcm_sdhost_should_wait_last_io)
     return;
 
-  bcm_sdhost_wait_last_op_complete();
   bcm_sdhost_should_wait_last_io = false;
+
+  bcm_sdhost_wait_last_op_complete();
 }
 
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)

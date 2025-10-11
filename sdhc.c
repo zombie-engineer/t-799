@@ -504,27 +504,10 @@ static OPTIMIZED int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
   size_t start_block_idx, size_t num_blocks)
 {
   int err = ERR_INVAL;
-//  sd_card_state_t card_state;
 
-#if 0
-wait:
-  err = sdhc_get_card_state(s);
-  if (err < 0)
-    return err;
-
-  card_state = (sd_card_state_t)err;
-  SDHC_LOG_INFO("card state: %d(%s)", card_state,
-    sd_card_state_to_str(card_state));
-
-  if (card_state == SD_CARD_STATE_PROG)
-    goto wait;
-
-  err = sdhc_dump_card_state(s, "before op", LOG_LEVEL_DEBUG2);
-  if (err)
-    return err;
-#endif
   s->ops->wait_prev_done(s);
   sdhc_current = s;
+
   /*
    * CMD18 READ_MULTIPLE_BLOCKS or CMD25 WRITE_MULTIPLE_BLOCKS must follow
    * CMD23 SET_BLOCK_COUNT in strict sequence, other CMDs not allowed inside
@@ -551,19 +534,6 @@ wait:
       err = sdhc_cmd25(s, start_block_idx, num_blocks, buf,
         SDHC_TIMEOUT_DEFAULT_USEC);
   }
-
-  if (num_blocks > 1) {
-    // err = sdhc_cmd12(s, SDHC_TIMEOUT_DEFAULT_USEC);
-    // SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
-  }
-
-#if 0
-  if (err == SUCCESS) {
-    err = sdhc_dump_card_state(s, "after op", LOG_LEVEL_DEBUG2);
-    if (err)
-      return err;
-  }
-#endif
 
   if (err)
     SDHC_LOG_ERR("sd op %s failed", sdhc_op_to_str(op));
@@ -807,7 +777,6 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
     SDHC_LOG_ERR("Failed to set io_mode %d", mode);
     return err;
   }
-
 
   sdhc->io_mode = mode;
   sdhc->invalidate_before_write = invalidate_before_write;
