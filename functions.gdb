@@ -42,15 +42,76 @@ set $sdhost_hbct = (int *)0x3f20203c
 set $sdhost_data = (int *)0x3f202040
 set $sdhost_hblc = (int *)0x3f202050
 
+define sdhost_expand_hsts
+  if $arg0 & 1
+    printf ",DATA"
+  end
+  if $arg0 & 8
+    printf ",FIFO_ERR"
+  end
+  if $arg0 & 0x10
+    printf ",CRC7_ERR"
+  end
+  if $arg0 & 0x20
+    printf ",CRC16_ERR"
+  end
+  if $arg0 & 0x40
+    printf ",CMD_TIMEOUT"
+  end
+  if $arg0 & 0x80
+    printf ",REW_TIMEOUT"
+  end
+  if $arg0 & 0x100
+    printf ",SDIO_IRQ"
+  end
+  if $arg0 & 0x200
+    printf ",BLOCK_IRQ"
+  end
+  if $arg0 & 0x400
+    printf ",BUSY_IRQ"
+  end
+end
+
+define sdhost_expand_hcfg
+  if $arg0 & 1
+    printf ",REL_CMD_LINE"
+  end
+  if $arg0 & 2
+    printf ",INT_WIDE"
+  end
+  if $arg0 & 4
+    printf ",EXT_WIDE"
+  end
+  if $arg0 & 8
+    printf ",SLOW_CARD"
+  end
+  if $arg0 & 0x10
+    printf ",DATA_IRQ_EN"
+  end
+  if $arg0 & 0x20
+    printf ",SDIO_IRQ_EN"
+  end
+  if $arg0 & 0x100
+    printf ",BLOCK_IRQ_EN"
+  end
+  if $arg0 & 0x400
+    printf ",BUSY_IRQ_EN"
+  end
+end
+
 define lssdhost
-  printf "SDHOST 0x3f202000: "
-  printf "00 CMD:%08x" , *$sdhost_cmd
-  printf "04 ARG:%08x" , *$sdhost_arg
-  printf "20 HSTS:%08x" , *$sdhost_hsts
-  printf "34 EDM:%08x" , *$sdhost_edm
-  printf "38 HCFG:%08x" , *$sdhost_hcfg
-  printf "3c HBCT:%08x" , *$sdhost_hbct
-  printf "50 HBLC:%08x" , *$sdhost_hblc
+  set $sdhost_regval_hsts = *$sdhost_hsts
+  set $sdhost_regval_hcfg = *$sdhost_hcfg
+  printf "SDHOST regs:\n"
+  printf "  0x3f202000: CMD:%08x\n", *$sdhost_cmd
+  printf "  0x3f202004: ARG:%08x\n" , *$sdhost_arg
+  printf "  0x3f202020: HSTS:%08x: ", $sdhost_regval_hsts
+  sdhost_expand_hsts $sdhost_regval_hsts
+  printf "\n  0x3f202034: EDM:%08x\n" , *$sdhost_edm
+  printf "  0x3f202038: HCFG:%08x: ", *$sdhost_hcfg
+  sdhost_expand_hcfg $sdhost_regval_hcfg
+  printf "\n  0x3f20203c: HBCT:%08x\n", *$sdhost_hbct
+  printf "  0x3f202050: HBLC:%08x\n", *$sdhost_hblc
   printf "\n"
 end
 
@@ -391,6 +452,9 @@ define __print_irq
   end
   if (($__irq >> 55) & 1)
     printf "PCM,"
+  end
+  if (($__irq >> 56) & 1)
+    printf "SDHOST,"
   end
   if (($__irq >> 57) & 1)
     printf "UART,"
