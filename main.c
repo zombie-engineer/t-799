@@ -138,7 +138,7 @@ static void app_main(void)
 
   os_log("SDHC intialized\r\n");
 
-  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard))
+  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard, false))
     goto out;
 
   err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA, false);
@@ -155,6 +155,9 @@ static void app_main(void)
   }
 
   sdhc_perf_measure(bdev_partition);
+
+  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard, true))
+    goto out;
 
   err = ili9341_init();
   if (err != SUCCESS) {

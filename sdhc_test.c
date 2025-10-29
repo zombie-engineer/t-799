@@ -10,6 +10,7 @@
 #include <kmalloc.h>
 #include <printf.h>
 #include <common.h>
+#include <memory_map.h>
 #include <log.h>
 
 extern struct sdhc_cmd_stat bcm_sdhost_cmd_stats;
@@ -81,69 +82,121 @@ void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
   }
 }
 
-static void write_stream_init(struct write_stream_buf *b, void *data,
+static void write_stream_init(struct write_stream_buf *b, const void *data,
   uint32_t buf_size)
 {
   memset(b, 0, sizeof(*b));
   INIT_LIST_HEAD(&b->list);
 
-  b->paddr = (uint32_t)(uint64_t)data | 0xc0000000;
+  b->paddr = RAM_PHY_TO_BUS_UNCACHED(data);
   b->size = buf_size;
   b->io_size = 0;
   b->io_offset = 0;
 }
 
-static __attribute__((unused)) void sdhc_test_write_stream(struct block_device *bdev)
+
+#define STREAM_TEST_LOG(__fmt, ...) \
+  os_log("sdhc_test_write_stream: " __fmt "\r\n", ##__VA_ARGS__);
+
+static inline bool sdhc_test_buffer_fill(uint8_t *buf, size_t size)
+{
+  size_t block_n, i;
+  const size_t block_size = 512;
+  size_t num_blocks = size / block_size;
+  uint8_t cell_value;
+
+  if (num_blocks * block_size != size) {
+    STREAM_TEST_LOG("invalid buffer size %d, should be multiple of %d", size,
+      block_size);
+    return false;
+  }
+
+  for (block_n = 0; block_n < num_blocks; ++block_n) {
+    for (i = 0; i < block_size / 2; ++i) {
+      cell_value = (block_n & 0x1f) + i;
+      buf[i] = buf[i + 1] = cell_value;
+    }
+  }
+
+  return true;
+}
+
+struct sdhc_test_io_task {
+  const uint8_t *buf;
+  size_t buf_size;
+};
+
+static int sdhc_test_write_stream_one(struct block_device *bdev,
+  const struct sdhc_test_io_task *c, struct write_stream_buf *b)
 {
   int err;
-  char *buf;
-  const uint32_t initial_sector = 1056768;
-  struct write_stream_buf *b;
   struct write_stream_buf *tmp;
-  uint32_t io_tasks[] = {
-    28,
-    1575,
-    655
-  };
-
-  buf = (char *)dma_alloc(512 * 128, 0);
-
-  memset(buf, 0x77, 512 * 128);
-  memset(buf +    0, 0x11, 512);
-  memset(buf +  512, 0x22, 512);
-  memset(buf + 1024, 0x33, 512);
-  memset(buf + 1536, 0x44, 512);
-  hexdump((uint8_t *)buf, 512);
 
   LIST_HEAD(bufs);
+
+  write_stream_init(b, c->buf, c->buf_size);
+
+  list_fifo_push_tail(&bufs, &b->list);
+  STREAM_TEST_LOG("writing buf %p, %d bytes", b, b->size);
+  err = bdev->ops.write_stream_push(bdev, &bufs);
+  list_for_each_entry_safe(b, tmp, &bufs, list) {
+    list_del(&b->list);
+    STREAM_TEST_LOG("buf %p with size %d released", b, b->size);
+  }
+  STREAM_TEST_LOG("stream_push returned %d", err);
+  return err;
+}
+
+static void sdhc_test_write_stream(struct block_device *bdev)
+{
+  int err;
+  uint8_t *buf;
+  size_t i;
+  const size_t total_buf_size = 512 * 32;
+  const uint32_t initial_sector = 1056768;
+  const struct sdhc_test_io_task *iotask;
+  struct write_stream_buf *iobuf = iobufs;
+
+  buf = dma_alloc(total_buf_size, false);
+  if (!buf) {
+    STREAM_TEST_LOG("failed to allocate dma buffer of size %d",
+      total_buf_size);
+    goto error;
+  }
+
+  const struct sdhc_test_io_task iotasks[] = {
+    { buf, 28 },
+    { buf, 1575 },
+    { buf, 655 }
+  };
+
+  STREAM_TEST_LOG("start");
+
+  memset(buf, 0x14, 512 * 4);
 
   err = bdev->ops.write_stream_open(bdev, initial_sector);
   if (err != SUCCESS)
     goto error;
 
-  for (int i = 0; i < ARRAY_SIZE(io_tasks); ++i) {
-    b = &iobufs[i];
-    write_stream_init(b, buf, io_tasks[i]);
-    list_fifo_push_tail(&bufs, &b->list);
-    os_log("writing %d bytes \r\n", b->size);
-    err = bdev->ops.write_stream_push(bdev, &bufs);
-    list_for_each_entry_safe(b, tmp, &bufs, list) {
-      os_log("buf with size %d released\r\n", b->size);
-      list_del(&b->list);
+  for (int j = 0; j < 100; ++j) {
+    STREAM_TEST_LOG("iter %d", j);
+    for (i = 0; i < ARRAY_SIZE(iotasks); ++i) {
+      iotask = &iotasks[i];
+      err = sdhc_test_write_stream_one(bdev, iotask, iobuf);
+      if (err != SUCCESS)
+        goto error;
+      iobuf++;
+      if (iobuf == &iobufs[128])
+        iobuf = iobufs;
     }
-    os_log("write_stream_push returned %d\r\n", err);
-    if (err != SUCCESS)
-      goto error;
   }
 
-  os_log("sdhc_test_write_stream done\r\n");
-  
-  while(1) {
-    asm volatile("wfi");
-  }
+  STREAM_TEST_LOG("done");
+  dma_free(buf);
+  return;
 
 error:
-  os_log("sdhc_test_write_stream failed\r\n");
+  STREAM_TEST_LOG("failed");
   while(1) {
     asm volatile("wfi");
   }
@@ -231,16 +284,20 @@ static bool sdhc_run_self_test_in_mode(struct sdhc *s, sdhc_io_mode_t mode,
   return true;
 }
 
-bool sdhc_run_self_test(struct sdhc *s, struct block_device *bdev)
+bool sdhc_run_self_test(struct sdhc *s, struct block_device *bdev, bool stream)
 {
   bool passed;
   const uint32_t test_partition_offset = 1056768;
   const bool cache_mem_used = true;
 
+  if (stream) {
+     sdhc_test_write_stream(bdev);
+     return true;
+  }
+
   os_log("Starting SDHC self-test\r\n");
   passed = sdhc_run_self_test_in_mode(s, SDHC_IO_MODE_IT_DMA,
     test_partition_offset, cache_mem_used);
-  // sdhc_test_write_stream(bdev);
   os_log("SDHC self-test %s\r\n", passed ? "PASSED" : "FAILED");
   return true;
 }
