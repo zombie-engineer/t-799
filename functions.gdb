@@ -42,6 +42,55 @@ set $sdhost_hbct = (int *)0x3f20203c
 set $sdhost_data = (int *)0x3f202040
 set $sdhost_hblc = (int *)0x3f202050
 
+define sdhost_expand_edm
+  set $edm_fsm = $arg0 & 0xf
+  if $edm_fsm == 0
+    printf "IDENT"
+  end
+  if $edm_fsm == 1
+    printf "DATA"
+  end
+  if $edm_fsm == 2
+    printf "READDATA"
+  end
+  if $edm_fsm == 3
+    printf "WRITEDATA"
+  end
+  if $edm_fsm == 4
+    printf "READWAIT"
+  end
+  if $edm_fsm == 5
+    printf "READCRC"
+  end
+  if $edm_fsm == 6
+    printf "WRITECRC"
+  end
+  if $edm_fsm == 7
+    printf "WRITEWAIT1"
+  end
+  if $edm_fsm == 8
+    printf "POWERDOWN"
+  end
+  if $edm_fsm == 9
+    printf "POWERUP"
+  end
+  if $edm_fsm == 10
+    printf "WRITESTART1"
+  end
+  if $edm_fsm == 11
+    printf "WRITESTART2"
+  end
+  if $edm_fsm == 12
+    printf "GENPULSE"
+  end
+  if $edm_fsm == 13
+    printf "WRITEWAIT2"
+  end
+  if $edm_fsm == 15
+    printf "STARTPOWDOWN"
+  end
+end
+
 define sdhost_expand_hsts
   if $arg0 & 1
     printf ",DATA"
@@ -102,13 +151,15 @@ end
 define lssdhost
   set $sdhost_regval_hsts = *$sdhost_hsts
   set $sdhost_regval_hcfg = *$sdhost_hcfg
+  set $sdhost_regval_edm = *$sdhost_edm
   printf "SDHOST regs:\n"
   printf "  0x3f202000: CMD:%08x\n", *$sdhost_cmd
   printf "  0x3f202004: ARG:%08x\n" , *$sdhost_arg
   printf "  0x3f202020: HSTS:%08x: ", $sdhost_regval_hsts
   sdhost_expand_hsts $sdhost_regval_hsts
-  printf "\n  0x3f202034: EDM:%08x\n" , *$sdhost_edm
-  printf "  0x3f202038: HCFG:%08x: ", *$sdhost_hcfg
+  printf "\n  0x3f202034: EDM:%08x: " , $sdhost_regval_edm
+  sdhost_expand_edm $sdhost_regval_edm
+  printf "\n  0x3f202038: HCFG:%08x: ", *$sdhost_hcfg
   sdhost_expand_hcfg $sdhost_regval_hcfg
   printf "\n  0x3f20203c: HBCT:%08x\n", *$sdhost_hbct
   printf "  0x3f202050: HBLC:%08x\n", *$sdhost_hblc
