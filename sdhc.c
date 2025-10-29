@@ -37,12 +37,23 @@ extern struct sdhc_cmd_stat bcm_sdhost_cmd_stats;
 #define SDHC_LOG_ERR(__fmt, ...) \
   __SDHC_LOG(ERR, __fmt, ## __VA_ARGS__)
 
-#define SDHC_CHECK_ERR(__fmt, ...)\
+#define SDHC_CHECK_ERR(__fmt, ...) \
   do {\
     if (err != SUCCESS) {\
       SDHC_LOG_ERR("%s err %d, " __fmt, __func__,  err, ## __VA_ARGS__);\
       return err;\
     }\
+  } while(0)
+
+#define SDHC_ASSERT(__expr, __fmt, ...) \
+  do { \
+    if (!(__expr)) { \
+      SDHC_LOG_ERR("ASSERTION at %s:%d " __fmt, __func__, __LINE__, \
+        ## __VA_ARGS__); \
+      while (1) { \
+        asm volatile ("wfe"); \
+      }\
+    } \
   } while(0)
 
 #define SDHC_TIMEOUT_DEFAULT_USEC 1000000
@@ -592,6 +603,7 @@ static void sdhc_write_stream_release_after_wr(struct sdhc *s,
 
   list_for_each_entry_safe(b, tmp, &s->write_stream_pending, list) {
     uint32_t remaining_size = b->size - b->io_offset;
+    // printf("release cb %d\r\n", b->dma_cb);
     bcm2835_dma_release_cb(b->dma_cb);
     s->write_stream_pending_size -= b->io_size;
     if (s->write_stream_num_pending_bufs == 1 && remaining_size) {
@@ -608,6 +620,8 @@ static void sdhc_write_stream_release_after_wr(struct sdhc *s,
           asm volatile("wfe");
       }
 
+      SDHC_ASSERT((remaining_size & 3) == 0,
+        "remaining size %d not aligned to 4 bytes", remaining_size);
       b->io_size = remaining_size;
       s->write_stream_pending_size = remaining_size;
       break;
@@ -655,13 +669,22 @@ static int sdhc_write_stream_one(struct sdhc *s, struct write_stream_buf *b)
 
   s->ops->wait_prev_done(s);
   sdhc_current = s;
-  err = sdhc_cmd23(s, num_wr_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
-  SDHC_CHECK_ERR("Failed to SET_BLOCK_LEN for write stream to %d",
-    num_wr_blocks);
 
-  err = sdhc_cmd25(s, s->write_stream_next_block_idx, num_wr_blocks, NULL,
-    SDHC_TIMEOUT_DEFAULT_USEC);
-  SDHC_CHECK_ERR("Failed to WRITE MULTIPLE BLOCKS to write stream");
+  if (num_wr_blocks == 1) {
+    err = sdhc_cmd24(s, s->write_stream_next_block_idx, NULL,
+      SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("Failed to WRITE SINGLE BLOCKS to write stream");
+  }
+  else {
+    err = sdhc_cmd23(s, num_wr_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("Failed to SET_BLOCK_LEN for write stream to %d",
+      num_wr_blocks);
+
+    err = sdhc_cmd25(s, s->write_stream_next_block_idx, num_wr_blocks, NULL,
+      SDHC_TIMEOUT_DEFAULT_USEC);
+    SDHC_CHECK_ERR("Failed to WRITE MULTIPLE BLOCKS to write stream");
+  }
+
   s->write_stream_next_block_idx += num_wr_blocks;
   sdhc_write_stream_release_after_wr(s, num_wr_blocks);
 

@@ -566,9 +566,39 @@ static OPTIMIZED inline void bcm_sdhost_wait_last_op_complete(void)
   }
 }
 
+/*
+ * Explanation of DMA_STREAM_MODE
+ * Enabled when s->dma_stream_mode = true
+ * In this mode stream as linked list of buffers of random size that together
+ * form a 1 or more blocks with size granular to 512 byte block.
+ * On SD command level write stream is implemented as a CMD23 SET_NUM_BLOCKS,
+ * followed by CMD25 WRITE_MULTIPLE_BLOCKS.
+ * list of buffers if converted to chain of dma control blocks by call to
+ * bcm_sdhost_setup_dma_chain
+ *
+ * About transfer length.
+ * DMA's TXFR_LEN (transfer length) register is in bytes. So is DMA control
+ * block and all size fields in 'struct write_stream_buf'
+ * However, DMA itself will perform reads/writes by 4-bytes, so all sizes
+ * should be in bytes, rounded to 4.
+ *
+ * About SDHOST's interrupt bits.
+ * There are 4 interrupts / bits:
+ * 1. BUSY: triggered at the end of commands that have BUSY response
+ * 2. DATA: triggered after command phase is finished, at the time when bit
+ *          SDHOST_CMD_NEW_FLAG of CMD register is cleared. Technically
+ *          speaking it could be called CMDEND instead. Also DATA interrupt
+ *          enable bit is present in SDHOST_HCFG register but corresponding
+ *          interrupt bit is absent in SDHOST_HSTS (status) register. It only
+ *          matches it's DATA bit.
+ * 3. BLOCK: is triggered every time a 512 bytes of one block are transferred
+ *          from sdhost's FIFO to sdcard. So currently its working not exactly
+ *          as I would expect
+ */
 static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
   uint64_t timeout_usec)
 {
+  int irq;
   int ret;
   uint32_t reg_cmd;
   uint32_t hcfg;
@@ -593,18 +623,18 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
 
   bcm_sdhost_cmd_stats.cmd_start_time = arm_timer_get_count();
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA && is_write) {
-    irq_disable();
+    disable_irq_save_flags(irq);
     hcfg = ioreg32_read(SDHOST_HCFG);
-    hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
-    hcfg |= SDHOST_CFG_DATA_IRPT_EN;
-    ioreg32_write(SDHOST_HCFG, hcfg);
-#if 1
-    if (ioreg32_read(SDHOST_HSTS) & 0x200) {
-      printf("\r\nPROBLEM\r\n\r\n");
-      ioreg32_write(SDHOST_HSTS, 0x200);
+    if (s->dma_stream_mode) {
+      /* See DMA_STREAM_MODE description above */
+      hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
+      hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
+    } else {
+      hcfg &= ~SDHOST_CFG_BLOCK_IRPT_EN;
+      hcfg |= SDHOST_CFG_DATA_IRPT_EN;
     }
-#endif
-    irq_enable();
+    ioreg32_write(SDHOST_HCFG, hcfg);
+    restore_irq_flags(irq);
   }
 
   os_event_clear(&bcm_sdhost_block_done_event);
