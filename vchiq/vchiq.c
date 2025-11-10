@@ -750,6 +750,11 @@ static int OPTIMIZED mmal_port_buf_to_sdcard(struct vchiq_mmal_port *p)
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {}
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {}
 #endif
+  static int frames = 0;
+
+  if (!(frames % 25))
+    os_log(".%d\r\n", frames);
+  frames++;
   err = mmal_port_buffer_submit_list(p, &p->buffers_free);
 out_err:
   return err;
