@@ -213,12 +213,11 @@ static void bcm_sdhost_dump_regs(bool full)
 
 static void bcm_sdhost_irq(void)
 {
-  uint32_t hsts;
+  uint32_t hsts = ioreg32_read(SDHOST_HSTS);
   uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
 
   if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
-    hsts = ioreg32_read(SDHOST_HSTS);
     if (hsts & SDHOST_HSTS_TRANSFER_ERROR_MASK) {
       printf("bcm_sdhost transfer error: HSTS:%08x\r\n", hsts);
       while(1) {
@@ -236,7 +235,6 @@ static void bcm_sdhost_irq(void)
   }
 
   if (hcfg & SDHOST_CFG_BLOCK_IRPT_EN) {
-    hsts = ioreg32_read(SDHOST_HSTS);
     if (!(hsts & SDHOST_HSTS_BLOCK_IRPT)) {
       printf("bcm_sdhost unexpected BLOCK interrupt: HSTS:%08x\r\n", hsts);
       while(1) {
@@ -256,7 +254,6 @@ static void bcm_sdhost_irq(void)
     return;
   }
 
-  hsts = ioreg32_read(SDHOST_HSTS);
   if (hsts & SDHOST_HSTS_BLOCK_IRPT) {
     printf("bcm_sdhost unexpected BLOCK interrupt: HSTS:%08x\r\n", hsts);
     while(1) {
