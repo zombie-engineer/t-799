@@ -69,8 +69,13 @@ OBJS := \
 
 OBJS := $(addsuffix .o, $(OBJS))
 
-kernel8.bin: kernel8.elf
+kernel8.bin: kernel8.elf os.json
 	$(OBJCOPY) -O binary $< $@
+
+.PHONY: os.json
+
+os.json: kernel8.elf
+	. scripts/gen_gdb_json.sh > os.json
 
 kernel8.elf: $(OBJS) link.ld
 	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map -print-memory-usage
