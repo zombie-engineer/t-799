@@ -246,7 +246,6 @@ static void bcm_sdhost_irq(void)
     ioreg32_write(SDHOST_HSTS, SDHOST_HSTS_BLOCK_IRPT);
 
     if (is_write) {
-      // sched_mon_start();
       bcm_sdhost_cmd_stats.data_end_irq_time = arm_timer_get_count();
       BCM_SDHOST_LOG_IRQ("block_done");
       os_event_notify_isr(&bcm_sdhost_block_done_event);
