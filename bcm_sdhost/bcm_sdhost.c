@@ -455,7 +455,7 @@ static void bcm_sdhost_setup_dma_chain(struct sdhc *s, struct sd_cmd *c)
     r.len       = b->io_size;
     total_io_size += b->io_size;
 
-    r.enable_irq = false;
+    r.enable_irq = b->list.next == &s->write_stream_pending;
 
     if (!bcm2835_dma_program_cb(&r, b->dma_cb)) {
       while (1);
@@ -635,7 +635,7 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
        * to go back to DATAMODE, with EDM FIFO showing 0, which would mean all
        * data is on SD card's side.
        */
-      os_event_wait(&bcm_sdhost_block_done_event);
+      os_event_wait(&bcm_sdhost_dma_done_event);
       bcm_sdhost_should_wait_last_io = true;
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
@@ -936,9 +936,7 @@ static void bcm_sdhost_wait_prev_done(struct sdhc *s)
 
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)
 {
-  bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
-  if (!is_write)
-    os_event_notify_isr(&bcm_sdhost_dma_done_event);
+  os_event_notify_isr(&bcm_sdhost_dma_done_event);
 }
 
 struct sdhc_ops bcm_sdhost_ops = {
