@@ -26,6 +26,11 @@ static void sched_idle_task_fn(void)
     asm volatile("wfe");
 }
 
+struct scheduler_stats {
+  uint32_t num_schedules;
+  uint32_t num_try_resched;
+};
+
 struct scheduler {
   struct task *current;
   struct list_head runnable;
@@ -36,6 +41,7 @@ struct scheduler {
   struct task *idle_task;
   uint64_t ticks;
   bool needs_resched;
+  struct scheduler_stats stats;
 };
 
 static struct scheduler sched;
@@ -50,7 +56,6 @@ bool sched_run_task_isr(struct task *t)
   struct list_head *node;
   struct task *old_task;
 
-  // uint32_t s = offsetof(struct task, scheduler_list);
   if (sched.current == t)
     return false;
 
@@ -93,10 +98,6 @@ static inline void scheduler_insert_to_blocked_on_timer(struct task *t)
   t->scheduler_list.prev->next = &t->scheduler_list;
   t->scheduler_list.next = node;
   node->prev = &t->scheduler_list;
-#if 0
-  list_for_each_entry(t, head, scheduler_list)
-    printf("timer_list: %p, %s, %ld\n", t, t->name, t->next_wakeup_time);
-#endif
 }
 
 static inline void scheduler_drop_current(void)
@@ -167,6 +168,8 @@ done:
 
 static void __schedule(void)
 {
+  sched.stats.num_schedules++;
+
   SCHED_PRINTF("__schedule, task:%s\r\n", sched.current->name);
   sched.needs_resched = true;
   scheduler_drop_current();
@@ -177,6 +180,7 @@ static void __schedule(void)
 
 void __sched_try_reschedule(void)
 {
+  sched.stats.num_try_resched++;
   if (!sched.needs_resched)
     goto out;
 
@@ -280,7 +284,6 @@ void sched_event_notify(struct event *ev)
   restore_irq_flags(irq);
 }
 
-
 void scheduler_init(void)
 {
   INIT_LIST_HEAD(&sched.runnable);
@@ -304,7 +307,6 @@ uint64_t sched_get_time_us(void)
   uint64_t result = 0;
   int flags;
   disable_irq_save_flags(flags);
-  // result = MS_TO_US(sched.ticks * SCHED_MS_PER_TICK);
   result =+ bcm2835_systimer_get_time_us_locked();
   restore_irq_flags(flags);
   return result;
