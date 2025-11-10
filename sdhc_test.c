@@ -122,7 +122,7 @@ static inline bool sdhc_test_buffer_fill(uint8_t *buf, size_t size)
 }
 
 struct sdhc_test_io_task {
-  const uint8_t *buf;
+  uint8_t *buf;
   size_t buf_size;
 };
 
@@ -152,7 +152,7 @@ static void sdhc_test_write_stream(struct block_device *bdev)
   int err;
   uint8_t *buf;
   size_t i;
-  const size_t total_buf_size = 512 * 32;
+  const size_t total_buf_size = 512 * 128;
   const uint32_t initial_sector = 1056768;
   const struct sdhc_test_io_task *iotask;
   struct write_stream_buf *iobuf = iobufs;
@@ -165,14 +165,17 @@ static void sdhc_test_write_stream(struct block_device *bdev)
   }
 
   const struct sdhc_test_io_task iotasks[] = {
-    { buf, 28 },
-    { buf, 1575 },
-    { buf, 655 }
+    { buf, 512 },
+    { buf, 1024 },
+    { buf, 2048 },
+    { buf, 4096 },
+    { buf, 8192 },
+    { buf, 512 * 32},
+    { buf, 512 * 64},
+    { buf, 512 * 128},
   };
 
   STREAM_TEST_LOG("start");
-
-  memset(buf, 0x14, 512 * 4);
 
   err = bdev->ops.write_stream_open(bdev, initial_sector);
   if (err != SUCCESS)
@@ -182,9 +185,11 @@ static void sdhc_test_write_stream(struct block_device *bdev)
     STREAM_TEST_LOG("iter %d", j);
     for (i = 0; i < ARRAY_SIZE(iotasks); ++i) {
       iotask = &iotasks[i];
+      memcpy(iotask->buf, sdhc_test_write_stream_one, iotask->buf_size);
       err = sdhc_test_write_stream_one(bdev, iotask, iobuf);
       if (err != SUCCESS)
         goto error;
+
       iobuf++;
       if (iobuf == &iobufs[128])
         iobuf = iobufs;
