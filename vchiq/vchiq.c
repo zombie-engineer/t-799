@@ -2810,6 +2810,13 @@ static int encoder_set_params(struct vchiq_mmal_port *e,
   MMAL_PARAM_SET32(VIDEO_BIT_RATE, p->bitrate);
   MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_HEADER, 1);
 
+  /* INLINE VECTORS gives a stream that ffplay does not support */
+#if 0
+  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_VECTORS, 1);
+#endif
+
+  MMAL_PARAM_SET32(VIDEO_ENCODE_SPS_TIMING, 1);
+
   err = vchiq_mmal_port_parameter_set(e, MMAL_PARAMETER_PROFILE,
     &video_profile, sizeof(video_profile));
   CHECK_ERR("Failed to set h264 MMAL_PARAMETER_PROFILE param");
@@ -2868,12 +2875,12 @@ static int create_encoder_component(struct vchiq_service_common *mmal_service,
 {
   int err = SUCCESS;
   struct vchiq_mmal_component *encoder;
-  const uint32_t bit_rate = 2 * 1000 * 1000;
+  const uint32_t bit_rate = 4 * 1000 * 1000;
 
   const struct encoder_h264_params encoder_params = {
-    .q_initial = 25,
+    .q_initial = 18,
     .q_min = 10,
-    .q_max = 30,
+    .q_max = 22,
     .profile = MMAL_VIDEO_PROFILE_H264_HIGH,
     .level = MMAL_VIDEO_LEVEL_H264_4,
     .intraperiod = frame_rate * 2,
@@ -3082,6 +3089,11 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   int err;
   /* mmal_init start */
 
+  struct mmal_parameter_rational cam_brightness = {
+    .num = 3,
+    .den = 5
+  };
+
   struct vchiq_mmal_component *cam = component_create(mmal_service,
     "ril.camera");
   CHECK_ERR_PTR(cam, "'ril.camera': failed to create component");
@@ -3094,6 +3106,11 @@ static int create_camera_component(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_port_parameter_set(&cam->control,
     MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, &param, sizeof(param));
   CHECK_ERR("'ril.camera': failed to set param SENSOR_CONFIG ");
+
+  err = vchiq_mmal_port_parameter_set(&cam->control, MMAL_PARAMETER_BRIGHTNESS,
+    &cam_brightness, sizeof(cam_brightness));
+  CHECK_ERR("Failed to set param MMAL_PARAMETER_BRIGHTNESS");
+  MMAL_INFO("BRIGHTNESS set");
 
   err = vchiq_mmal_port_enable(&cam->control);
   CHECK_ERR("'ril.camera': failed to enable port");
@@ -3181,7 +3198,7 @@ static int vchiq_startup_camera(struct vchiq_service_common *mmal_service,
   err = vchiq_mmal_get_cam_info(mmal_service, &cam_info);
   CHECK_ERR("Failed to get num cameras");
 
-  const int frame_rate = 25;
+  const int frame_rate = 30;
   err = create_camera_component(mmal_service, frame_width, frame_height,
     frame_rate, &cam_info.cameras[0], &cam_preview, &cam_video, &cam_still);
   CHECK_ERR("Failed to create camera component");
