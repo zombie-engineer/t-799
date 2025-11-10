@@ -1,0 +1,21 @@
+set terminal qt persist size 1400,800
+set title "CPU Execution Timeline"
+set xlabel "Time (µs)"
+set ylabel "CPU State Level"
+set grid
+set yrange [-0.2:2.2]
+set key off
+
+set ytics ("Idle" 0, \
+    "Task" 1, \
+    "Save CTX" 1.55, \
+    "Set Task" 1.575, \
+    "IRQ End" 1.525, \
+    "Drop Task" 1.5, \
+    "Restore CTX" 1.0, \
+    "IRQ" 2)
+
+plot "data_cpu_state.dat" using 1:2 with linespoints lw 2 lc rgb "blue", \
+    "data_task_ids.dat" using 1:2 with linespoints lw 1 lc rgb "red" title "Task ID overlay"
+pause -1 "Press Enter or close window to exit"
+
