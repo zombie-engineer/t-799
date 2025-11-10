@@ -18,7 +18,6 @@
 #include "memory_map.h"
 #include <os_api.h>
 #include <sched.h>
-// #include <sched_mon.h>
 #include <irq.h>
 #include <bcm2835/bcm2835_ic.h>
 #include "bcm_sdhost_stat.h"
@@ -212,26 +211,11 @@ static void bcm_sdhost_dump_regs(bool full)
   BCM_SDHOST_LOG_INFO("resp3:0x%08x", ioreg32_read(SDHOST_RESP3));
 }
 
-static inline void bcm_sdhost_irq_log()
-{
-#if defined(BCM_SDHOST_DEBUG_LOG_IRQ)
-  BCM_SDHOST_LOG_IRQ("hcfg:%08x, hsts:%08x, edm:%08x, cmd:%08x,w:%d",
-    ioreg32_read(SDHOST_HCFG),
-    ioreg32_read(SDHOST_HSTS),
-    ioreg32_read(SDHOST_EDM),
-    ioreg32_read(SDHOST_CMD),
-    is_write
-  );
-#endif
-}
-
 static void bcm_sdhost_irq(void)
 {
   uint32_t hsts;
   uint32_t hcfg = ioreg32_read(SDHOST_HCFG);
   bool is_write = ioreg32_read(SDHOST_CMD) & SDHOST_CMD_WRITE_CMD;
-
-  bcm_sdhost_irq_log();
 
   if (hcfg & SDHOST_CFG_DATA_IRPT_EN) {
     hsts = ioreg32_read(SDHOST_HSTS);
@@ -661,8 +645,6 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
        * data is on SD card's side.
        */
       os_event_wait(&bcm_sdhost_block_done_event);
-
-      // sched_mon_stop("waitdone", sdhost_ts_data_end, sdhost_ts_cmd_finished);
       bcm_sdhost_should_wait_last_io = true;
     } else {
       os_event_wait(&bcm_sdhost_dma_done_event);
