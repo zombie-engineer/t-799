@@ -20,7 +20,7 @@
 #include <sched.h>
 #include <irq.h>
 #include <bcm2835/bcm2835_ic.h>
-#include "bcm_sdhost_stat.h"
+// #include "bcm_sdhost_stat.h"
 
 /*
  * In manual mode we set CDIV register by calculating required CDIV from
@@ -162,7 +162,6 @@ typedef enum {
 
 static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
 static int bcm_sdhost_should_wait_last_io = false;
-struct sdhc_cmd_stat bcm_sdhost_cmd_stats = { 0 };
 
 static struct event bcm_sdhost_cmd_done_event;
 static struct event bcm_sdhost_block_done_event;
@@ -228,7 +227,6 @@ static void bcm_sdhost_irq(void)
     hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
     hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-    bcm_sdhost_cmd_stats.cmd_end_time = arm_timer_get_count();
     if (!is_write)
       os_event_notify_isr(&bcm_sdhost_cmd_done_event);
     return;
@@ -600,7 +598,6 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
       bcm_sdhost_cmd_prep_dma(s, c, is_write);
   }
 
-  bcm_sdhost_cmd_stats.cmd_start_time = arm_timer_get_count();
   if (has_data && s->io_mode == SDHC_IO_MODE_IT_DMA && is_write) {
     disable_irq_save_flags(irq);
     hcfg = ioreg32_read(SDHOST_HCFG);
@@ -774,7 +771,6 @@ int OPTIMIZED bcm_sdhost_cmd(struct sdhc *s, struct sd_cmd *c,
     is_acmd ? "A" : "", c->cmd_idx & 0x7fffffff, ret,
     c->resp0, c->resp1, c->resp2, c->resp3);
 
-  bcm_sdhost_cmd_stats.data_end_time = arm_timer_get_count();
   return ret;
 }
 
@@ -930,7 +926,6 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
 
 static void bcm_sdhost_wait_prev_done(struct sdhc *s)
 {
-  bcm_sdhost_cmd_stats.wait_rdy_time = arm_timer_get_count();
   if (!bcm_sdhost_should_wait_last_io)
     return;
 

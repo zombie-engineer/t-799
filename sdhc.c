@@ -524,9 +524,7 @@ static OPTIMIZED int sdhc_op(struct sdhc *s, sdhc_op_t op, uint8_t *buf,
    * CMD23 SET_BLOCK_COUNT in strict sequence, other CMDs not allowed inside
    */
   if (num_blocks > 1) {
-    bcm_sdhost_cmd_stats.multiblock_start_time = arm_timer_get_count();
     err = sdhc_cmd23(s, num_blocks, SDHC_TIMEOUT_DEFAULT_USEC);
-    bcm_sdhost_cmd_stats.multiblock_end_time = arm_timer_get_count();
     SDHC_CHECK_ERR("SET_BLOCK_COUNT failed");
   }
 

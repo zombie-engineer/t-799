@@ -24,16 +24,6 @@ typedef enum {
   SD_CARD_STATE_UNKNOWN = 0xff
 } sd_card_state_t;
 
-struct sdhc_cmd_stat {
-  uint64_t wait_rdy_time;
-  uint64_t cmd_start_time;
-  uint64_t cmd_end_time;
-  uint64_t data_end_irq_time;
-  uint64_t data_end_time;
-  uint64_t multiblock_start_time;
-  uint64_t multiblock_end_time;
-};
-
 static inline const char *sdhc_io_mode_to_str(sdhc_io_mode_t m)
 {
   switch (m) {
@@ -339,3 +329,9 @@ int sdhc_write(struct sdhc *s, const uint8_t *buf, uint64_t from_sector,
   uint32_t num_sectors);
 
 int sdhc_set_log_level(int l);
+
+static inline bool sdhc_in_dma_mode(const struct sdhc *s)
+{
+  return s->io_mode == SDHC_IO_MODE_BLOCKING_DMA
+    || s->io_mode == SDHC_IO_MODE_IT_DMA;
+}

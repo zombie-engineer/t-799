@@ -13,8 +13,6 @@
 #include <memory_map.h>
 #include <log.h>
 
-extern struct sdhc_cmd_stat bcm_sdhost_cmd_stats;
-
 static char sdhc_testbuf[512 * 512] = { 0 };
 
 static struct write_stream_buf iobufs[128];
@@ -30,26 +28,9 @@ static inline void hexdump(const uint8_t *buffer, uint32_t size)
   }
 }
 
-static OPTIMIZED void sdhc_dump_io_stats(int io_idx, uint64_t io_start,
-  uint64_t io_end)
-{
-  const struct sdhc_cmd_stat *const s = &bcm_sdhost_cmd_stats;
-  os_log("%ld %ld %ld %ld %ld %ld %ld %ld\r\n",
-    io_start,
-    s->multiblock_start_time,
-    s->multiblock_end_time,
-    s->wait_rdy_time,
-    s->cmd_start_time,
-    s->cmd_end_time,
-    s->data_end_time,
-    io_end);
-}
-
 void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
 {
   int err;
-  uint64_t io_start_time;
-  uint64_t io_end_time;
 
   os_wait_ms(100);
   for (int i = 0; i < 256; ++i) {
@@ -57,28 +38,16 @@ void OPTIMIZED sdhc_perf_measure(struct block_device *bdev)
       sdhc_testbuf[i * 512 + j] = (uint8_t)(i - j);
     }
   }
-#if 0
-  memset(sdhc_testbuf, 0x11, 512);
-  memset(sdhc_testbuf + 512, 0x22, 512);
-  memset(sdhc_testbuf + 1024, 0x44, 1024);
-  memset(sdhc_testbuf + 2048, 0x55, sizeof(sdhc_testbuf) - 2048);
-#endif
+
   dcache_invalidate(sdhc_testbuf, sizeof(sdhc_testbuf));
 
-  /* buffer size = 512 * 256 = 128 * 1024 = 128K */
-  /* Total write = 100Mb = 100 * 1024 * 1024 */
-
   for (int i = 0; i < 400; ++i) {
-    io_start_time = arm_timer_get_count();
     err = bdev->ops.write(bdev, (uint8_t *)sdhc_testbuf, i * 512, 512);
     if (err) {
       os_log("failed to write to SD partition\r\n");
       while(1)
         asm volatile("wfe");
     }
-
-    io_end_time = arm_timer_get_count();
-    sdhc_dump_io_stats(i, io_start_time, io_end_time);
   }
 }
 
