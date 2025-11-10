@@ -104,6 +104,7 @@ static inline void scheduler_drop_current(void)
   struct task *t;
 
   t = sched.current;
+  sched_mon_drop_current_task(t->task_id);
   sched.current = NULL;
 
   if (t == sched.idle_task)
@@ -170,18 +171,19 @@ static void __schedule(void)
   sched.needs_resched = true;
   scheduler_drop_current();
   scheduler_select_next();
-
-  sched_mon_schedule(sched.current->task_id);
-
+  sched_mon_set_current_task(sched.current->task_id);
   SCHED_PRINTF("__schedule end, new task:%s\r\n", sched.current->name);
 }
 
 void __sched_try_reschedule(void)
 {
   if (!sched.needs_resched)
-    return;
+    goto out;
 
   __schedule();
+
+out:
+  sched_mon_restore_ctx();
 }
 
 static void sched_timer_irq_cb(void *arg)

@@ -5,6 +5,7 @@
 #include <task.h>
 #include <os_api.h>
 #include <printf.h>
+#include <sched_mon.h>
 #include "armv8_cpuctx.h"
 
 extern char __bss_start;
@@ -334,6 +335,7 @@ static __attribute__((section(".rodata_nommu"))) armv8_exception_handler_sync_fn
 EXCEPTION_VECTOR void armv8_exception_handler_sync(uint64_t esr)
 {
   armv8_exception_handler_sync_fn sync_cb;
+  sched_mon_save_ctx();
 
   int exception_class = ESR_GET_SYNC_EXCEPTION_CLASS(esr);
   int iss = ESR_GET_SYNC_ISS(esr);
@@ -346,4 +348,5 @@ EXCEPTION_VECTOR void armv8_exception_handler_sync(uint64_t esr)
     panic();
 
   sync_cb(iss);
+  sched_mon_restore_ctx();
 }

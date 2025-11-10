@@ -4,70 +4,85 @@
 #include <stdint.h>
 #include <cpu.h>
 #include <printf.h>
+#include <common.h>
 
 struct sched_mon_record {
-  uint64_t schedule_time;
-  int task_id;
-};
-
-extern uint64_t __last_restore_ctx_time;
+  uint64_t time;
+  uint32_t ev;
+  uint32_t value;
+} __attribute__((packed));
 
 static bool sched_mon_enabled = false;
 static struct sched_mon_record sched_mon_data[256];
 static int sched_mon_idx = 0;
-
-static inline uint64_t sched_get_last_restore_ctx_time(void)
-{
-  uint64_t ret;
-  asm volatile (
-    "ldr %0, =__last_restore_ctx_time\n"
-    "ldr %0, [%0]\n"
-    :"=r"(ret));
-
-  return ret;
-}
+static int sched_mon_num_events = 0;
 
 void sched_mon_start(void)
 {
+  struct sched_mon_record *r;
   int irqflags;
+  int i;
   disable_irq_save_flags(irqflags);
   sched_mon_idx = 0;
+
+  for (i = 0; i < ARRAY_SIZE(sched_mon_data); ++i) {
+    r = &sched_mon_data[i];
+    r->ev = SCHED_MON_EV_NOT_YET;
+    r->time = 0;
+    r->value = 0;
+  }
+
   sched_mon_enabled = true;
   asm volatile("dsb st");
   restore_irq_flags(irqflags);
 }
 
-void sched_mon_stop(const char *tag, uint64_t ts0, uint64_t ts1)
+void sched_mon_stop(void)
 {
   int i;
-  int task_id;
   int irqflags;
-  uint64_t last_restore_ctx_time;
-  uint64_t sched_ts;
+  struct sched_mon_record *r;
 
   disable_irq_save_flags(irqflags);
   sched_mon_enabled = false;
-  last_restore_ctx_time = sched_get_last_restore_ctx_time();
 
-  printf("%s: %lu %lu %d [", tag, ts0, ts1, sched_mon_idx);
+#define DUMP_ITEM(__idx) \
+  do { \
+    r = &sched_mon_data[i]; \
+    printf("%lu %u %u\r\n", r->time, r->ev, r->value); \
+  } while(0)
+
+  if (sched_mon_num_events >= ARRAY_SIZE(sched_mon_data)) {
+    for (i = sched_mon_idx; i < ARRAY_SIZE(sched_mon_data); ++i)
+      DUMP_ITEM(i);
+  }
 
   for (i = 0; i < sched_mon_idx; ++i)
-    printf(" %d:%lu", sched_mon_data[i].task_id,
-      sched_mon_data[i].schedule_time);
+    DUMP_ITEM(i);
 
-  printf("] %lu\r\n", last_restore_ctx_time);
   restore_irq_flags(irqflags);
 }
 
-void sched_mon_schedule(int task_id)
+void sched_mon_event(sched_mon_event_t ev, int value)
 {
+  struct sched_mon_record *r;
+
   if (!sched_mon_enabled)
     return;
 
-  sched_mon_data[sched_mon_idx].task_id = task_id;
-  sched_mon_data[sched_mon_idx].schedule_time = arm_timer_get_count();
-  sched_mon_idx++;
+  r = &sched_mon_data[sched_mon_idx++];
+  sched_mon_num_events++;
+
   if (sched_mon_idx > 255)
     sched_mon_idx = 0;
+
+  r->ev = ev;
+  r->value = value;
+  r->time = arm_timer_get_count();
+}
+
+void sched_mon_save_ctx(void)
+{
+  sched_mon_event(SCHED_MON_EV_SAVE_CTX, 0);
 }
 #endif

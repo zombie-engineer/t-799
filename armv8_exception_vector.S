@@ -1,4 +1,5 @@
 #define BCM2835_IC_BASE 0x3f00b200
+#include <config.h>
 
 #define ARM_IRQ1_BASE 0
 #define ARM_IRQ2_BASE 32
@@ -205,6 +206,10 @@ __exception_handler_irq_\()\suffix:
   b __armv8_cpuctx_save
 1:
   add   sp, sp, #16
+
+#if (CONFIG_SCHED_MON == 1)
+  bl sched_mon_save_ctx
+#endif
 
 /*
  * x19 to x29 are callee-saved registers, so

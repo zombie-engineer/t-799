@@ -3,6 +3,7 @@
 #include <errcode.h>
 #include <common.h>
 #include <sections.h>
+#include <sched_mon.h>
 
 struct irq_desc {
   irq_func handler;
@@ -33,6 +34,7 @@ EXCEPTION void __handle_irq(int irqnr)
 {
   struct irq_desc *idesc;
 
+  sched_mon_set_irq_handler_start(irqnr);
   if (irqnr > NUM_IRQS)
     panic();
 
@@ -40,6 +42,8 @@ EXCEPTION void __handle_irq(int irqnr)
 
   if (idesc->handler)
     idesc->handler();
+
+  sched_mon_set_irq_handler_end(irqnr);
 }
 
 int irq_local_set(irq_func func)
