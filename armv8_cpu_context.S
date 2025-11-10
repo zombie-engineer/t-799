@@ -1,13 +1,5 @@
 #include <config.h>
 
-.macro SAVE_LAST_RESTORE_CTX_TIME scratchreg0, scratchreg1
-#if defined(CONFIG_SCHED_MON)
-  ldr \scratchreg0, =__last_restore_ctx_time
-  mrs \scratchreg1, cntvct_el0
-  str \scratchreg1, [\scratchreg0]
-#endif
-.endm
-
 .macro GET_CURRENT_CTX dest
   ldr \dest, =__current_cpuctx
   ldr \dest, [\dest]
@@ -80,12 +72,6 @@ __cpuctx_stub:
 .globl __current_cpuctx
 __current_cpuctx:
 .quad __cpuctx_stub
-
-#if defined(CONFIG_SCHED_MON)
-.globl __last_restore_ctx_time
-__last_restore_ctx_time:
-.quad 0
-#endif
 
 /*
  * Called from C, initializes cpu context, arguments:
@@ -211,7 +197,6 @@ task_pstate .req x0
 task_sp     .req x1
 task_pc     .req x2
 
-  SAVE_LAST_RESTORE_CTX_TIME x30, x29
   GET_CURRENT_CTX x30
   /* restore spsr */
   ldp task_sp, task_pc, [x30, #(31 * 8)]
