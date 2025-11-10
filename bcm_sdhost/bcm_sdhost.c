@@ -21,6 +21,7 @@
 // #include <sched_mon.h>
 #include <irq.h>
 #include <bcm2835/bcm2835_ic.h>
+#include "bcm_sdhost_stat.h"
 
 /*
  * In manual mode we set CDIV register by calculating required CDIV from
