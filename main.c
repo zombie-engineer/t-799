@@ -92,7 +92,7 @@ static void kernel_init(void)
 {
   int err;
 
-  uart_pl011_init(115200);
+  uart_pl011_init(115200*2);
   clear_reboot_request();
   kmalloc_init();
   dma_memory_init();
