@@ -1,5 +1,6 @@
 #pragma once
 #include <compiler.h>
+#include <common.h>
 #include <stddef.h>
 
 struct list_head {

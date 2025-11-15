@@ -21,17 +21,12 @@
 #include <printf.h>
 #include <atomic.h>
 #include <sections.h>
-#include <vchiq.h>
 #include <ili9341.h>
 #include <errcode.h>
-#include "sdhc_test.h"
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <logger.h>
-
-static struct sdhc sdhc;
-struct block_device bdev_sdcard;
-struct block_device *bdev_partition;
+#include <app/app_main.h>
 
 EXCEPTION void fiq_handler(void)
 {
@@ -122,53 +117,6 @@ out:
     while(1)
       asm volatile("wfe");
   }
-}
-
-static void app_main(void)
-{
-  int err;
-
-  os_log("Application main\r\n");
-
-  err = sdhc_init(&bdev_sdcard, &sdhc, &bcm_sdhost_ops);
-  if (err != SUCCESS) {
-    printf("Failed to init sdhc, %d\r\n", err);
-    goto out;
-  }
-
-  os_log("SDHC intialized\r\n");
-
-  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard, false))
-    goto out;
-
-  err = sdhc_set_io_mode(&sdhc, SDHC_IO_MODE_IT_DMA, false);
-  if (err != SUCCESS) {
-    os_log("Failed to set sdhc io mode IT_DMA\r\n");
-    goto out;
-  }
-
-  blockdev_scheduler_init();
-  err = fs_init(&bdev_sdcard, &bdev_partition);
-  if (err != SUCCESS) {
-    os_log("Failed to init fs block device, err: %d\r\n", err);
-    goto out;
-  }
-
-  sdhc_perf_measure(bdev_partition);
-
-  if (!sdhc_run_self_test(&sdhc, &bdev_sdcard, true))
-    goto out;
-
-  err = ili9341_init();
-  if (err != SUCCESS) {
-    printf("Failed to init ili9341 display, err: %d\r\n", err);
-    goto out;
-  }
-
-  fs_dump_partition(bdev_partition);
-  vchiq_init(bdev_partition);
-out:
-  os_exit_current_task();
 }
 
 static void kernel_run(void)

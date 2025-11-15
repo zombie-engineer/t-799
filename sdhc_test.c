@@ -6,6 +6,7 @@
 #include <list_fifo.h>
 #include <logger.h>
 #include <bcm2835/bcm_sdhost.h>
+#include <write_stream_buffer.h>
 #include <string.h>
 #include <kmalloc.h>
 #include <printf.h>

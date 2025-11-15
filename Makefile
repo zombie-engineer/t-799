@@ -15,6 +15,8 @@ CFLAGS := -Iinclude -g -Werror -Wall
 CFLAGS += -ffreestanding
 
 OBJS := \
+  app/app_main \
+  app/camera \
   armv8 \
   armv8_mmu \
   armv8_cpu_context \
@@ -65,7 +67,9 @@ OBJS := \
   gpio \
   self_test_context_switch \
   spi \
-  vchiq/vchiq
+  vc/vchiq \
+  vc/service_mmal \
+  vc/service_smem
 
 OBJS := $(addsuffix .o, $(OBJS))
 

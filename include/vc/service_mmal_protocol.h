@@ -1,92 +1,240 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Broadcom BM2835 V4L2 driver
- *
- * Copyright © 2013 Raspberry Pi (Trading) Ltd.
- *
- * Authors: Vincent Sanders @ Collabora
- *          Dave Stevenson @ Broadcom
- *    (now dave.stevenson@raspberrypi.org)
- *          Simon Mellor @ Broadcom
- *          Luke Diamand @ Broadcom
- */
+#pragma once
 
-/*
- * all the data structures which serialise the MMAL protocol. note
- * these are directly mapped onto the recived message data.
- *
- * BEWARE: They seem to *assume* pointers are uint32_t and that there is no
- * structure padding!
- *
- * NOTE: this implementation uses kernel types to ensure sizes. Rather
- * than assigning values to enums to force their size the
- * implementation uses fixed size types and not the enums (though the
- * comments have the actual enum type
- */
-#ifndef MMAL_MSG_H
-#define MMAL_MSG_H
-
-#define MAKE_FOURCC(x) ((int32_t)( (x[0] << 24) | (x[1] << 16) | (x[2] << 8) | x[3] ))
-
-#define VC_MMAL_VER 15
-#define VC_MMAL_MIN_VER 10
-#define VC_MMAL_SERVER_NAME  MAKE_FOURCC("mmal")
-
-/* max total message size is 512 bytes */
-#define MMAL_MSG_MAX_SIZE 512
-/* with six 32bit header elements max payload is therefore 488 bytes */
+#define MMAL_FORMAT_EXTRADATA_MAX_SIZE 128
 #define MMAL_MSG_MAX_PAYLOAD 488
+#define MMAL_TIME_UNKNOWN (1ull << 63)
 
-#include "mmal-msg-common.h"
-#include "mmal-msg-format.h"
-#include "mmal-msg-port.h"
-#include "mmal-vchiq.h"
-#include <bitops.h>
+/* Size of space reserved in a buffer message for short messages. */
+#define MMAL_VC_SHORT_DATA 128
+
+/* Signals that the current payload is the end of the stream of data */
+#define MMAL_BUFFER_HEADER_FLAG_EOS                    BIT(0)
+/* Signals that the start of the current payload starts a frame */
+#define MMAL_BUFFER_HEADER_FLAG_FRAME_START            BIT(1)
+/* Signals that the end of the current payload ends a frame */
+#define MMAL_BUFFER_HEADER_FLAG_FRAME_END              BIT(2)
+/* Signals that the current payload contains only complete frames (>1) */
+#define MMAL_BUFFER_HEADER_FLAG_FRAME                  \
+  (MMAL_BUFFER_HEADER_FLAG_FRAME_START | \
+   MMAL_BUFFER_HEADER_FLAG_FRAME_END)
+/* Signals that the current payload is a keyframe (i.e. self decodable) */
+#define MMAL_BUFFER_HEADER_FLAG_KEYFRAME               BIT(3)
+/*
+ * Signals a discontinuity in the stream of data (e.g. after a seek).
+ * Can be used for instance by a decoder to reset its state
+ */
+#define MMAL_BUFFER_HEADER_FLAG_DISCONTINUITY          BIT(4)
+/*
+ * Signals a buffer containing some kind of config data for the component
+ * (e.g. codec config data)
+ */
+#define MMAL_BUFFER_HEADER_FLAG_CONFIG                 BIT(5)
+/* Signals an encrypted payload */
+#define MMAL_BUFFER_HEADER_FLAG_ENCRYPTED              BIT(6)
+/* Signals a buffer containing side information */
+#define MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO          BIT(7)
+/*
+ * Signals a buffer which is the snapshot/postview image from a stills
+ * capture
+ */
+#define MMAL_BUFFER_HEADER_FLAG_SNAPSHOT               BIT(8)
+/* Signals a buffer which contains data known to be corrupted */
+#define MMAL_BUFFER_HEADER_FLAG_CORRUPTED              BIT(9)
+/* Signals that a buffer failed to be transmitted */
+#define MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED    BIT(10)
+/** Signals the output buffer won't be used, just update reference frames */
+#define MMAL_BUFFER_HEADER_FLAG_DECODEONLY             (1<<11)
+/** Signals that the end of the current payload ends a NAL */
+#define MMAL_BUFFER_HEADER_FLAG_NAL_END                (1<<12)
+
+#define MMAL_WORKER_PORT_PARAMETER_SPACE      96
+
+/* event messages */
+#define MMAL_WORKER_EVENT_SPACE 256
+
+/* Four CC's for events */
+#define MMAL_FOURCC(a, b, c, d) ((a) | (b << 8) | (c << 16) | (d << 24))
+
+#define MMAL_EVENT_ERROR    MMAL_FOURCC('E', 'R', 'R', 'O')
+#define MMAL_EVENT_EOS      MMAL_FOURCC('E', 'E', 'O', 'S')
+#define MMAL_EVENT_FORMAT_CHANGED  MMAL_FOURCC('E', 'F', 'C', 'H')
+#define MMAL_EVENT_PARAMETER_CHANGED  MMAL_FOURCC('E', 'P', 'C', 'H')
+
+enum mmal_port_type {
+  MMAL_PORT_TYPE_UNKNOWN = 0,
+  MMAL_PORT_TYPE_CONTROL,
+  MMAL_PORT_TYPE_INPUT,
+  MMAL_PORT_TYPE_OUTPUT,
+  MMAL_PORT_TYPE_CLOCK,
+};
 
 enum mmal_msg_type {
   MMAL_MSG_TYPE_QUIT = 1,
   MMAL_MSG_TYPE_SERVICE_CLOSED,
   MMAL_MSG_TYPE_GET_VERSION,
   MMAL_MSG_TYPE_COMPONENT_CREATE,
-  MMAL_MSG_TYPE_COMPONENT_DESTROY,  /* 5 */
+  MMAL_MSG_TYPE_COMPONENT_DESTROY,
   MMAL_MSG_TYPE_COMPONENT_ENABLE,
   MMAL_MSG_TYPE_COMPONENT_DISABLE,
   MMAL_MSG_TYPE_PORT_INFO_GET,
   MMAL_MSG_TYPE_PORT_INFO_SET,
-  MMAL_MSG_TYPE_PORT_ACTION,    /* 10 */
+  MMAL_MSG_TYPE_PORT_ACTION,
   MMAL_MSG_TYPE_BUFFER_FROM_HOST,
   MMAL_MSG_TYPE_BUFFER_TO_HOST,
   MMAL_MSG_TYPE_GET_STATS,
   MMAL_MSG_TYPE_PORT_PARAMETER_SET,
-  MMAL_MSG_TYPE_PORT_PARAMETER_GET,  /* 15 */
+  MMAL_MSG_TYPE_PORT_PARAMETER_GET,
   MMAL_MSG_TYPE_EVENT_TO_HOST,
   MMAL_MSG_TYPE_GET_CORE_STATS_FOR_PORT,
   MMAL_MSG_TYPE_OPAQUE_ALLOCATOR,
   MMAL_MSG_TYPE_CONSUME_MEM,
-  MMAL_MSG_TYPE_LMK,      /* 20 */
+  MMAL_MSG_TYPE_LMK,
   MMAL_MSG_TYPE_OPAQUE_ALLOCATOR_DESC,
   MMAL_MSG_TYPE_DRM_GET_LHS32,
   MMAL_MSG_TYPE_DRM_GET_TIME,
   MMAL_MSG_TYPE_BUFFER_FROM_HOST_ZEROLEN,
-  MMAL_MSG_TYPE_PORT_FLUSH,    /* 25 */
+  MMAL_MSG_TYPE_PORT_FLUSH,
   MMAL_MSG_TYPE_HOST_LOG,
   MMAL_MSG_TYPE_MSG_LAST
 };
 
-/* port action request messages differ depending on the action type */
 enum mmal_msg_port_action_type {
-  MMAL_MSG_PORT_ACTION_TYPE_UNKNOWN = 0,  /* Unknown action */
-  MMAL_MSG_PORT_ACTION_TYPE_ENABLE,  /* Enable a port */
-  MMAL_MSG_PORT_ACTION_TYPE_DISABLE,  /* Disable a port */
-  MMAL_MSG_PORT_ACTION_TYPE_FLUSH,  /* Flush a port */
-  MMAL_MSG_PORT_ACTION_TYPE_CONNECT,  /* Connect ports */
-  MMAL_MSG_PORT_ACTION_TYPE_DISCONNECT,  /* Disconnect ports */
-  MMAL_MSG_PORT_ACTION_TYPE_SET_REQUIREMENTS, /* Set buffer requirements*/
+  MMAL_MSG_PORT_ACTION_TYPE_UNKNOWN = 0,
+  MMAL_MSG_PORT_ACTION_TYPE_ENABLE,
+  MMAL_MSG_PORT_ACTION_TYPE_DISABLE,
+  MMAL_MSG_PORT_ACTION_TYPE_FLUSH,
+  MMAL_MSG_PORT_ACTION_TYPE_CONNECT,
+  MMAL_MSG_PORT_ACTION_TYPE_DISCONNECT,
+  MMAL_MSG_PORT_ACTION_TYPE_SET_REQUIREMENTS,
+};
+
+struct mmal_rect {
+  int32_t x;
+  int32_t y;
+  int32_t width;
+  int32_t height;
+};
+
+struct mmal_rational {
+  /* Numerator */
+  int32_t num;
+  /* Denominator */
+  int32_t den;
+};
+
+struct mmal_audio_format {
+  /* Number of audio channels */
+  uint32_t channels;
+
+  /* Sample rate */
+  uint32_t sample_rate;
+
+  /* Bits per sample */
+  uint32_t bits_per_sample;
+
+  /* Size of a block of data */
+  uint32_t block_align;
+};
+
+struct mmal_video_format {
+  /* Width of frame in pixels */
+  uint32_t width;
+
+  /* Height of frame in rows of pixels */
+  uint32_t height;
+
+  /* Visible region of the frame */
+  struct mmal_rect crop;
+
+  /* Frame rate */
+  struct mmal_rational frame_rate;
+
+  /* Pixel aspect ratio */
+  struct mmal_rational par;
+
+  /*
+   * FourCC specifying the color space of the video stream. See the
+   * MmalColorSpace "pre-defined color spaces" for some examples.
+   */
+  uint32_t color_space;
+};
+
+struct mmal_subpicture_format {
+  uint32_t x_offset;
+  uint32_t y_offset;
+};
+
+union mmal_es_specific_format {
+  struct mmal_audio_format audio;
+  struct mmal_video_format video;
+  struct mmal_subpicture_format subpicture;
+};
+
+struct mmal_port_buffer {
+  /* number of buffers */
+  unsigned int num;
+  /* size of buffers */
+  uint32_t size;
+  /* alignment of buffers */
+  uint32_t alignment;
+};
+
+struct mmal_es_format_local {
+  /* enum mmal_es_type */
+  uint32_t type;
+  /* FourCC specifying encoding of the elementary stream.  */
+  uint32_t encoding;
+
+  /*
+   * FourCC specifying the specific encoding variant of the elementary
+   * stream.
+   */
+  uint32_t encoding_variant;
+
+  /* Type specifiv information for the elementary stream */
+  union mmal_es_specific_format *es;
+
+  /* Bitrate in bits per second */
+  uint32_t bitrate;
+
+  /* Flags describing properties of the elementary stream.  */
+  uint32_t flags;
+
+  /* Size of the codec specific data */
+  uint32_t extradata_size;
+
+  /* Codec specific data */
+  uint8_t *extradata;
+};
+
+struct mmal_es_format {
+  /* enum mmal_es_type */
+  uint32_t type;
+
+  /* FourCC specifying encoding of the elementary stream.  */
+  uint32_t encoding;
+  /* FourCC specifying the specific encoding variant of the elementary stream.*/
+  uint32_t encoding_variant;
+
+  /* Type specific information for the elementary stream */
+  uint32_t es;
+
+  /* Bitrate in bits per second */
+  uint32_t bitrate;
+
+  /* Flags describing properties of the elementary stream.  */
+  uint32_t flags;
+
+  /* Size of the codec specific data */
+  uint32_t extradata_size;
+  /* Codec specific data */
+  uint32_t extradata;
 };
 
 struct mmal_msg_header {
   uint32_t magic;
-  uint32_t type;  /* enum mmal_msg_type */
+  /* enum mmal_msg_type */
+  uint32_t type;
 
   /* Opaque handle to the control service */
   uint32_t control_service;
@@ -156,6 +304,71 @@ struct mmal_msg_port_info_get {
   uint32_t index;             /* port index to query */
 };
 
+struct mmal_port_msg {
+  uint32_t priv;  /* Private member used by the framework */
+  uint32_t name;  /* Port name. Used for debugging purposes (RO) */
+
+  uint32_t type;  /* Type of the port (RO) enum mmal_port_type */
+  uint16_t index;  /* Index of the port in its type list (RO) */
+  uint16_t index_all;  /* Index of the port in the list of all ports (RO) */
+
+  uint32_t is_enabled;  /* Indicates whether the port is enabled or not (RO) */
+  uint32_t format;  /* Format of the elementary stream */
+
+  uint32_t buffer_num_min;  /* Minimum number of buffers the port
+         *   requires (RO).  This is set by the
+         *   component.
+         */
+
+  uint32_t buffer_size_min;  /* Minimum size of buffers the port
+         * requires (RO).  This is set by the
+         * component.
+         */
+
+  uint32_t buffer_alignment_min;/* Minimum alignment requirement for
+          * the buffers (RO).  A value of
+          * zero means no special alignment
+          * requirements.  This is set by the
+          * component.
+          */
+
+  uint32_t buffer_num_recommended;  /* Number of buffers the port
+           * recommends for optimal
+           * performance (RO).  A value of
+           * zero means no special
+           * recommendation.  This is set
+           * by the component.
+           */
+
+  uint32_t buffer_size_recommended;  /* Size of buffers the port
+           * recommends for optimal
+           * performance (RO).  A value of
+           * zero means no special
+           * recommendation.  This is set
+           * by the component.
+           */
+
+  uint32_t buffer_num;  /* Actual number of buffers the port will use.
+       * This is set by the client.
+       */
+
+  uint32_t buffer_size; /* Actual maximum size of the buffers that
+        * will be sent to the port. This is set by
+        * the client.
+        */
+
+  uint32_t component;  /* Component this port belongs to (Read Only) */
+
+  uint32_t userdata;  /* Field reserved for use by the client */
+
+  uint32_t capabilities;  /* Flags describing the capabilities of a
+         * port (RO).  Bitwise combination of \ref
+         * portcapabilities "Port capabilities"
+         * values.
+         */
+};
+
+
 /* reply from VC to get port info request */
 struct mmal_msg_port_info_get_reply {
   uint32_t status;    /* enum mmal_msg_status */
@@ -164,7 +377,7 @@ struct mmal_msg_port_info_get_reply {
   uint32_t port_index;    /* port indexed in query */
   int32_t found;    /* unused */
   uint32_t port_handle;  /* Handle to use for this port */
-  struct mmal_port port;
+  struct mmal_port_msg port;
   struct mmal_es_format format; /* elementary stream format */
   union mmal_es_specific_format es; /* es type specific data */
   uint8_t extradata[MMAL_FORMAT_EXTRADATA_MAX_SIZE]; /* es extra data */
@@ -175,7 +388,7 @@ struct mmal_msg_port_info_set {
   uint32_t component_handle;
   uint32_t port_type;    /* enum mmal_msg_port_type */
   uint32_t port_index;    /* port indexed in query */
-  struct mmal_port port;
+  struct mmal_port_msg port;
   struct mmal_es_format format;
   union mmal_es_specific_format es;
   uint8_t extradata[MMAL_FORMAT_EXTRADATA_MAX_SIZE];
@@ -189,18 +402,18 @@ struct mmal_msg_port_info_set_reply {
   uint32_t index;    /* port indexed in query */
   int32_t found;    /* unused */
   uint32_t port_handle;  /* Handle to use for this port */
-  struct mmal_port port;
+  struct mmal_port_msg port;
   struct mmal_es_format format;
   union mmal_es_specific_format es;
   uint8_t extradata[MMAL_FORMAT_EXTRADATA_MAX_SIZE];
 };
 
-/* port action requests that take a mmal_port as a parameter */
+/* port action requests that take a mmal_port_msg as a parameter */
 struct mmal_msg_port_action_port {
   uint32_t component_handle;
   uint32_t port_handle;
   uint32_t action;    /* enum mmal_msg_port_action_type */
-  struct mmal_port port;
+  struct mmal_port_msg port;
 };
 
 /* port action requests that take handles as a parameter */
@@ -215,51 +428,6 @@ struct mmal_msg_port_action_handle {
 struct mmal_msg_port_action_reply {
   uint32_t status;  /* The port action operation status */
 };
-
-/* MMAL buffer transfer */
-
-/* Size of space reserved in a buffer message for short messages. */
-#define MMAL_VC_SHORT_DATA 128
-
-/* Signals that the current payload is the end of the stream of data */
-#define MMAL_BUFFER_HEADER_FLAG_EOS                    BIT(0)
-/* Signals that the start of the current payload starts a frame */
-#define MMAL_BUFFER_HEADER_FLAG_FRAME_START            BIT(1)
-/* Signals that the end of the current payload ends a frame */
-#define MMAL_BUFFER_HEADER_FLAG_FRAME_END              BIT(2)
-/* Signals that the current payload contains only complete frames (>1) */
-#define MMAL_BUFFER_HEADER_FLAG_FRAME                  \
-  (MMAL_BUFFER_HEADER_FLAG_FRAME_START | \
-   MMAL_BUFFER_HEADER_FLAG_FRAME_END)
-/* Signals that the current payload is a keyframe (i.e. self decodable) */
-#define MMAL_BUFFER_HEADER_FLAG_KEYFRAME               BIT(3)
-/*
- * Signals a discontinuity in the stream of data (e.g. after a seek).
- * Can be used for instance by a decoder to reset its state
- */
-#define MMAL_BUFFER_HEADER_FLAG_DISCONTINUITY          BIT(4)
-/*
- * Signals a buffer containing some kind of config data for the component
- * (e.g. codec config data)
- */
-#define MMAL_BUFFER_HEADER_FLAG_CONFIG                 BIT(5)
-/* Signals an encrypted payload */
-#define MMAL_BUFFER_HEADER_FLAG_ENCRYPTED              BIT(6)
-/* Signals a buffer containing side information */
-#define MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO          BIT(7)
-/*
- * Signals a buffer which is the snapshot/postview image from a stills
- * capture
- */
-#define MMAL_BUFFER_HEADER_FLAG_SNAPSHOT               BIT(8)
-/* Signals a buffer which contains data known to be corrupted */
-#define MMAL_BUFFER_HEADER_FLAG_CORRUPTED              BIT(9)
-/* Signals that a buffer failed to be transmitted */
-#define MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED    BIT(10)
-/** Signals the output buffer won't be used, just update reference frames */
-#define MMAL_BUFFER_HEADER_FLAG_DECODEONLY             (1<<11)
-/** Signals that the end of the current payload ends a NAL */
-#define MMAL_BUFFER_HEADER_FLAG_NAL_END                (1<<12)
 
 struct mmal_driver_buffer {
   uint32_t magic;
@@ -319,8 +487,6 @@ struct mmal_msg_buffer_from_host {
 
 /* port parameter setting */
 
-#define MMAL_WORKER_PORT_PARAMETER_SPACE      96
-
 struct mmal_msg_port_parameter_set {
   uint32_t component_handle;  /* component */
   uint32_t port_handle;  /* port */
@@ -350,17 +516,6 @@ struct mmal_msg_port_parameter_get_reply {
   uint32_t size;    /* Parameter size */
   uint32_t value[MMAL_WORKER_PORT_PARAMETER_SPACE];
 };
-
-/* event messages */
-#define MMAL_WORKER_EVENT_SPACE 256
-
-/* Four CC's for events */
-#define MMAL_FOURCC(a, b, c, d) ((a) | (b << 8) | (c << 16) | (d << 24))
-
-#define MMAL_EVENT_ERROR    MMAL_FOURCC('E', 'R', 'R', 'O')
-#define MMAL_EVENT_EOS      MMAL_FOURCC('E', 'E', 'O', 'S')
-#define MMAL_EVENT_FORMAT_CHANGED  MMAL_FOURCC('E', 'F', 'C', 'H')
-#define MMAL_EVENT_PARAMETER_CHANGED  MMAL_FOURCC('E', 'P', 'C', 'H')
 
 /* Structs for each of the event message payloads */
 struct mmal_msg_event_eos {
@@ -446,4 +601,3 @@ struct mmal_msg {
     uint8_t payload[MMAL_MSG_MAX_PAYLOAD];
   } u;
 };
-#endif

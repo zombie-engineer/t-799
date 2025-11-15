@@ -10,16 +10,6 @@ struct block_dev_write_stream {
   struct block_device *bd;
 };
 
-struct write_stream_buf {
-  struct list_head list;
-  uint32_t paddr;
-  uint32_t size;
-  uint32_t io_size;
-  uint32_t io_offset;
-  void *priv;
-  int dma_cb;
-};
-
 struct block_device_ops {
   int (*read)(struct block_device *, uint8_t *buf, uint64_t start_sector,
     uint32_t num_sectors);

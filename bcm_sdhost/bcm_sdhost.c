@@ -1,5 +1,6 @@
 #include <bcm2835/bcm_sdhost.h>
 #include <bcm2835/bcm_cm.h>
+#include <write_stream_buffer.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <ioreg.h>

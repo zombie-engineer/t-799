@@ -1,5 +1,6 @@
 #include <errcode.h>
 #include <sdhc.h>
+#include <write_stream_buffer.h>
 #include <sdhc_cmd.h>
 #include <bcm2835_dma.h>
 #include <bitops.h>
