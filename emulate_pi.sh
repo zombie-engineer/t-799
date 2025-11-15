@@ -11,6 +11,7 @@ TRACE_ARGS=
 
 echo $RUNCMD
 $RUNCMD -kernel kernel8.bin\
+	-drive file=/mnt/gooddisk/sdcard_virt.img,if=sd,format=raw \
 	-machine raspi3b \
 	-nographic \
 	$TRACE_ARGS \
