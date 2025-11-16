@@ -1,4 +1,5 @@
 #pragma once
+#include <bitops.h>
 
 #define MMAL_FORMAT_EXTRADATA_MAX_SIZE 128
 #define MMAL_MSG_MAX_PAYLOAD 488

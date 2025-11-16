@@ -607,7 +607,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
   mmal_buf_fifo_dump("submitted", &p->buffers_pending);
   p->nr_busy--;
   restore_irq_flags(irqflags);
-  r->buffer_header.user_data =(uint32_t)(uint64_t)b;
+  r->buffer_header.user_data = NARROW_PTR(b);
 
   os_event_notify_and_yield(&mmal_io_event);
 

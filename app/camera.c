@@ -56,8 +56,8 @@ struct camera {
   struct camera_component_resizer resizer;
   struct camera_component_encoder encoder;
   struct camera_component_splitter splitter;
-  struct mmal_port *to_display;
-  struct mmal_port *port_out;
+  struct mmal_port *port_preview_stream;
+  struct mmal_port *port_h264_stream;
 
   int stat_frames;
 };
@@ -106,14 +106,21 @@ static int mmal_port_io_work_display_buf_release(
 }
 #endif
 
-#if 0
-static OPTIMIZED int mmal_port_buffer_process_display(
-  struct mmal_port *p)
+static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
+{
+  struct list_head *node;
+  node = list_fifo_pop_head(l);
+  return node ? list_entry(node, struct mmal_buffer, list) : NULL;
+}
+
+static OPTIMIZED int camera_process_preview_buffers()
 {
   int err;
   int irqflags;
   bool should_draw;
+  struct mmal_port *p = cam.port_preview_stream;
   struct mmal_buffer *b = mmal_buf_fifo_pop(&p->buffers_pending);
+
   if (!b)
     return SUCCESS;
 
@@ -146,16 +153,8 @@ static OPTIMIZED int mmal_port_buffer_process_display(
   err = ili9341_draw_dma_buf(b->user_handle);
   return err;
 }
-#endif
 
-static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
-{
-  struct list_head *node;
-  node = list_fifo_pop_head(l);
-  return node ? list_entry(node, struct mmal_buffer, list) : NULL;
-}
-
-static void OPTIMIZED camera_mmal_buffer_to_host_cb(void)
+static void OPTIMIZED camera_process_h264_buffers(void)
 {
   int irqflags;
   int err;
@@ -164,7 +163,7 @@ static void OPTIMIZED camera_mmal_buffer_to_host_cb(void)
   struct list_head *node;
   struct write_stream_buf *iobuf;
   struct write_stream_buf *iobuf_tmp;
-  struct mmal_port *p = cam.port_out;
+  struct mmal_port *p = cam.port_h264_stream;
 
   // mmal_buf_fifo_dump("before received", &p->buffers_pending);
   b = mmal_buf_fifo_pop(&p->buffers_pending);
@@ -211,6 +210,7 @@ static void OPTIMIZED camera_mmal_buffer_to_host_cb(void)
     list_add_tail(&b->list, &p->buffers_free);
     restore_irq_flags(irqflags);
   }
+
 #if 0
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {}
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {}
@@ -223,6 +223,12 @@ static void OPTIMIZED camera_mmal_buffer_to_host_cb(void)
   if (err != SUCCESS) {
     MODULE_ERR("failed to submit buffer list, err: %d", err);
   }
+}
+
+static void OPTIMIZED camera_on_mmal_buffer_ready(void)
+{
+  camera_process_h264_buffers();
+  camera_process_preview_buffers();
 }
 
 static int mmal_set_camera_parameters(struct mmal_component *c,
@@ -256,24 +262,22 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
   return ret;
 }
 
-#if 0
-static void OPTIMIZED camera_on_mmal_buffer_done_isr(uint32_t buf_handle)
+static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
 {
-  struct mmal_port *p = cam.to_display;
+  struct mmal_port *p = cam.port_preview_stream;
   struct mmal_buffer *b = NULL;
 
   list_for_each_entry(b, &p->buffers_in_process, list) {
     if (buf_handle == b->user_handle) {
       list_del(&b->list);
       list_add_tail(&b->list, &p->buffers_free);
-      os_event_notify(&mmal_io_work_waitflag);
+      os_event_notify_and_yield(&mmal_io_work_waitflag);
       return;
     }
   }
 
   MODULE_ERR("Failed to find display buffer\r\n");
 }
-#endif
 
 static inline void camera_display_buffers_dump(
   const struct ili9341_buffer_info *b,
@@ -419,9 +423,7 @@ out_err:
   return err;
 }
 
-
-static __attribute__((unused)) int camera_make_resizer_port(
-  int in_width, int in_height,
+static int camera_make_resizer_port(int in_width, int in_height,
   int out_width, int out_height)
 {
   int err = SUCCESS;
@@ -689,23 +691,93 @@ int camera_video_stop(void)
     &frame_count, sizeof(frame_count));
 }
 
-int camera_init(struct block_device *bdev, int frame_width, int frame_height,
-  int frame_rate, uint32_t bit_rate)
+static int mmal_apply_display_buffers(struct mmal_port *p,
+  struct ili9341_buffer_info *buffers, size_t num_buffers)
+{
+  size_t i;
+  int err;
+
+  for (i = 0; i < num_buffers; ++i) {
+    err = mmal_port_add_buffer(p, buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle);
+    CHECK_ERR("Failed to import display buffer #%d", i);
+    MODULE_INFO("mmal_apply_display_buffers: port:%s, ptr:%08x, size:%d"
+      " handle:%d, port_enabled:%s",
+      p->name,
+      buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle,
+      p->enabled ? "yes" : "no");
+  }
+
+  err = mmal_port_buffer_send_all(p);
+  CHECK_ERR("Failed to send buffers to port");
+out_err:
+  return err;
+}
+
+static int camera_preview_init(int input_width, int input_height,
+    int preview_width, int preview_height, bool start)
 {
   int err;
-  struct mmal_param_cam_info cam_info = {0};
-//  struct ili9341_buffer_info display_buffers[2];
-  cam.bdev = bdev;
 
-#if 0
-  err = ili9341_nonstop_refresh_init(camera_on_mmal_buffer_done_isr);
+  struct ili9341_buffer_info display_buffers[2];
+  err = ili9341_nonstop_refresh_init(camera_on_preview_data_consumed_isr);
   CHECK_ERR("Failed to init display in non-stop refresh mode");
   err = ili9341_nonstop_refresh_get_buffers(display_buffers,
     ARRAY_SIZE(display_buffers));
   CHECK_ERR("Failed to get display dma buffers");
 
   camera_display_buffers_dump(display_buffers, ARRAY_SIZE(display_buffers));
-#endif
+
+  err = camera_make_resizer_port(input_width, input_height, preview_width,
+    preview_height);
+
+  CHECK_ERR("Failed to make resizer port");
+
+  err = mmal_port_set_zero_copy(cam.camera.preview);
+  CHECK_ERR("Failed to set zero copy to preview.OUT");
+  err = mmal_port_set_zero_copy(cam.resizer.in);
+  CHECK_ERR("Failed to set zero copy to resizer.IN");
+  err = mmal_port_set_zero_copy(cam.resizer.out);
+  CHECK_ERR("Failed to set zero copy to resizer.OUT");
+
+  err = mmal_port_connect(cam.camera.preview, cam.resizer.in);
+  CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
+  cam.port_preview_stream = cam.resizer.out;
+
+  /* Enable resizer ports */
+  err = mmal_port_enable(cam.resizer.out);
+  CHECK_ERR("Failed to enable resizer.OUT");
+
+  err = mmal_apply_display_buffers(cam.resizer.out, display_buffers,
+    ARRAY_SIZE(display_buffers));
+  CHECK_ERR("Failed to add display buffers");
+
+  if (start) {
+    /*
+     * Preview frames will start coming indefinitely as soon as
+     * - preview port is enabled
+     * - buffer is provided to the output of MMAL component graph, to where
+     *   preview port is connected, in our case this is 'ril.isp.OUT' node of
+     *   graph 'ril.camera.PREVIEW -> ril.isp.IN -> ril.isp.OUT'
+     * - var name for ril.isp nodes are named as resizer_X
+     */
+    err = mmal_port_enable(cam.camera.preview);
+    CHECK_ERR("Failed to enable preview.OUT");
+    MODULE_INFO("Preview port enabled %p", cam.camera.preview);
+  }
+  return SUCCESS;
+}
+
+int camera_init(struct block_device *bdev, int frame_width, int frame_height,
+  int frame_rate, uint32_t bit_rate, bool preview_enable, int preview_width,
+  int preview_height)
+{
+  int err;
+  struct mmal_param_cam_info cam_info = {0};
+  cam.bdev = bdev;
+
+  mmal_register_io_cb(camera_on_mmal_buffer_ready);
 
   err = camera_get_camera_info(&cam_info);
   CHECK_ERR("Failed to get num cameras");
@@ -718,17 +790,8 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
     bit_rate);
   CHECK_ERR("Failed to create encoder component");
 
-#if 0
-  err = camera_make_resizer_port(frame_width, frame_height, 320, 240);
-#endif
-
   err = mmal_port_connect(cam.camera.video, cam.encoder.in);
   CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
-
-#if 0
-  err = mmal_port_connect(cam.port_preview, cam.port_resizer_in);
-  CHECK_ERR("Failed to connect camera video.OUT to encoder.IN");
-#endif
 
   err = mmal_port_set_zero_copy(cam.encoder.out);
   CHECK_ERR("Failed to set zero copy to encoder.OUT");
@@ -736,23 +799,14 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   CHECK_ERR("Failed to set zero copy to encoder.IN");
   err = mmal_port_set_zero_copy(cam.camera.video);
   CHECK_ERR("Failed to set zero copy to video.OUT");
+  cam.port_h264_stream = cam.encoder.out;
 
-#if 0
-  err = mmal_port_set_zero_copy(cam.port_preview);
-  CHECK_ERR("Failed to set zero copy to preview.OUT");
-
-  err = mmal_port_set_zero_copy(cam.port_resizer_in);
-  CHECK_ERR("Failed to set zero copy to resizer.IN");
-
-  err = mmal_port_set_zero_copy(cam.port_resizer_out);
-  CHECK_ERR("Failed to set zero copy to resizer.OUT");
-
-  /* Enable resizer ports */
-  err = mmal_port_enable(cam.resizer.out);
-  CHECK_ERR("Failed to enable resizer.OUT");
-
-  camera.to_display = cam.resizer.out;
-#endif
+  if (preview_enable) {
+    err = camera_preview_init(frame_width, frame_height, preview_width,
+      preview_height, true);
+    CHECK_ERR("Failed to enable preview graph when requested");
+    return SUCCESS;
+  }
 
   /*
    * Enable encoder ports.
@@ -764,31 +818,9 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   err = mmal_port_enable(cam.encoder.in);
   CHECK_ERR("Failed to enable encoder.IN");
 
-  cam.port_out = cam.encoder.out;
-  mmal_register_io_cb(camera_mmal_buffer_to_host_cb);
-
-  err = mmal_port_apply_buffers(cam.port_out, 1);
+  err = mmal_port_apply_buffers(cam.port_h264_stream, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
-
-#if 0
-  /*
-   * Preview frames will start coming indefinitely as soon as
-   * - preview port is enabled
-   * - buffer is provided to the output of MMAL component graph, to where
-   *   preview port is connected, in our case this is 'ril.isp.OUT' node of
-   *   graph 'ril.camera.PREVIEW -> ril.isp.IN -> ril.isp.OUT'
-   * - var name for ril.isp nodes are named as resizer_X
-   */
-  err = mmal_port_enable(cam.camera.preview);
-  CHECK_ERR("Failed to enable preview.OUT");
-  MODULE_INFO("Preview port enabled %p", cam.camera.preview);
-
-  err = mmal_apply_display_buffers(cam.resizer.out, display_buffers,
-    ARRAY_SIZE(display_buffers));
-
-  CHECK_ERR("Failed to add display buffers");
-#endif
   err = camera_video_start();
   CHECK_ERR("Failed to start camera capture");
   MODULE_INFO("Started video capture, err = %d", err);

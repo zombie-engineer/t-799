@@ -21,6 +21,11 @@ void app_main(void)
 {
   int err;
 
+  const int frame_width = 1920;
+  const int frame_height = 1080;
+  const int preview_width = 320;
+  const int preview_height = 240;
+  const bool preview_enable = true;
   const uint32_t camera_bit_rate = 4 * 1000 * 1000;
   const int camera_frame_rate = 30;
 
@@ -69,8 +74,10 @@ void app_main(void)
   BUG_IF(err != SUCCESS, "failed to init VideoCore service \"MMAL\"");
   err = smem_init();
   BUG_IF(err != SUCCESS, "failed to init VideoCore service \"SMEM\"");
-  err = camera_init(bdev_partition, 1920, 1080, camera_frame_rate,
-    camera_bit_rate);
+
+  err = camera_init(bdev_partition, frame_width, frame_height,
+    camera_frame_rate, camera_bit_rate, preview_enable, preview_width,
+    preview_height);
   BUG_IF(err != SUCCESS, "failed to init camera");
 
   while (1) {
