@@ -335,7 +335,9 @@ static __attribute__((section(".rodata_nommu"))) armv8_exception_handler_sync_fn
 EXCEPTION_VECTOR void armv8_exception_handler_sync(uint64_t esr)
 {
   armv8_exception_handler_sync_fn sync_cb;
+#if defined(CONFIG_SCHED_MON)
   sched_mon_save_ctx();
+#endif
 
   int exception_class = ESR_GET_SYNC_EXCEPTION_CLASS(esr);
   int iss = ESR_GET_SYNC_ISS(esr);

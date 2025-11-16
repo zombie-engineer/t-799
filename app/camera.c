@@ -12,7 +12,6 @@
 #include <vc/service_mmal_encoding.h>
 #include <write_stream_buffer.h>
 
-static int camera_log_level;
 #define MODULE_LOG_LEVEL camera_log_level
 #define MODULE_UNIT_TAG "cam"
 #include <module_common.h>

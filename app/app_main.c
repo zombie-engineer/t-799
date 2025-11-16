@@ -80,4 +80,3 @@ void app_main(void)
 out:
   os_exit_current_task();
 }
-
