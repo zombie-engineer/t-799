@@ -755,7 +755,10 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   camera.to_display = cam.resizer.out;
 #endif
 
-  /* Enable encoder ports */
+  /*
+   * Enable encoder ports.
+   * NOTE: port must be enabled before queing the buffers
+   */
   err = mmal_port_enable(cam.encoder.out);
   CHECK_ERR("Failed to enable encoder.OUT");
 

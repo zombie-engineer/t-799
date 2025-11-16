@@ -143,21 +143,17 @@ static inline void vchiq_event_check_isr(struct event *ev,
     os_event_notify_isr(ev);
 }
 
-static void vchiq_check_local_events_isr(void)
+static void vchiq_irq_handler(void)
 {
-  struct vchiq_shared_state *local;
-  local = vchiq_state.local;
+  struct vchiq_shared_state *local = vchiq_state.local;
+
+  if (!vchiq_doorbell_is_triggered())
+    return;
 
   vchiq_event_check_isr(&vchiq_state.ev_trigger, &local->trigger);
   vchiq_event_check_isr(&vchiq_state.ev_recycle, &local->recycle);
   vchiq_event_check_isr(&vchiq_state.ev_sync_trigger, &local->sync_trigger);
   vchiq_event_check_isr(&vchiq_state.ev_sync_release, &local->sync_release);
-}
-
-static void vchiq_irq_handler(void)
-{
-  if (vchiq_doorbell_is_triggered())
-    vchiq_check_local_events_isr();
 }
 
 static int vchiq_tx_header_to_slot_idx(struct vchiq_state *s)

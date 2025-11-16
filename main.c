@@ -1,32 +1,22 @@
-#include <gpio.h>
-#include <cpu.h>
-#include <block_device.h>
 #include <kmalloc.h>
 #include <bcm2835/bcm2835_systimer.h>
-#include <bcm2835/bcm2835_emmc.h>
 #include <bcm2835/bcm2835_pll.h>
 #include <bcm2835/bcm_sdhost.h>
 #include <bcm2835_dma.h>
-#include <common.h>
 #include <debug_led.h>
-#include "uart_pl011.h"
-#include <stringlib.h>
 #include <mbox.h>
+#include <uart_pl011.h>
 #include <mbox_props.h>
 #include <irq.h>
 #include <sched.h>
 #include <task.h>
 #include <os_api.h>
-#include <mmu.h>
 #include <printf.h>
-#include <atomic.h>
 #include <sections.h>
-#include <ili9341.h>
 #include <errcode.h>
-#include <fs/fs.h>
-#include <fs/fat32.h>
 #include <logger.h>
 #include <app/app_main.h>
+#include <config.h>
 
 EXCEPTION void fiq_handler(void)
 {
@@ -36,7 +26,7 @@ EXCEPTION void serror_handler(void)
 {
 }
 
-void print_mbox_props(void)
+static void print_mbox_props(void)
 {
   uint64_t val64;
   int val, val2, i;
@@ -92,7 +82,7 @@ static void kernel_init(void)
 {
   int err;
 
-  uart_pl011_init(115200*2);
+  uart_pl011_init(CONFIG_CONSOLE_BAUDRATE);
   clear_reboot_request();
   kmalloc_init();
   dma_memory_init();
@@ -122,18 +112,13 @@ out:
 static void kernel_run(void)
 {
   struct task *t;
-#if 0
-  mmu_print_va(0x0000000001ff1000, 1);
-  mmu_print_va(0xffff000001ff0000, 1);
-  mmu_print_va(0xffff000001ff1000, 1);
-  mmu_print_va(0xffff00000201c000, 1);
-#endif
-
   t = task_create(app_main, "app_main");
   sched_run_task_isr(t);
   t = task_create(blockdev_scheduler_fn, "block-sched");
   sched_run_task_isr(t);
   scheduler_start();
+
+  /* not reachable code */
   panic();
 }
 

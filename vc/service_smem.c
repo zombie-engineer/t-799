@@ -1,5 +1,4 @@
 #include <vc/service_smem.h>
-#include <vc/service_smem_helpers.h>
 #include <vc/vchiq.h>
 #include <errcode.h>
 #include <stddef.h>
@@ -8,6 +7,10 @@
 #include <event.h>
 #include <common.h>
 #include <os_api.h>
+
+#define MODULE_UNIT_TAG "smem"
+#define MODULE_LOG_LEVEL smem_log_level
+#include <module_common.h>
 
 #define VC_SM_VER  1
 #define VC_SM_MIN_VER 0
@@ -173,7 +176,7 @@ static int vc_sm_cma_vchi_send_msg(enum vc_sm_msg_type msg_id, const void *msg,
   ctx = smem_msg_ctx_alloc();
   if (!ctx) {
     err = ERR_GENERIC;
-    SMEM_ERR("Failed to allocate mems message context");
+    MODULE_ERR("Failed to allocate mems message context");
     return err;
   }
 
@@ -208,13 +211,13 @@ static struct smem_msg_ctx *smem_msg_ctx_from_trans_id(uint32_t trans_id)
     ctx = &smem_msg_ctx_pool[i];
     if (ctx->trans_id == trans_id) {
       if (!ctx->active) {
-        SMEM_ERR("mems data callback for inactive message");
+        MODULE_ERR("mems data callback for inactive message");
         return NULL;
       }
       return ctx;
     }
   }
-  SMEM_ERR("mems data callback for non-existent context");
+  MODULE_ERR("mems data callback for non-existent context");
   return NULL;
 }
 
@@ -256,9 +259,9 @@ int smem_import_dmabuf(void *addr, uint32_t size, uint32_t *vcsm_handle)
     &msg, sizeof(msg),
     &result, sizeof(result),
     &cur_trans_id);
-  SMEM_CHECK_ERR("Failed to import buffer to vc");
+  CHECK_ERR("Failed to import buffer to vc");
 
-  SMEM_DEBUG("imported_dmabuf: addr:%08x, size: %d, trans_id: %08x,"
+  MODULE_DEBUG("imported_dmabuf: addr:%08x, size: %d, trans_id: %08x,"
     " res.trans_id: %08x, res.handle: %08x",
     msg.addr, msg.size, cur_trans_id, result.trans_id,
     result.res_handle);
