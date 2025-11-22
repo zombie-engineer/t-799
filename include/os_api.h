@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <event.h>
 #include <cpu.h>
+#include <syscall.h>
 
 /*
  * os_wait_ms - put current task to sleep for a given number of milliseconds
