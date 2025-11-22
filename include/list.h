@@ -95,7 +95,6 @@ static inline OPTIMIZED void __list_add(struct list_head *new,
       &pos->member != (head);\
       pos = tmp, tmp = list_next_entry(tmp, member))
 
-
 static inline void __list_del(struct list_head *entry)
 {
   entry->prev->next = entry->next;
@@ -128,4 +127,16 @@ static inline void list_move_tail(struct list_head *list,
 {
   __list_del(list);
   list_add_tail(list, head);
+}
+
+static inline struct list_head *list_pop_head(struct list_head *l)
+{
+  struct list_head *node;
+
+  if (list_empty(l))
+    return NULL;
+
+  node = l->next;
+  list_del_init(node);
+  return node;
 }
