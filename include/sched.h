@@ -37,6 +37,10 @@ void sched_event_notify(struct event *ev);
 
 void sched_event_notify_isr(struct event *ev);
 
+void sched_wait_list_wake_one_isr(struct list_head *wait_list);
+
+void sched_wait_list_put_current_isr(struct list_head *wait_list);
+
 uint64_t sched_get_time_us(void);
 
 void __sched_try_reschedule(void);

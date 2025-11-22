@@ -9,6 +9,7 @@ typedef void (*task_fn)(void);
 #define TASK_SCHED_RQ_BLOCK_ON_TIMER (1<<0)
 #define TASK_SCHED_RQ_BLOCK_ON_EVENT (1<<1)
 #define TASK_SCHED_RQ_EXIT           (1<<2)
+#define TASK_SCHED_RQ_WAIT_LIST      (1<<3)
 
 struct stack;
 
@@ -21,6 +22,7 @@ struct task {
   uint8_t scheduler_request;
   struct event *wait_event;
   struct stack *stack;
+  int starvation;
 };
 
 struct task *task_create(task_fn fn, const char *task_name);

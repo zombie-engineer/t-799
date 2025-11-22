@@ -1,6 +1,7 @@
 #include <os_api.h>
 #include <sched.h>
 #include <task.h>
+#include <os_msgq.h>
 #include "armv8_cpuctx.h"
 #include <common.h>
 
@@ -90,14 +91,24 @@ void os_event_notify_and_yield(struct event *ev)
   OSAPI_PUTS("[os_event_notify end]\r\n");
 }
 
+static inline void svc_put_to_wait_list(struct list_head *l)
+{
+  sched_wait_list_put_current_isr(l);
+}
+
+static inline void svc_msgq_put(struct os_msgq *q, const void *m)
+{
+  os_msgq_put_isr(q, m);
+}
 
 void svc_handler(uint32_t imm)
 {
-  uint64_t arg0;
+  uint64_t arg0, arg1;
   struct task *t = sched_get_current_task();
   const struct armv8_cpuctx *c;
   c = t->cpuctx;
   arg0 = c->gpregs[0];
+  arg1 = c->gpregs[1];
 
   switch(imm)
   {
@@ -118,6 +129,12 @@ void svc_handler(uint32_t imm)
     break;
   case SYSCALL_EXIT_CURRENT_TASK:
     sched_exit_current_task_isr();
+    break;
+  case SYSCALL_PUT_TO_WAIT_LIST:
+    svc_put_to_wait_list((void *)arg0);
+    break;
+  case SYSCALL_MSGQ_PUT:
+    svc_msgq_put((void *)arg0, (const void *)arg1);
     break;
   default:
     panic();

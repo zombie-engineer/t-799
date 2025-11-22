@@ -33,6 +33,7 @@ struct scheduler_stats {
 
 struct scheduler {
   struct task *current;
+  struct list_head high_prio_runnable;
   struct list_head runnable;
   struct list_head blocked_on_event;
   struct list_head blocked_on_timer;
@@ -58,6 +59,12 @@ bool sched_run_task_isr(struct task *t)
 
   if (sched.current == t)
     return false;
+
+  list_for_each(node, &sched.high_prio_runnable) {
+    old_task = container_of(node, struct task, scheduler_list);
+    if (old_task == t)
+      return false;
+  }
 
   list_for_each(node, &sched.runnable) {
     old_task = container_of(node, struct task, scheduler_list);
@@ -119,6 +126,8 @@ static inline void scheduler_drop_current(void)
     scheduler_insert_to_blocked_on_timer(t);
   else if (t->scheduler_request == TASK_SCHED_RQ_BLOCK_ON_EVENT)
     list_add_tail(&t->scheduler_list, &sched.blocked_on_event);
+  else if (t->scheduler_request == TASK_SCHED_RQ_WAIT_LIST)
+    ; /* do not add task in wait_list anywhere for now */
   else
     list_add_tail(&t->scheduler_list, &sched.runnable);
   t->scheduler_request = 0;
@@ -126,8 +135,9 @@ static inline void scheduler_drop_current(void)
 
 static void scheduler_select_next(void)
 {
-  struct task *t;
+  struct task *t, *tmp;
   struct list_head *h;
+  bool from_runnable = false;
 
   if (!list_empty(&sched.blocked_on_event)) {
     h = sched.blocked_on_event.next;
@@ -150,17 +160,36 @@ static void scheduler_select_next(void)
     }
   }
 
-  if (!list_empty(&sched.runnable)) {
-    h = sched.runnable.next;
+  if (!list_empty(&sched.high_prio_runnable)) {
+    h = sched.high_prio_runnable.next;
     list_del(h);
     t = container_of(h, struct task, scheduler_list);
     sched.current = t;
     goto done;
   }
 
+  if (!list_empty(&sched.runnable)) {
+    h = sched.runnable.next;
+    list_del(h);
+    t = container_of(h, struct task, scheduler_list);
+    sched.current = t;
+    from_runnable = true;
+    goto done;
+  }
+
   sched.current = sched.idle_task;
 
 done:
+  if (!from_runnable) {
+    list_for_each_entry_safe(t, tmp, &sched.runnable, scheduler_list) {
+      t->starvation++;
+      if (t->starvation > 10) {
+        list_move_tail(&t->scheduler_list, &sched.high_prio_runnable);
+      }
+    }
+  }
+
+  sched.current->starvation = 0;
   asm volatile (
     "ldr x1, =__current_cpuctx\n"
     "str %0, [x1]\n"::"r"(sched.current->cpuctx));
@@ -284,9 +313,33 @@ void sched_event_notify(struct event *ev)
   restore_irq_flags(irq);
 }
 
+void sched_wait_list_put_current_isr(struct list_head *wait_list)
+{
+  struct task *t = sched.current;
+  BUG_IF(!t, "Current task is NULL");
+  list_add_tail(&t->scheduler_list, wait_list);
+  t->scheduler_request = TASK_SCHED_RQ_WAIT_LIST;
+  __schedule();
+}
+
+void sched_wait_list_wake_one_isr(struct list_head *wait_list)
+{
+  struct task *t;
+  struct list_head *l;
+
+  l = list_pop_head(wait_list);
+  if (!l)
+    return;
+
+  t = container_of(l, struct task, scheduler_list);
+  list_add_tail(&t->scheduler_list, &sched.high_prio_runnable);
+  sched.needs_resched = true;
+}
+
 void scheduler_init(void)
 {
   INIT_LIST_HEAD(&sched.runnable);
+  INIT_LIST_HEAD(&sched.high_prio_runnable);
   INIT_LIST_HEAD(&sched.blocked_on_event);
   INIT_LIST_HEAD(&sched.blocked_on_timer);
   sched.current = NULL;

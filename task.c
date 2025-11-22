@@ -147,6 +147,7 @@ struct task *task_create(task_fn fn, const char *task_name)
   t->scheduler_request = 0;
   t->cpuctx = ctx;
   t->task_id = task_id_generator++;
+  t->starvation = 0;
   task_init_cpuctx(t, fn, stack_base);
   memset(t->name, 0, sizeof(t->name));
   strncpy(t->name, task_name, sizeof(t->name));

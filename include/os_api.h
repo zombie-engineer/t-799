@@ -4,6 +4,29 @@
 #include <cpu.h>
 #include <syscall.h>
 
+#define os_api_syscall1(__syscall, __arg0) \
+  do { \
+    asm inline volatile( \
+        "mov x0, %0\r\n" \
+        "svc %1" \
+    :: "r"(__arg0), "i"(__syscall)); \
+  } while (0)
+
+#define os_api_syscall2(__syscall, __arg0, __arg1) \
+  do { \
+    asm inline volatile( \
+      "mov x0, %0\r\n" \
+      "mov x1, %1\r\n" \
+      "svc %2" \
+    :: "r"(__arg0), "r"(__arg1), "i"(__syscall)); \
+  } while (0)
+
+#define os_api_put_to_wait_list(__wait_list) \
+  do { \
+    asm inline volatile("mov x0, %0\r\nsvc %1" \
+    :: "r"(__wait_list), "i"(SYSCALL_PUT_TO_WAIT_LIST)); \
+  } while (0)
+
 /*
  * os_wait_ms - put current task to sleep for a given number of milliseconds
  * ms - number of milliseconds to sleep
