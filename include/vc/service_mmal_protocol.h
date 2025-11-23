@@ -590,12 +590,9 @@ struct mmal_msg {
     struct mmal_msg_buffer_from_host buffer_from_host;
 
     struct mmal_msg_port_parameter_set port_parameter_set;
-    struct mmal_msg_port_parameter_set_reply
-      port_parameter_set_reply;
-    struct mmal_msg_port_parameter_get
-      port_parameter_get;
-    struct mmal_msg_port_parameter_get_reply
-      port_parameter_get_reply;
+    struct mmal_msg_port_parameter_set_reply port_parameter_set_reply;
+    struct mmal_msg_port_parameter_get port_parameter_get;
+    struct mmal_msg_port_parameter_get_reply port_parameter_get_reply;
 
     struct mmal_msg_event_to_host event_to_host;
 
