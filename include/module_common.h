@@ -30,3 +30,9 @@ static int MODULE_LOG_LEVEL = LOG_LEVEL_CRIT;
     goto out_err; \
   }
 
+#define MODULE_ASSERT(__expr, __msg) \
+  if (!(__expr)) { \
+    MODULE_ERR(__msg); \
+    while(1) \
+      asm volatile("wfe"); \
+  }
