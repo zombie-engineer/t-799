@@ -89,29 +89,19 @@ static OPTIMIZED int camera_on_preview_buffer_ready(struct mmal_buffer *b)
   bool should_draw;
   struct mmal_buffer *b2;
   struct mmal_port *p = cam.port_preview_stream;
+
+  disable_irq_save_flags(irqflags);
   b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
-
-  if (b != b2)
+  if (b != b2) {
+    restore_irq_flags(irqflags);
     return ERR_INVAL;
-
-  if (!(b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END))
-    return SUCCESS;
-
-  should_draw = false;
-
-  disable_irq_save_flags(irqflags);
-  while(1) {
-    list_del(&b->list);
-    if (list_empty(&p->bufs.os_side_consumable))
-      break;
-
-    list_add_tail(&b->list, &p->bufs.os_side_free);
-    b = list_first_entry(&p->bufs.os_side_consumable,
-      struct mmal_buffer, list);
   }
-  restore_irq_flags(irqflags);
 
-  disable_irq_save_flags(irqflags);
+  if (!(b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END)) {
+    restore_irq_flags(irqflags);
+    goto to_remote;
+  }
+
   should_draw = list_empty(&p->bufs.os_side_in_process);
   if (should_draw)
     list_add_tail(&b->list, &p->bufs.os_side_in_process);
@@ -119,9 +109,18 @@ static OPTIMIZED int camera_on_preview_buffer_ready(struct mmal_buffer *b)
   restore_irq_flags(irqflags);
 
   if (!should_draw)
-    return SUCCESS;
+    goto to_remote;
 
   err = ili9341_draw_dma_buf(b->user_handle);
+  if (err != SUCCESS)
+    MODULE_ERR("Failed to send display buffer to draw");
+  return err;
+
+to_remote:
+  err = mmal_port_buffer_to_remote(p, b);
+  if (err != SUCCESS) {
+    MODULE_ERR("Failed to return unused display buffer to remode");
+  }
   return err;
 }
 
@@ -174,7 +173,7 @@ static int OPTIMIZED camera_on_h264_buffer_ready(void)
   if (!(cam.stat_frames % 25))
     os_log(".%d\r\n", cam.stat_frames);
   cam.stat_frames++;
-  err = mmal_port_buffer_submit_list(p, &p->bufs.os_side_free);
+  err = mmal_port_buffers_to_remote(p, &p->bufs.os_side_free, false);
   if (err != SUCCESS) {
     MODULE_ERR("failed to submit buffer list, err: %d", err);
   }
@@ -184,11 +183,10 @@ static int OPTIMIZED camera_on_h264_buffer_ready(void)
 static int OPTIMIZED camera_on_mmal_buffer_ready(struct mmal_port *p,
   struct mmal_buffer *b)
 {
-  if (p == cam.port_h264_stream) {
+  if (p == cam.port_h264_stream)
     return camera_on_h264_buffer_ready();
-  } if (p == cam.port_preview_stream) {
+  if (p == cam.port_preview_stream)
     return camera_on_preview_buffer_ready(b);
-  }
   return ERR_INVAL;
 }
 
@@ -222,33 +220,6 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
     MMAL_PARAM_CAMERA_CONFIG, &new_config, &config_size);
   return ret;
 }
-
-#if 0
-static int mmal_apply_display_buffers(struct mmal_port *p,
-  struct ili9341_buffer_info *buffers, size_t num_buffers)
-{
-  size_t i;
-  int err;
-
-  for (i = 0; i < num_buffers; ++i) {
-    err = mmal_port_add_buffer(p, buffers[i].buffer,
-      buffers[i].buffer_size, buffers[i].handle);
-    CHECK_ERR("Failed to import display buffer #%d", i);
-    MODULE_INFO("mmal_apply_display_buffers: port:%s, ptr:%08x, size:%d"
-      " handle:%d, port_enabled:%s",
-      p->name,
-      buffers[i].buffer,
-      buffers[i].buffer_size, buffers[i].handle,
-      p->enabled ? "yes" : "no");
-  }
-
-  err = mmal_port_buffer_send_all(p);
-  CHECK_ERR("Failed to send buffers to port");
-out_err:
-  return err;
-}
-#endif
-
 
 static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
 {
@@ -696,7 +667,7 @@ static int mmal_apply_display_buffers(struct mmal_port *p,
       p->enabled ? "yes" : "no");
   }
 
-  err = mmal_port_buffer_send_all(p);
+  err = mmal_port_buffers_to_remote(p, &p->bufs.os_side_free, true);
   CHECK_ERR("Failed to send buffers to port");
 out_err:
   return err;

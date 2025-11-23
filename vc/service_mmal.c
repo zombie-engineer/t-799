@@ -222,34 +222,138 @@ static void mmal_format_print(const char *action, const char *name,
     f->es->video.height, f->flags);
 }
 
-static int mmal_port_buffer_send_one(struct mmal_port *p,
-  struct mmal_buffer *b);
-
-OPTIMIZED int mmal_port_buffer_submit(struct mmal_port *p,
+static int mmal_send_msg_buffer_from_host(struct mmal_port *p,
   struct mmal_buffer *b)
 {
-  int irqflags;
+  /*
+   * Kernel code in bcm2835-camera.c states this is only possible for enabled
+   * port
+   */
+  if (!p->enabled)
+    return ERR_INVAL;
 
-  disable_irq_save_flags(irqflags);
-  list_del(&b->list);
-  list_add_tail(&b->list, &p->bufs.remote_side);
-  restore_irq_flags(irqflags);
-  return mmal_port_buffer_send_one(p, b);
+  VCHIQ_MMAL_MSG_DECL_ASYNC(p->component->ms, BUFFER_FROM_HOST,
+    buffer_from_host);
+
+  memset(m, 0, sizeof(*m));
+
+  m->drvbuf.magic = MMAL_MAGIC;
+  m->drvbuf.component_handle = p->component->handle;
+  m->drvbuf.port_handle = p->handle;
+  m->drvbuf.client_context = (uint32_t)((uint64_t)b & ~0xffff000000000000);
+
+  m->is_zero_copy = p->zero_copy;
+  m->buffer_header.next = 0;
+  m->buffer_header.priv = 0;
+  m->buffer_header.cmd = 0;
+  m->buffer_header.user_data = NARROW_PTR(b);
+  if (p->zero_copy)
+    m->buffer_header.data = b->vcsm_handle;
+  else
+    m->buffer_header.data = RAM_PHY_TO_BUS_UNCACHED(b->buffer);
+  m->buffer_header.alloc_size = b->buffer_size;
+
+  if (p->type == MMAL_PORT_TYPE_OUTPUT) {
+    m->buffer_header.length = 0;
+    m->buffer_header.offset = 0;
+    m->buffer_header.flags = 0;
+    m->buffer_header.pts = MMAL_TIME_UNKNOWN;
+    m->buffer_header.dts = MMAL_TIME_UNKNOWN;
+  } else {
+    m->buffer_header.length = b->length;
+    m->buffer_header.offset = 0;
+    m->buffer_header.flags = b->flags;
+    m->buffer_header.pts = b->pts;
+    m->buffer_header.dts = b->dts;
+  }
+
+  memset(&m->buffer_header_type_specific, 0,
+    sizeof(m->buffer_header_type_specific));
+  m->payload_in_message = 0;
+
+  VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC();
+  return SUCCESS;
 }
 
-int OPTIMIZED mmal_port_buffer_submit_list(struct mmal_port *p,
-  struct list_head *l)
+static int mmal_port_info_get(struct mmal_port *p)
 {
+  VCHIQ_MMAL_MSG_DECL(p->component->ms, PORT_INFO_GET, port_info_get,
+    port_info_get_reply);
+
+  m->component_handle = p->component->handle;
+  m->index = p->index;
+  m->port_type = p->type;
+
+  VCHIQ_MMAL_MSG_COMMUNICATE_SYNC();
+
+  p->enabled = r->port.is_enabled ? 1 : 0;
+  p->handle = r->port_handle;
+  p->type = r->port_type;
+  p->index = r->port_index;
+
+  p->minimum_buffer.num = r->port.buffer_num_min;
+  p->minimum_buffer.size = r->port.buffer_size_min;
+  p->minimum_buffer.alignment = r->port.buffer_alignment_min;
+
+  p->recommended_buffer.alignment = r->port.buffer_alignment_min;
+  p->recommended_buffer.num = r->port.buffer_num_recommended;
+  p->recommended_buffer.size = r->port.buffer_size_recommended;
+
+  p->current_buffer.num = r->port.buffer_num;
+  p->current_buffer.size = r->port.buffer_size;
+
+  /* stream format */
+  p->format.type = r->format.type;
+  p->format.encoding = r->format.encoding;
+  p->format.encoding_variant = r->format.encoding_variant;
+  p->format.bitrate = r->format.bitrate;
+  p->format.flags = r->format.flags;
+
+  /* elementary stream format */
+  memcpy(&p->es, &r->es, sizeof(union mmal_es_specific_format));
+  p->format.es = &p->es;
+
+  p->format.extradata_size = r->format.extradata_size;
+  memcpy(p->format.extradata, r->extradata, p->format.extradata_size);
+
+  mmal_format_print("actual", p->name, &p->format);
+  MODULE_INFO(" ena:%d,min:%dx%d,rec:%dx%d,curr:%dx%d", p->enabled,
+    p->minimum_buffer.num, p->minimum_buffer.size,
+    p->recommended_buffer.num, p->recommended_buffer.size,
+    p->current_buffer.num, p->current_buffer.size);
+
+  return SUCCESS;
+}
+
+
+int OPTIMIZED mmal_port_buffers_to_remote(struct mmal_port *p,
+  struct list_head *l, bool report_result)
+{
+  int irqflags;
   int err = SUCCESS;
   struct mmal_buffer *b;
 
+  disable_irq_save_flags(irqflags);
   while (!list_empty(l)) {
     b = list_first_entry(l, struct mmal_buffer, list);
-    err = mmal_port_buffer_submit(p, b);
+    list_del(&b->list);
+    list_add_tail(&b->list, &p->bufs.remote_side);
+    restore_irq_flags(irqflags);
+
+    err = mmal_send_msg_buffer_from_host(p, b);
     CHECK_ERR("Failed to submit buffer");
+    disable_irq_save_flags(irqflags);
+  }
+
+  if (report_result) {
+    err = mmal_port_info_get(p);
+    CHECK_ERR("failed to get port info");
+    MODULE_INFO("port buf applied: nr:%d, size:%d",
+      p->current_buffer.num, p->current_buffer.size);
   }
 
 out_err:
+  restore_irq_flags(irqflags);
   return err;
 }
 
@@ -350,56 +454,6 @@ static void mmal_port_to_msg(struct mmal_port *port,
   p->buffer_num = port->current_buffer.num;
   p->buffer_size = port->current_buffer.size;
   p->userdata = (uint32_t)(unsigned long)port;
-}
-
-static int mmal_port_info_get(struct mmal_port *p)
-{
-  VCHIQ_MMAL_MSG_DECL(p->component->ms, PORT_INFO_GET, port_info_get,
-    port_info_get_reply);
-
-  m->component_handle = p->component->handle;
-  m->index = p->index;
-  m->port_type = p->type;
-
-  VCHIQ_MMAL_MSG_COMMUNICATE_SYNC();
-
-  p->enabled = r->port.is_enabled ? 1 : 0;
-  p->handle = r->port_handle;
-  p->type = r->port_type;
-  p->index = r->port_index;
-
-  p->minimum_buffer.num = r->port.buffer_num_min;
-  p->minimum_buffer.size = r->port.buffer_size_min;
-  p->minimum_buffer.alignment = r->port.buffer_alignment_min;
-
-  p->recommended_buffer.alignment = r->port.buffer_alignment_min;
-  p->recommended_buffer.num = r->port.buffer_num_recommended;
-  p->recommended_buffer.size = r->port.buffer_size_recommended;
-
-  p->current_buffer.num = r->port.buffer_num;
-  p->current_buffer.size = r->port.buffer_size;
-
-  /* stream format */
-  p->format.type = r->format.type;
-  p->format.encoding = r->format.encoding;
-  p->format.encoding_variant = r->format.encoding_variant;
-  p->format.bitrate = r->format.bitrate;
-  p->format.flags = r->format.flags;
-
-  /* elementary stream format */
-  memcpy(&p->es, &r->es, sizeof(union mmal_es_specific_format));
-  p->format.es = &p->es;
-
-  p->format.extradata_size = r->format.extradata_size;
-  memcpy(p->format.extradata, r->extradata, p->format.extradata_size);
-
-  mmal_format_print("actual", p->name, &p->format);
-  MODULE_INFO(" ena:%d,min:%dx%d,rec:%dx%d,curr:%dx%d", p->enabled,
-    p->minimum_buffer.num, p->minimum_buffer.size,
-    p->recommended_buffer.num, p->recommended_buffer.size,
-    p->current_buffer.num, p->current_buffer.size);
-
-  return SUCCESS;
 }
 
 static int mmal_port_info_set(struct mmal_port *p)
@@ -506,59 +560,6 @@ static __attribute__((optimize("O0"))) void mmal_port_report_buffer_ready(
   os_msgq_put(&mmal_io_msgq, &m);
 }
 
-static int mmal_send_msg_buffer_from_host(struct mmal_port *p,
-  struct mmal_buffer *b)
-{
-  /*
-   * Kernel code in bcm2835-camera.c states this is only possible for enabled
-   * port
-   */
-  if (!p->enabled)
-    return ERR_INVAL;
-
-  VCHIQ_MMAL_MSG_DECL_ASYNC(p->component->ms, BUFFER_FROM_HOST,
-    buffer_from_host);
-
-  memset(m, 0, sizeof(*m));
-
-  m->drvbuf.magic = MMAL_MAGIC;
-  m->drvbuf.component_handle = p->component->handle;
-  m->drvbuf.port_handle = p->handle;
-  m->drvbuf.client_context = (uint32_t)((uint64_t)b & ~0xffff000000000000);
-
-  m->is_zero_copy = p->zero_copy;
-  m->buffer_header.next = 0;
-  m->buffer_header.priv = 0;
-  m->buffer_header.cmd = 0;
-  m->buffer_header.user_data = NARROW_PTR(b);
-  if (p->zero_copy)
-    m->buffer_header.data = b->vcsm_handle;
-  else
-    m->buffer_header.data = RAM_PHY_TO_BUS_UNCACHED(b->buffer);
-  m->buffer_header.alloc_size = b->buffer_size;
-
-  if (p->type == MMAL_PORT_TYPE_OUTPUT) {
-    m->buffer_header.length = 0;
-    m->buffer_header.offset = 0;
-    m->buffer_header.flags = 0;
-    m->buffer_header.pts = MMAL_TIME_UNKNOWN;
-    m->buffer_header.dts = MMAL_TIME_UNKNOWN;
-  } else {
-    m->buffer_header.length = b->length;
-    m->buffer_header.offset = 0;
-    m->buffer_header.flags = b->flags;
-    m->buffer_header.pts = b->pts;
-    m->buffer_header.dts = b->dts;
-  }
-
-  memset(&m->buffer_header_type_specific, 0,
-    sizeof(m->buffer_header_type_specific));
-  m->payload_in_message = 0;
-
-  VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC();
-  return SUCCESS;
-}
-
 /*
  * take buffer_to_host message and find associated component, port and buffer
  * and return port and buffer
@@ -616,6 +617,18 @@ static inline void mmal_port_buffer_to_host_cb(struct mmal_port *p,
   restore_irq_flags(irqflags);
 }
 
+int OPTIMIZED  mmal_port_buffer_to_remote(struct mmal_port *p,
+  struct mmal_buffer *b)
+{
+  int irqflags;
+
+  disable_irq_save_flags(irqflags);
+  list_del_init(&b->list);
+  list_add_tail(&b->list, &p->bufs.remote_side);
+  restore_irq_flags(irqflags);
+  return mmal_send_msg_buffer_from_host(p, b);
+}
+
 static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
 {
   int err;
@@ -625,7 +638,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
   err = mmal_buffer_to_host_msg_to_port(&m->u.buffer_from_host, &p, &b);
   if (p->bufs.acks_count < p->bufs.total_count) {
     p->bufs.acks_count++;
-    err = mmal_send_msg_buffer_from_host(p, b);
+    err = mmal_port_buffer_to_remote(p, b);
     CHECK_ERR("Failed to re-send acknowledged buffer to vc");
     return SUCCESS;
   }
@@ -714,19 +727,6 @@ out_err:
   return err;
 
   return SUCCESS;
-}
-
-static int mmal_port_buffer_send_one(struct mmal_port *p,
-  struct mmal_buffer *b)
-{
-  int err;
-  err = mmal_send_msg_buffer_from_host(p, b);
-  if (err) {
-    MODULE_ERR("failed to submit port buffer to VC");
-    return err;
-  }
-  return SUCCESS;
-
 }
 
 int mmal_port_parameter_set(struct mmal_port *p, uint32_t parameter_id,
@@ -908,41 +908,6 @@ out_err:
   return err;
 }
 
-int mmal_port_buffer_send_all(struct mmal_port *p)
-{
-  int irqflags;
-  int err;
-  struct mmal_buffer *b;
-  struct list_head *node, *tmp;
-
-  disable_irq_save_flags(irqflags);
-  list_for_each_safe(node, tmp, &p->bufs.os_side_free) {
-    b = container_of(node, struct mmal_buffer, list);
-    list_del(node);
-    list_add_tail(node, &p->bufs.remote_side);
-  }
-  restore_irq_flags(irqflags);
-
-  list_for_each_entry(b, &p->bufs.remote_side, list) {
-    MODULE_DEBUG("Submitting buf: %p, buffer:%p, handle:%08x to port %p (%s)",
-      b, b->buffer,
-      b->vcsm_handle, p,
-      p->name);
-    err = mmal_send_msg_buffer_from_host(p, b);
-    CHECK_ERR("failed to submit port buffer to VC");
-  }
-
-  if (err == SUCCESS) {
-    err = mmal_port_info_get(p);
-    CHECK_ERR("failed to get port info");
-    MODULE_INFO("port buf applied: nr:%d, size:%d",
-      p->current_buffer.num, p->current_buffer.size);
-  }
-
-out_err:
-  return err;
-}
-
 static __attribute__((unused)) void mmal_format_copy(
   struct mmal_es_format_local *to, const struct mmal_es_format_local *from)
 {
@@ -961,7 +926,7 @@ int mmal_port_init_buffers(struct mmal_port *p, size_t min_buffers)
   err = mmal_port_alloc_buffers(p, min_buffers);
   p->bufs.acks_count = 0;
   CHECK_ERR("Failed to alloc buffers for port");
-  err = mmal_port_buffer_send_all(p);
+  err = mmal_port_buffers_to_remote(p, &p->bufs.os_side_free, true);
   CHECK_ERR("Failed to send buffers to port");
 out_err:
   return err;
@@ -1144,7 +1109,7 @@ static void mmal_io_loop(void)
       }
     }
     else if (m.id == MMAL_IO_BUF_CONSUMED) {
-      err = mmal_port_buffer_send_one(m.port, m.buffer);
+      err = mmal_port_buffer_to_remote(m.port, m.buffer);
       if (err != SUCCESS) {
         MODULE_ERR("Failed to submit buffer");
       }

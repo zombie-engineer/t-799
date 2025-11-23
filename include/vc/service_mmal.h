@@ -1,6 +1,7 @@
 #pragma once
 #include <list.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <vc/service_mmal_protocol.h>
 
 #define MMAL_COMPONENT_MAX_PORTS 4
@@ -145,7 +146,17 @@ int mmal_port_connect(struct mmal_port *src, struct mmal_port *dst);
 int mmal_port_set_zero_copy(struct mmal_port *p);
 int mmal_port_get_supp_encodings(struct mmal_port *p, uint32_t *encodings,
   int max_encodings, int *num_encodings);
-int mmal_port_buffer_submit_list(struct mmal_port *p, struct list_head *l);
+
+int mmal_port_buffers_to_remote(struct mmal_port *p, struct list_head *l,
+  bool report_result);
+
+int mmal_port_buffer_to_remote(struct mmal_port *p, struct mmal_buffer *b);
+
+int mmal_port_add_buffer(struct mmal_port *p, void *dma_buf,
+  size_t dma_buf_size, uint32_t user_handle);
+
+void mmal_port_buffer_consumed_isr(struct mmal_port *p, struct mmal_buffer *b);
+
 int mmal_port_parameter_set(struct mmal_port *p,
   uint32_t parameter_id, const void *value, int value_size);
 int mmal_port_parameter_get(struct mmal_port *p, int parameter_id, void *value,
@@ -160,9 +171,3 @@ void mmal_register_io_cb(mmal_io_buffer_ready_cb_t cb);
 void mmal_format_set(struct mmal_es_format_local *f, int encoding,
   int encoding_variant, int width, int height, int frame_rate, int bitrate);
 
-int mmal_port_add_buffer(struct mmal_port *p, void *dma_buf,
-  size_t dma_buf_size, uint32_t user_handle);
-
-int mmal_port_buffer_send_all(struct mmal_port *p);
-
-void mmal_port_buffer_consumed_isr(struct mmal_port *p, struct mmal_buffer *b);
