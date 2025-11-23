@@ -46,6 +46,30 @@ struct mmal_buffer {
   int64_t pts;
 };
 
+struct mmal_port_buffers {
+  size_t acks_count;
+  size_t total_count;
+  /*
+   * Preallocated buffers on operating system's (our) side, ready to be sent
+   * to mmal backend
+   */
+  struct list_head os_side_free;
+
+  /* Delivered to OS, ready to be consumed */
+  struct list_head os_side_consumable;
+
+  /* Delivered to OS and in process of being used */
+  struct list_head os_side_in_process;
+
+  /*
+   * Buffers that are released to remote side (vcos). At some point they will
+   * be sent to us by BUFFER_TO_HOST message
+   */
+  struct list_head remote_side;
+
+  size_t nr_in_process;
+
+};
 
 struct mmal_port {
   char name[32];
@@ -74,34 +98,7 @@ struct mmal_port {
   /* elementary stream format */
   union mmal_es_specific_format es;
 
-  /*
-   * Preallocated free buffers on our side, they are not used but if required
-   * we can release them to the remote side (vcos)
-   */
-  struct list_head buffers_free;
-  size_t nr_free;
-
-  /*
-   * Buffers that are released to remote side (vcos). At some point they will
-   * be sent to us by BUFFER_TO_HOST message
-   */
-  struct list_head buffers_busy;
-  size_t nr_busy;
-
-  struct list_head buffers_pending;
-  size_t nr_pending;
-
-  /*
-   * Buffers that are send to use by BUFFER_TO_HOST and are currently being
-   * processed by us. After processing is done these will be sent to
-   * buffers_free
-   */
-  struct list_head buffers_in_process;
-  size_t nr_in_process;
-
-
-  /* callback context */
-  void *cb_ctx;
+  struct mmal_port_buffers bufs;
   struct list_head iobufs;
 };
 
@@ -143,7 +140,7 @@ struct mmal_component *mmal_component_create(const char *name);
 
 int mmal_port_enable(struct mmal_port *p);
 int mmal_port_set_format(struct mmal_port *p);
-int mmal_port_apply_buffers(struct mmal_port *p, size_t min_buffers);
+int mmal_port_init_buffers(struct mmal_port *p, size_t min_buffers);
 int mmal_port_connect(struct mmal_port *src, struct mmal_port *dst);
 int mmal_port_set_zero_copy(struct mmal_port *p);
 int mmal_port_get_supp_encodings(struct mmal_port *p, uint32_t *encodings,
@@ -155,7 +152,7 @@ int mmal_port_parameter_get(struct mmal_port *p, int parameter_id, void *value,
   uint32_t *value_size);
 void mmal_port_dump(const char *tag, const struct mmal_port *p);
 
-typedef void (*mmal_io_buffer_ready_cb_t)(struct mmal_port *p,
+typedef int (*mmal_io_buffer_ready_cb_t)(struct mmal_port *p,
   struct mmal_buffer *b);
 
 void mmal_register_io_cb(mmal_io_buffer_ready_cb_t cb);

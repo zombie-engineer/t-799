@@ -82,16 +82,17 @@ static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
   return node ? list_entry(node, struct mmal_buffer, list) : NULL;
 }
 
-static OPTIMIZED int camera_on_preview_buffer_ready(void)
+static OPTIMIZED int camera_on_preview_buffer_ready(struct mmal_buffer *b)
 {
   int err;
   int irqflags;
   bool should_draw;
+  struct mmal_buffer *b2;
   struct mmal_port *p = cam.port_preview_stream;
-  struct mmal_buffer *b = mmal_buf_fifo_pop(&p->buffers_pending);
+  b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
 
-  if (!b)
-    return SUCCESS;
+  if (b != b2)
+    return ERR_INVAL;
 
   if (!(b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END))
     return SUCCESS;
@@ -101,18 +102,19 @@ static OPTIMIZED int camera_on_preview_buffer_ready(void)
   disable_irq_save_flags(irqflags);
   while(1) {
     list_del(&b->list);
-    if (list_empty(&p->buffers_pending))
+    if (list_empty(&p->bufs.os_side_consumable))
       break;
 
-    list_add_tail(&b->list, &p->buffers_free);
-    b = list_first_entry(&p->buffers_pending, struct mmal_buffer, list);
+    list_add_tail(&b->list, &p->bufs.os_side_free);
+    b = list_first_entry(&p->bufs.os_side_consumable,
+      struct mmal_buffer, list);
   }
   restore_irq_flags(irqflags);
 
   disable_irq_save_flags(irqflags);
-  should_draw = list_empty(&p->buffers_in_process);
+  should_draw = list_empty(&p->bufs.os_side_in_process);
   if (should_draw)
-    list_add_tail(&b->list, &p->buffers_in_process);
+    list_add_tail(&b->list, &p->bufs.os_side_in_process);
 
   restore_irq_flags(irqflags);
 
@@ -123,7 +125,7 @@ static OPTIMIZED int camera_on_preview_buffer_ready(void)
   return err;
 }
 
-static void OPTIMIZED camera_on_h264_buffer_ready(void)
+static int OPTIMIZED camera_on_h264_buffer_ready(void)
 {
   int irqflags;
   int err;
@@ -134,7 +136,7 @@ static void OPTIMIZED camera_on_h264_buffer_ready(void)
   struct write_stream_buf *iobuf_tmp;
   struct mmal_port *p = cam.port_h264_stream;
 
-  b = mmal_buf_fifo_pop(&p->buffers_pending);
+  b = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
   node = list_fifo_pop_head(&p->iobufs);
 
   MODULE_ASSERT(b, "Unexpected buffer not found");
@@ -160,7 +162,7 @@ static void OPTIMIZED camera_on_h264_buffer_ready(void)
     list_fifo_push_tail_locked(&p->iobufs, &iobuf->list);
     b = iobuf->priv;
     list_del(&b->list);
-    list_add_tail(&b->list, &p->buffers_free);
+    list_add_tail(&b->list, &p->bufs.os_side_free);
     restore_irq_flags(irqflags);
   }
 
@@ -172,20 +174,22 @@ static void OPTIMIZED camera_on_h264_buffer_ready(void)
   if (!(cam.stat_frames % 25))
     os_log(".%d\r\n", cam.stat_frames);
   cam.stat_frames++;
-  err = mmal_port_buffer_submit_list(p, &p->buffers_free);
+  err = mmal_port_buffer_submit_list(p, &p->bufs.os_side_free);
   if (err != SUCCESS) {
     MODULE_ERR("failed to submit buffer list, err: %d", err);
   }
+  return SUCCESS;
 }
 
-static void OPTIMIZED camera_on_mmal_buffer_ready(struct mmal_port *p,
+static int OPTIMIZED camera_on_mmal_buffer_ready(struct mmal_port *p,
   struct mmal_buffer *b)
 {
   if (p == cam.port_h264_stream) {
-    camera_on_h264_buffer_ready();
-  } else if (p == cam.port_preview_stream) {
-    camera_on_preview_buffer_ready();
+    return camera_on_h264_buffer_ready();
+  } if (p == cam.port_preview_stream) {
+    return camera_on_preview_buffer_ready(b);
   }
+  return ERR_INVAL;
 }
 
 static int mmal_set_camera_parameters(struct mmal_component *c,
@@ -219,14 +223,41 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
   return ret;
 }
 
+#if 0
+static int mmal_apply_display_buffers(struct mmal_port *p,
+  struct ili9341_buffer_info *buffers, size_t num_buffers)
+{
+  size_t i;
+  int err;
+
+  for (i = 0; i < num_buffers; ++i) {
+    err = mmal_port_add_buffer(p, buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle);
+    CHECK_ERR("Failed to import display buffer #%d", i);
+    MODULE_INFO("mmal_apply_display_buffers: port:%s, ptr:%08x, size:%d"
+      " handle:%d, port_enabled:%s",
+      p->name,
+      buffers[i].buffer,
+      buffers[i].buffer_size, buffers[i].handle,
+      p->enabled ? "yes" : "no");
+  }
+
+  err = mmal_port_buffer_send_all(p);
+  CHECK_ERR("Failed to send buffers to port");
+out_err:
+  return err;
+}
+#endif
+
+
 static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
 {
   struct mmal_port *p = cam.port_preview_stream;
   struct mmal_buffer *b = NULL, *tmp;
 
-  list_for_each_entry_safe(b, tmp, &p->buffers_in_process, list) {
+  list_for_each_entry_safe(b, tmp, &p->bufs.os_side_in_process, list) {
     if (buf_handle == b->user_handle) {
-      list_move_tail(&b->list, &p->buffers_free);
+      list_move_tail(&b->list, &p->bufs.os_side_free);
       mmal_port_buffer_consumed_isr(p, b);
       return;
     }
@@ -776,7 +807,7 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   err = mmal_port_enable(cam.encoder.in);
   CHECK_ERR("Failed to enable encoder.IN");
 
-  err = mmal_port_apply_buffers(cam.port_h264_stream, 1);
+  err = mmal_port_init_buffers(cam.port_h264_stream, 1);
   CHECK_ERR("Failed to add buffers to encoder output");
 
   err = camera_video_start();
