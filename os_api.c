@@ -55,15 +55,19 @@ void os_exit_current_task(void)
 
 void os_event_wait(struct event *ev)
 {
+  int irq;
   OSAPI_PUTS("[os_event_wait]\r\n");
+  disable_irq_save_flags(irq);
   if (ev->ev == 1) {
     OSAPI_PUTS("[os_event_wait end fast]\r\n");
-    return;
+    goto out;
   }
 
   asm inline volatile("mov x0, %0\r\nsvc %1"
     :: "r"(ev), "i"(SYSCALL_WAIT_EVENT));
   OSAPI_PUTS("[os_event_wait end slow]\r\n");
+out:
+  restore_irq_flags(irq);
 }
 
 void os_event_notify_isr(struct event *ev)
