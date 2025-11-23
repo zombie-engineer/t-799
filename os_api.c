@@ -4,6 +4,7 @@
 #include <os_msgq.h>
 #include "armv8_cpuctx.h"
 #include <common.h>
+#include <errcode.h>
 
 #if 0
 #include <printf.h>
@@ -91,6 +92,11 @@ void os_event_notify_and_yield(struct event *ev)
   OSAPI_PUTS("[os_event_notify end]\r\n");
 }
 
+static inline void svc_sema_give(struct semaphore *s)
+{
+  os_semaphore_give_isr(s);
+}
+
 static inline void svc_put_to_wait_list(struct list_head *l)
 {
   sched_wait_list_put_current_isr(l);
@@ -129,6 +135,9 @@ void svc_handler(uint32_t imm)
     break;
   case SYSCALL_EXIT_CURRENT_TASK:
     sched_exit_current_task_isr();
+    break;
+  case SYSCALL_SEMA_GIVE:
+    svc_sema_give((void *)arg0);
     break;
   case SYSCALL_PUT_TO_WAIT_LIST:
     svc_put_to_wait_list((void *)arg0);

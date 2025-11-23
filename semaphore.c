@@ -4,17 +4,9 @@
 #include <event.h>
 #include <os_api.h>
 
-struct semaphore_waiter {
-  struct list_head list;
-  struct task *waiter_task;
-  struct event ev;
-};
-
+#if 0
 static inline void __semaphore_down(struct semaphore *s)
 {
-  struct semaphore_waiter waiter;
-
-  list_add_tail(&waiter.list, &s->wait_list);
   waiter.waiter_task = sched_get_current_task();
   os_event_clear(&waiter.ev);
   spinlock_unlock_irq(&s->lock);
@@ -29,21 +21,26 @@ static inline void __semaphore_up(struct semaphore *s)
   waiter = list_first_entry(&s->wait_list, struct semaphore_waiter, list);
   os_event_notify(&waiter->ev);
 }
+#endif
 
-
-void semaphore_down(struct semaphore *s)
+void semaphore_give(struct semaphore *s)
 {
-  int flag;
-  spinlock_lock_disable_irq(&s->lock, flag);
-  if (s->count > 0)
-    s->count--;
-  else
+#if 0
+  // int flag;
+
+  // spinlock_lock_disable_irq(&s->lock, flag);
+
+  if (s->value)
     __semaphore_down(s);
+
+  s->count--;
   spinlock_unlock_restore_irq(&s->lock, flag);
+#endif
 }
 
-void semaphore_up(struct semaphore *s)
+void semaphore_take(struct semaphore *s)
 {
+#if 0
   int flag;
   spinlock_lock_disable_irq(&s->lock, flag);
   if (list_empty(&s->wait_list))
@@ -51,8 +48,10 @@ void semaphore_up(struct semaphore *s)
   else
     __semaphore_up(s);
   spinlock_unlock_restore_irq(&s->lock, flag);
+#endif
 }
 
+#if 0
 int down_trylock(struct semaphore *s)
 {
   int flags;
@@ -65,3 +64,4 @@ int down_trylock(struct semaphore *s)
   spinlock_unlock_restore_irq(&s->lock, flags);
   return count < 0;
 }
+#endif

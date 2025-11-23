@@ -8,3 +8,4 @@
 #define SYSCALL_EXIT_CURRENT_TASK 5
 #define SYSCALL_PUT_TO_WAIT_LIST  6
 #define SYSCALL_MSGQ_PUT          7
+#define SYSCALL_SEMA_GIVE         8

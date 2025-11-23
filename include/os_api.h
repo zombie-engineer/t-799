@@ -1,7 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <event.h>
+#include <semaphore.h>
 #include <cpu.h>
+#include <sched.h>
 #include <syscall.h>
 
 #define os_api_syscall1(__syscall, __arg0) \
@@ -54,5 +56,42 @@ void os_exit_current_task(void);
 void os_event_notify(struct event *ev);
 void os_event_notify_isr(struct event *ev);
 void os_event_notify_and_yield(struct event *ev);
+
+
+static inline void os_semaphore_init(struct semaphore *s, int initial_value,
+  int max_value)
+{
+  s->value = initial_value;
+  s->max_value = max_value;
+  INIT_LIST_HEAD(&s->wait_list);
+}
+
+static inline void os_semaphore_give_isr(struct semaphore *s)
+{
+  BUG_IF(!s->value, "semaphore logic error");
+  s->value--;
+  sched_wait_list_wake_one_isr(&s->wait_list);
+}
+
+static inline void os_semaphore_give_and_yield(struct semaphore *s)
+{
+  asm inline volatile("mov x0, %0\r\nsvc %1"
+    :: "r"(s), "i"(SYSCALL_SEMA_GIVE));
+}
+
+static inline void os_semaphore_take(struct semaphore *s)
+{
+  int irq;
+  disable_irq_save_flags(irq);
+  if (s->value < s->max_value) {
+    s->value++;
+    goto out;
+  }
+
+  os_api_put_to_wait_list(&s->wait_list);
+
+out:
+  restore_irq_flags(irq);
+}
 
 void svc_handler(uint32_t imm);
