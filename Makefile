@@ -77,9 +77,18 @@ kernel8.bin: kernel8.elf os.json
 	$(OBJCOPY) -O binary $< $@
 
 .PHONY: os.json
+.PHONE: .force
+.force:
 
-os.json: kernel8.elf
+task_offsets.o: task_offsets.c .force
+	$(CC) $(CFLAGS) -c $< -o $@
+
+task_offsets.bin: task_offsets.o
+	$(OBJCOPY) -O binary --only-section .task_struct_layout $< $@
+
+os.json: kernel8.elf task_offsets.bin
 	. scripts/gen_gdb_json.sh > os.json
+	cat os.json
 
 kernel8.elf: $(OBJS) link.ld
 	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map -print-memory-usage
