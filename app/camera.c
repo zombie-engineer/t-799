@@ -11,6 +11,7 @@
 #include <vc/service_mmal_param.h>
 #include <vc/service_mmal_encoding.h>
 #include <write_stream_buffer.h>
+#include <memory_map.h>
 
 #define MODULE_LOG_LEVEL camera_log_level
 #define MODULE_UNIT_TAG "cam"
@@ -74,38 +75,6 @@ struct encoder_h264_params {
 
 static struct camera cam = { 0 };
 
-#if 0
-static int mmal_port_io_work_display_buf_release(
-  struct mmal_component *c,
-  struct mmal_port *p, struct mmal_buffer_header *h, uint32_t handle)
-{
-  int irqflags;
-  int err;
-
-  struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
-    &p->buffers_in_process, handle);
-
-  if (!b) {
-    MODULE_ERR("No display buffer to release");
-    return ERR_GENERIC;
-  }
-
-  MODULE_DEBUG("Submitting buffer %08x to port:%s", b->vcsm_handle, p->name);
-
-  disable_irq_save_flags(irqflags);
-  list_del(&b->list);
-  list_add_tail(&b->list, &p->buffers_busy);
-  p->nr_busy++;
-
-  restore_irq_flags(irqflags);
-  err = mmal_port_buffer_send_one(p, b);
-  if (err != SUCCESS) {
-    MODULE_ERR("Failed to submit buffer");
-  }
-  return SUCCESS;
-}
-#endif
-
 static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
 {
   struct list_head *node;
@@ -113,7 +82,7 @@ static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
   return node ? list_entry(node, struct mmal_buffer, list) : NULL;
 }
 
-static OPTIMIZED int camera_process_preview_buffers()
+static OPTIMIZED int camera_on_preview_buffer_ready(void)
 {
   int err;
   int irqflags;
@@ -154,7 +123,7 @@ static OPTIMIZED int camera_process_preview_buffers()
   return err;
 }
 
-static void OPTIMIZED camera_process_h264_buffers(void)
+static void OPTIMIZED camera_on_h264_buffer_ready(void)
 {
   int irqflags;
   int err;
@@ -165,31 +134,15 @@ static void OPTIMIZED camera_process_h264_buffers(void)
   struct write_stream_buf *iobuf_tmp;
   struct mmal_port *p = cam.port_h264_stream;
 
-  // mmal_buf_fifo_dump("before received", &p->buffers_pending);
   b = mmal_buf_fifo_pop(&p->buffers_pending);
-  if (!b) {
-    MODULE_ERR("unexpected buffer not found");
-    while(1)
-      asm volatile("wfe");
-  }
-
-  // mmal_buf_fifo_dump("received", &p->buffers_pending);
-
-  if (!b->buffer) {
-    MODULE_ERR("buffer 0");
-    while(1)
-      asm volatile("wfe");
-  }
-
   node = list_fifo_pop_head(&p->iobufs);
-  if (!node) {
-    MODULE_ERR("Not enough io bufs to continue");
-    while(1)
-      asm volatile("wfe");
-  }
+
+  MODULE_ASSERT(b, "Unexpected buffer not found");
+  MODULE_ASSERT(b->buffer, "buffer ptr is NULL");
+  MODULE_ASSERT(node, "Not enough io bufs to continue");
 
   iobuf = list_entry(node, struct write_stream_buf, list);
-  iobuf->paddr = (uint32_t)(uint64_t)b->buffer;
+  iobuf->paddr = NARROW_PTR(b->buffer);
   iobuf->size = ALIGN_UP_4(b->length);
   iobuf->io_offset = 0;
   iobuf->priv = b;
@@ -225,10 +178,14 @@ static void OPTIMIZED camera_process_h264_buffers(void)
   }
 }
 
-static void OPTIMIZED camera_on_mmal_buffer_ready(void)
+static void OPTIMIZED camera_on_mmal_buffer_ready(struct mmal_port *p,
+  struct mmal_buffer *b)
 {
-  camera_process_h264_buffers();
-  camera_process_preview_buffers();
+  if (p == cam.port_h264_stream) {
+    camera_on_h264_buffer_ready();
+  } else if (p == cam.port_preview_stream) {
+    camera_on_preview_buffer_ready();
+  }
 }
 
 static int mmal_set_camera_parameters(struct mmal_component *c,
@@ -265,13 +222,12 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
 static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
 {
   struct mmal_port *p = cam.port_preview_stream;
-  struct mmal_buffer *b = NULL;
+  struct mmal_buffer *b = NULL, *tmp;
 
-  list_for_each_entry(b, &p->buffers_in_process, list) {
+  list_for_each_entry_safe(b, tmp, &p->buffers_in_process, list) {
     if (buf_handle == b->user_handle) {
-      list_del(&b->list);
-      list_add_tail(&b->list, &p->buffers_free);
-      os_event_notify_and_yield(&mmal_io_work_waitflag);
+      list_move_tail(&b->list, &p->buffers_free);
+      mmal_port_buffer_consumed_isr(p, b);
       return;
     }
   }
@@ -767,6 +723,9 @@ static int camera_preview_init(int input_width, int input_height,
     MODULE_INFO("Preview port enabled %p", cam.camera.preview);
   }
   return SUCCESS;
+
+out_err:
+  return err;
 }
 
 int camera_init(struct block_device *bdev, int frame_width, int frame_height,
@@ -805,7 +764,6 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
     err = camera_preview_init(frame_width, frame_height, preview_width,
       preview_height, true);
     CHECK_ERR("Failed to enable preview graph when requested");
-    return SUCCESS;
   }
 
   /*

@@ -14,6 +14,7 @@
 #include <bitops.h>
 #include <kmalloc.h>
 #include <write_stream_buffer.h>
+#include <os_msgq.h>
 
 #define MODULE_LOG_LEVEL mmal_log_level
 #define MODULE_UNIT_TAG "mmal"
@@ -24,6 +25,20 @@
 
 #define VC_MMAL_VER 15
 #define VC_MMAL_MIN_VER 10
+
+#define MMAL_IO_BUF_UNKNOWN  0
+#define MMAL_IO_BUF_READY    1
+#define MMAL_IO_BUF_CONSUMED 2
+
+#define MMAL_IO_MSGQ_MAX_COUNT 32
+#define MMAL_IO_MSGQ_BUF_SIZE \
+  (sizeof(struct mmal_msgq_msg) * MMAL_IO_MSGQ_MAX_COUNT)
+
+struct mmal_msgq_msg {
+  uint64_t id;
+  struct mmal_port *port;
+  struct mmal_buffer *buffer;
+} /* PACKED */;
 
 struct mmal_msg_context {
   union {
@@ -111,9 +126,11 @@ static const char *const mmal_msg_type_names[] = {
 
 static struct vchiq_service *service_mmal = NULL;
 
-static void (*mmal_io_cb)(void);
+static uint8_t mmal_io_msgq_buffer[MMAL_IO_MSGQ_BUF_SIZE];
 
-static struct event mmal_io_event;
+static struct os_msgq mmal_io_msgq;
+
+static mmal_io_buffer_ready_cb_t mmal_io_buffer_ready_cb = NULL;
 
 static struct mmal_msg_context *mmal_msg_context_from_handle(uint32_t handle)
 {
@@ -148,14 +165,12 @@ static inline void *mmal_msg_check_reply(struct mmal_msg *rmsg,
   return &rmsg->u;
 }
 
-
 #define VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC() \
   os_event_init(&ctx.u.sync.completion_waitflag); \
   mmal_msg_fill_header(_ms, ctx.u.sync.msg_type, &msg, &ctx); \
   vchiq_msg_prep(VCHIQ_MSG_DATA, _ms->localport, \
     _ms->remoteport, &msg, sizeof(struct mmal_msg_header) + sizeof(*m)); \
   vchiq_event_signal_trigger();
-
 
 #define VCHIQ_MMAL_MSG_COMMUNICATE_SYNC() \
   VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC(); \
@@ -210,7 +225,7 @@ static void mmal_format_print(const char *action, const char *name,
 static int mmal_port_buffer_send_one(struct mmal_port *p,
   struct mmal_buffer *b);
 
-static OPTIMIZED int mmal_port_buffer_submit(struct mmal_port *p,
+OPTIMIZED int mmal_port_buffer_submit(struct mmal_port *p,
   struct mmal_buffer *b)
 {
   int irqflags;
@@ -563,35 +578,53 @@ static struct mmal_port *mmal_port_get_by_handle(struct mmal_component *c,
   return NULL;
 }
 
-static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
+static __attribute__((optimize("O0"))) void mmal_port_report_buffer_ready(
+  struct mmal_port *p,
+  struct mmal_buffer *b)
 {
-  int irqflags;
-  int err;
-  struct mmal_port *p = NULL;
+
+  volatile int fff = 1;
+  while(fff) asm volatile("wfe");
+
+  struct mmal_msgq_msg m;
+  m.id = MMAL_IO_BUF_READY;
+  m.port = p;
+  m.buffer = b;
+
+  os_msgq_put(&mmal_io_msgq, &m);
+}
+
+/*
+ * take buffer_to_host message and find associated component, port and buffer
+ * and return port and buffer
+ */
+static inline int mmal_buffer_to_host_msg_to_port(
+  const struct mmal_msg_buffer_from_host *m,
+  struct mmal_port **out_p, struct mmal_buffer **out_b)
+{
   struct mmal_component *c;
-
-  struct mmal_msg_buffer_from_host *r;
   struct list_head *components = vchiq_get_components_list();
+  struct mmal_port *p;
+  struct mmal_buffer *b;
 
-  r = (void *)&rmsg->u;
   list_for_each_entry(c, components, list) {
-    if (c->handle == r->drvbuf.component_handle)
+    if (c->handle == m->drvbuf.component_handle)
       break;
   }
 
-  if (c->handle != r->drvbuf.component_handle) {
+  if (c->handle != m->drvbuf.component_handle) {
     MODULE_ERR("Failed to find component for buffer");
     return ERR_NOT_FOUND;
   }
 
-  p = mmal_port_get_by_handle(c, r->drvbuf.port_handle);
+  p = mmal_port_get_by_handle(c, m->drvbuf.port_handle);
   if (!p) {
     MODULE_ERR("Failed to find component for buffer");
     return ERR_NOT_FOUND;
   }
 
-  struct mmal_buffer *b = mmal_port_get_buffer_from_header(p,
-    &p->buffers_busy, r->buffer_header.data);
+  b = mmal_port_get_buffer_from_header(p, &p->buffers_busy,
+    m->buffer_header.data);
 
   if (!b || !b->buffer) {
     os_log("Bad buffer %p->%p\r\n", b, b ? b->buffer : NULL);
@@ -599,18 +632,41 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *rmsg)
       asm volatile ("wfe");
   }
 
+  *out_p = p;
+  *out_b = b;
+
+  return SUCCESS;
+}
+
+static inline void mmal_port_buffer_to_host_cb(struct mmal_port *p,
+  const struct mmal_msg_buffer_from_host *m,
+  struct mmal_buffer *b)
+{
+  int irqflags;
   disable_irq_save_flags(irqflags);
   list_del_init(&b->list);
-  b->length = r->buffer_header.length;
-  b->flags = r->buffer_header.flags;
+  b->length = m->buffer_header.length;
+  b->flags = m->buffer_header.flags;
   mmal_buf_fifo_push(&p->buffers_pending, b);
-  mmal_buf_fifo_dump("submitted", &p->buffers_pending);
   p->nr_busy--;
+  // m->buffer_header.user_data = NARROW_PTR(b);
   restore_irq_flags(irqflags);
-  r->buffer_header.user_data = NARROW_PTR(b);
+}
 
-  os_event_notify_and_yield(&mmal_io_event);
+static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
+{
+  int err;
+  struct mmal_port *p = NULL;
+  struct mmal_buffer *b;
 
+
+  err = mmal_buffer_to_host_msg_to_port(&m->u.buffer_from_host, &p, &b);
+  CHECK_ERR("Failed to find matching port and buffer");
+  mmal_port_buffer_to_host_cb(p, &m->u.buffer_from_host, b);
+  mmal_port_report_buffer_ready(p, b);
+  err = SUCCESS;
+
+out_err:
   return err;
 }
 
@@ -872,7 +928,7 @@ out_err:
   return err;
 }
 
-static int mmal_port_add_buffer(struct mmal_port *p, void *dma_buf,
+int mmal_port_add_buffer(struct mmal_port *p, void *dma_buf,
   size_t dma_buf_size, uint32_t user_handle)
 {
   int err;
@@ -937,7 +993,7 @@ out_err:
   return err;
 }
 
-static int mmal_port_buffer_send_all(struct mmal_port *p)
+int mmal_port_buffer_send_all(struct mmal_port *p)
 {
   int irqflags;
   int err;
@@ -1177,12 +1233,34 @@ err_component_destroy:
   return NULL;
 }
 
-static void mmal_io_thread(void)
+void mmal_port_buffer_consumed_isr(struct mmal_port *p, struct mmal_buffer *b)
 {
+  struct mmal_msgq_msg m = {
+    .id = MMAL_IO_BUF_CONSUMED,
+    .port = p,
+    .buffer = b
+  };
+
+  os_msgq_put_isr(&mmal_io_msgq, &m);
+}
+
+static void mmal_io_loop(void)
+{
+  int err;
+
+  struct mmal_msgq_msg m;
+
   while(1) {
-    os_event_wait(&mmal_io_event);
-    os_event_clear(&mmal_io_event);
-    mmal_io_cb();
+    os_msgq_get(&mmal_io_msgq, &m);
+    if (m.id == MMAL_IO_BUF_READY) {
+      mmal_io_buffer_ready_cb(m.port, m.buffer);
+    }
+    else if (m.id == MMAL_IO_BUF_CONSUMED) {
+      err = mmal_port_buffer_send_one(m.port, m.buffer);
+      if (err != SUCCESS) {
+        MODULE_ERR("Failed to submit buffer");
+      }
+    }
   }
 }
 
@@ -1270,6 +1348,9 @@ int mmal_init(void)
   struct task *t;
   uint32_t service_id = VCHIQ_SERVICE_NAME_TO_ID("mmal");
 
+  os_msgq_init(&mmal_io_msgq, mmal_io_msgq_buffer,
+    sizeof(struct mmal_msgq_msg), MMAL_IO_MSGQ_MAX_COUNT);
+
   service_mmal = vchiq_service_open(service_id, VC_MMAL_MIN_VER, VC_MMAL_VER,
     mmal_service_cb);
 
@@ -1278,9 +1359,7 @@ int mmal_init(void)
     return ERR_GENERIC;
   }
 
-  os_event_init(&mmal_io_event);
-
-  t = task_create(mmal_io_thread, "mmal_io_thread");
+  t = task_create(mmal_io_loop, "mmal_io_loop");
   if (!t) {
     MODULE_ERR("Failed to start vchiq_thread");
     return ERR_GENERIC;
@@ -1291,7 +1370,7 @@ int mmal_init(void)
   return SUCCESS;
 }
 
-void mmal_register_io_cb(void (*cb)(void))
+void mmal_register_io_cb(mmal_io_buffer_ready_cb_t cb)
 {
-  mmal_io_cb = cb;
+  mmal_io_buffer_ready_cb = cb;
 }

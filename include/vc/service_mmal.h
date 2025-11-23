@@ -155,8 +155,17 @@ int mmal_port_parameter_get(struct mmal_port *p, int parameter_id, void *value,
   uint32_t *value_size);
 void mmal_port_dump(const char *tag, const struct mmal_port *p);
 
-void mmal_register_io_cb(void (*cb)(void));
+typedef void (*mmal_io_buffer_ready_cb_t)(struct mmal_port *p,
+  struct mmal_buffer *b);
+
+void mmal_register_io_cb(mmal_io_buffer_ready_cb_t cb);
 
 void mmal_format_set(struct mmal_es_format_local *f, int encoding,
   int encoding_variant, int width, int height, int frame_rate, int bitrate);
 
+int mmal_port_add_buffer(struct mmal_port *p, void *dma_buf,
+  size_t dma_buf_size, uint32_t user_handle);
+
+int mmal_port_buffer_send_all(struct mmal_port *p);
+
+void mmal_port_buffer_consumed_isr(struct mmal_port *p, struct mmal_buffer *b);
