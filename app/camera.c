@@ -648,7 +648,7 @@ int camera_video_stop(void)
     &frame_count, sizeof(frame_count));
 }
 
-static int mmal_apply_display_buffers(struct mmal_port *p,
+static int camera_init_preview_buffers(struct mmal_port *p,
   struct ili9341_buffer_info *buffers, size_t num_buffers)
 {
   size_t i;
@@ -706,7 +706,7 @@ static int camera_preview_init(int input_width, int input_height,
   err = mmal_port_enable(cam.resizer.out);
   CHECK_ERR("Failed to enable resizer.OUT");
 
-  err = mmal_apply_display_buffers(cam.resizer.out, display_buffers,
+  err = camera_init_preview_buffers(cam.resizer.out, display_buffers,
     ARRAY_SIZE(display_buffers));
   CHECK_ERR("Failed to add display buffers");
 
