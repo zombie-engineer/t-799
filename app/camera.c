@@ -13,7 +13,6 @@
 #include <write_stream_buffer.h>
 #include <memory_map.h>
 
-#define MODULE_LOG_LEVEL camera_log_level
 #define MODULE_UNIT_TAG "cam"
 #include <module_common.h>
 

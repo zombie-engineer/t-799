@@ -2,19 +2,27 @@
 
 #include <log.h>
 
-static int MODULE_LOG_LEVEL = LOG_LEVEL_CRIT;
+#define MODULE_LOG_LEVEL_VAR log_level_ ## MODULE_UNIT_TAG
+static int MODULE_LOG_LEVEL_VAR =
+
+#ifdef MODULE_LOG_LEVEL
+MODULE_LOG_LEVEL
+#else
+LOG_LEVEL_CRIT
+#endif
+;
 
 #define MODULE_INFO(__fmt, ...) \
-  LOG(MODULE_LOG_LEVEL, INFO, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
+  LOG(MODULE_LOG_LEVEL_VAR, INFO, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
 
 #define MODULE_DEBUG(__fmt, ...) \
-  LOG(MODULE_LOG_LEVEL, DEBUG, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
+  LOG(MODULE_LOG_LEVEL_VAR, DEBUG, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
 
 #define MODULE_DEBUG2(__fmt, ...) \
-  LOG(MODULE_LOG_LEVEL, DEBUG2, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
+  LOG(MODULE_LOG_LEVEL_VAR, DEBUG2, MODULE_UNIT_TAG, __fmt, ##__VA_ARGS__)
 
 #define MODULE_ERR(__fmt, ...) \
-  LOG(MODULE_LOG_LEVEL, ERR, MODULE_UNIT_TAG, "%s:" __fmt __endline, \
+  LOG(MODULE_LOG_LEVEL_VAR, ERR, MODULE_UNIT_TAG, "%s:" __fmt __endline, \
   __func__, ##__VA_ARGS__)
 
 #define CHECK_ERR(__fmt, ...) \

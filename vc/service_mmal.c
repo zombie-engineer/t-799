@@ -16,7 +16,6 @@
 #include <write_stream_buffer.h>
 #include <os_msgq.h>
 
-#define MODULE_LOG_LEVEL mmal_log_level
 #define MODULE_UNIT_TAG "mmal"
 #include <module_common.h>
 

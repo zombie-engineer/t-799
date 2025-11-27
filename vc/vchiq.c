@@ -16,7 +16,6 @@
 #include "vchiq_doorbell.h"
 
 #define MODULE_UNIT_TAG "vchiq"
-#define MODULE_LOG_LEVEL vchiq_log_level
 #include <module_common.h>
 
 static bool vchiq_ready = false;

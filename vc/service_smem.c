@@ -9,7 +9,6 @@
 #include <os_api.h>
 
 #define MODULE_UNIT_TAG "smem"
-#define MODULE_LOG_LEVEL smem_log_level
 #include <module_common.h>
 
 #define VC_SM_VER  1
