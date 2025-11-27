@@ -380,8 +380,8 @@ out_err:
   return err;
 }
 
-static int camera_make_resizer_port(int in_width, int in_height,
-  int out_width, int out_height)
+static int camera_make_resizer(int in_width, int in_height, int out_width,
+  int out_height)
 {
   int err = SUCCESS;
   struct mmal_component *c;
@@ -413,6 +413,7 @@ static int camera_make_resizer_port(int in_width, int in_height,
   c->input[0].format.es->video.height = in_height;
   c->input[0].format.es->video.crop.width = in_width;
   c->input[0].format.es->video.crop.height = in_height;
+  c->output[0].current_buffer.num = 2;
   err = mmal_port_set_format(&c->input[0]);
   CHECK_ERR("Failed to set format for resizer.IN port");
 
@@ -686,7 +687,7 @@ static int camera_preview_init(int input_width, int input_height,
 
   camera_display_buffers_dump(display_buffers, ARRAY_SIZE(display_buffers));
 
-  err = camera_make_resizer_port(input_width, input_height, preview_width,
+  err = camera_make_resizer(input_width, input_height, preview_width,
     preview_height);
 
   CHECK_ERR("Failed to make resizer port");
@@ -736,6 +737,8 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   int err;
   struct mmal_param_cam_info cam_info = {0};
   cam.bdev = bdev;
+  cam.port_h264_stream = NULL;
+  cam.port_preview_stream = NULL;
 
   mmal_register_io_cb(camera_on_mmal_buffer_ready);
 

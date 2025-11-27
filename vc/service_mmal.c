@@ -435,8 +435,7 @@ void mmal_format_set(struct mmal_es_format_local *f, int encoding,
   f->bitrate = bitrate;
 }
 
-static void mmal_port_to_msg(struct mmal_port *port,
-  struct mmal_port_msg *p)
+static void mmal_port_to_msg(struct mmal_port *port, struct mmal_port_msg *p)
 {
   /* todo do readonly fields need setting at all? */
   p->type = port->type;
