@@ -88,15 +88,15 @@ static inline void os_msgq_get(struct os_msgq *q, void *m)
   int irq;
   const uint8_t *slot;
 
+  disable_irq_save_flags(irq);
   if (q->wr == q->rd)
     os_api_put_to_wait_list(&q->wait_list);
 
   slot = q->queue + q->rd * q->msg_size;
   q->rd++;
-  if (q->rd == q->msg_size)
+  if (q->rd == q->queue_size)
     q->rd = 0;
 
-  disable_irq_save_flags(irq);
-  memcpy(m, slot, q->msg_size);
   restore_irq_flags(irq);
+  memcpy(m, slot, q->msg_size);
 }

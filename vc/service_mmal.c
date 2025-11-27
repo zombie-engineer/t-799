@@ -543,18 +543,14 @@ static struct mmal_port *mmal_port_get_by_handle(struct mmal_component *c,
   return NULL;
 }
 
-static __attribute__((optimize("O0"))) void mmal_port_report_buffer_ready(
-  struct mmal_port *p,
+static void mmal_port_report_buffer_ready(struct mmal_port *p,
   struct mmal_buffer *b)
 {
-
-  volatile int fff = 1;
-  while(fff) asm volatile("wfe");
-
-  struct mmal_msgq_msg m;
-  m.id = MMAL_IO_BUF_READY;
-  m.port = p;
-  m.buffer = b;
+  struct mmal_msgq_msg m = {
+    .id = MMAL_IO_BUF_READY,
+    .port = p,
+    .buffer = b
+  };
 
   os_msgq_put(&mmal_io_msgq, &m);
 }
