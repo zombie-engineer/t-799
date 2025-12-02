@@ -14,30 +14,30 @@
 #include <mmu.h>
 #include <memory_map.h>
 
-#define ILI9341_CMD_SOFT_RESET   0x01
-#define ILI9341_CMD_READ_ID      0x04
-#define ILI9341_CMD_SLEEP_OUT    0x11
-#define ILI9341_CMD_DISPLAY_OFF  0x28
-#define ILI9341_CMD_DISPLAY_ON   0x29
-#define ILI9341_CMD_SET_CURSOR_X 0x2a
-#define ILI9341_CMD_SET_CURSOR_Y 0x2b
-#define ILI9341_CMD_WRITE_PIXELS 0x2c
-#define ILI9341_CMD_MEM_ACCESS_CONTROL 0x36
-#define ILI9341_CMD_SET_PIXEL_FORMAT 0x3a
+#define ILI9341_CMD_SOFT_RESET            0x01
+#define ILI9341_CMD_READ_ID               0x04
+#define ILI9341_CMD_SLEEP_OUT             0x11
+#define ILI9341_CMD_DISPLAY_OFF           0x28
+#define ILI9341_CMD_DISPLAY_ON            0x29
+#define ILI9341_CMD_SET_CURSOR_X          0x2a
+#define ILI9341_CMD_SET_CURSOR_Y          0x2b
+#define ILI9341_CMD_WRITE_PIXELS          0x2c
+#define ILI9341_CMD_MEM_ACCESS_CONTROL    0x36
+#define ILI9341_CMD_SET_PIXEL_FORMAT      0x3a
 #define ILI9341_CMD_WRITE_MEMORY_CONTINUE 0x3c
-#define ILI9341_CMD_POWER_CTL_A  0xcb
-#define ILI9341_CMD_POWER_CTL_B  0xcf
-#define ILI9341_CMD_TIMING_CTL_A 0xe8
-#define ILI9341_CMD_TIMING_CTL_B 0xea
-#define ILI9341_CMD_POWER_ON_SEQ 0xed
-#define ILI9341_CMD_PUMP_RATIO   0xf7
-#define ILI9341_CMD_POWER_CTL_1  0xc0
-#define ILI9341_CMD_POWER_CTL_2  0xc1
-#define ILI9341_CMD_VCOM_CTL_1   0xc5
-#define ILI9341_CMD_VCOM_CTL_2   0xc7
-#define ILI9341_CMD_FRAME_RATE_CTL 0xb1
-#define ILI9341_CMD_BLANK_PORCH  0xb5
-#define ILI9341_CMD_DISPL_FUNC   0xb6
+#define ILI9341_CMD_POWER_CTL_A           0xcb
+#define ILI9341_CMD_POWER_CTL_B           0xcf
+#define ILI9341_CMD_TIMING_CTL_A          0xe8
+#define ILI9341_CMD_TIMING_CTL_B          0xea
+#define ILI9341_CMD_POWER_ON_SEQ          0xed
+#define ILI9341_CMD_PUMP_RATIO            0xf7
+#define ILI9341_CMD_POWER_CTL_1           0xc0
+#define ILI9341_CMD_POWER_CTL_2           0xc1
+#define ILI9341_CMD_VCOM_CTL_1            0xc5
+#define ILI9341_CMD_VCOM_CTL_2            0xc7
+#define ILI9341_CMD_FRAME_RATE_CTL        0xb1
+#define ILI9341_CMD_BLANK_PORCH           0xb5
+#define ILI9341_CMD_DISPL_FUNC            0xb6
 
 /*
  * ILI9341 displays are able to update at any rate between 61Hz to up to
