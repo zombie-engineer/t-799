@@ -123,18 +123,37 @@ to_remote:
   return err;
 }
 
-static int OPTIMIZED camera_on_h264_buffer_ready(void)
+bool config_done = false;
+
+static int OPTIMIZED camera_on_h264_buffer_ready(struct mmal_buffer *b)
 {
   int irqflags;
   int err;
-  struct mmal_buffer *b;
+  struct mmal_buffer *b2;
   struct list_head iobufs = LIST_HEAD_INIT(iobufs);
   struct list_head *node;
   struct write_stream_buf *iobuf;
   struct write_stream_buf *iobuf_tmp;
   struct mmal_port *p = cam.port_h264_stream;
 
-  b = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
+  disable_irq_save_flags(irqflags);
+  b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
+  if (b != b2) {
+    restore_irq_flags(irqflags);
+    return ERR_INVAL;
+  }
+
+  if (!config_done && b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
+    config_done = true;
+
+  if (!config_done) {
+    disable_irq_save_flags(irqflags);
+    list_del(&b->list);
+    list_add_tail(&b->list, &p->bufs.os_side_free);
+    restore_irq_flags(irqflags);
+    goto second_half;
+  }
+
   node = list_fifo_pop_head(&p->iobufs);
 
   MODULE_ASSERT(b, "Unexpected buffer not found");
@@ -168,7 +187,8 @@ static int OPTIMIZED camera_on_h264_buffer_ready(void)
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {}
   if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {}
 #endif
-  
+
+second_half:
   if (!(cam.stat_frames % 25))
     os_log(".%d\r\n", cam.stat_frames);
   cam.stat_frames++;
@@ -183,7 +203,7 @@ static int OPTIMIZED camera_on_mmal_buffer_ready(struct mmal_port *p,
   struct mmal_buffer *b)
 {
   if (p == cam.port_h264_stream)
-    return camera_on_h264_buffer_ready();
+    return camera_on_h264_buffer_ready(b);
   if (p == cam.port_preview_stream)
     return camera_on_preview_buffer_ready(b);
   return ERR_INVAL;

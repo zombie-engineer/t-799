@@ -631,6 +631,10 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
 
   err = mmal_buffer_to_host_msg_to_port(&m->u.buffer_from_host, &p, &b);
   if (p->bufs.acks_count < p->bufs.total_count) {
+    if (b->length || b->flags) {
+      MODULE_ERR("non-0 buf during ack %d/%d", p->bufs.acks_count,
+        p->bufs.total_count);
+    }
     p->bufs.acks_count++;
     err = mmal_port_buffer_to_remote(p, b);
     CHECK_ERR("Failed to re-send acknowledged buffer to vc");
