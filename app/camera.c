@@ -699,7 +699,8 @@ static int camera_preview_init(int input_width, int input_height,
   int err;
 
   struct ili9341_buffer_info display_buffers[2];
-  err = ili9341_nonstop_refresh_init(camera_on_preview_data_consumed_isr);
+  err = ili9341_nonstop_refresh_init(camera_on_preview_data_consumed_isr,
+    0, 0, preview_width, preview_height);
   CHECK_ERR("Failed to init display in non-stop refresh mode");
   err = ili9341_nonstop_refresh_get_buffers(display_buffers,
     ARRAY_SIZE(display_buffers));

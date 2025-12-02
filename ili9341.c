@@ -100,8 +100,11 @@ struct ili9341_gpio {
 #define BYTES_PER_PIXEL 3
 #define MAX_BYTES_PER_TRANSFER 0xfff8
 
+#define BYTES_PER_REGION(__width, __height) \
+  ((__width) * (__height) * BYTES_PER_PIXEL)
+
 /* 230400 */
-#define NUM_BYTES_PER_FRAME (DISPLAY_HEIGHT * DISPLAY_WIDTH * BYTES_PER_PIXEL)
+#define NUM_BYTES_PER_REGION BYTES_PER_REGION(DISPLAY_HEIGHT, DISPLAY_WIDTH)
 
 /*
  * Precalculated transfer of image via SPI and DMA:
@@ -116,9 +119,11 @@ struct ili9341_gpio {
  * Number of 65532 byte transfers we need to transfer 230400 is:
  * roundup(230400 / 65532) = roundup(3.51584) = 4
  */
-#define NUM_DMA_TRANSFERS \
-  ((NUM_BYTES_PER_FRAME + (MAX_BYTES_PER_TRANSFER - 1))\
+#define __NUM_DMA_TRANSFERS(__bytes_per_frame) \
+  (((__bytes_per_frame) + (MAX_BYTES_PER_TRANSFER - 1))\
     / MAX_BYTES_PER_TRANSFER)
+
+#define NUM_DMA_TRANSFERS __NUM_DMA_TRANSFERS(NUM_BYTES_PER_REGION)
 
 struct ili9341_dma_buf {
   /* DMA control blocks */
@@ -141,6 +146,11 @@ struct ili9341 {
   uint32_t *spi_dma_headers;
   int last_transfer_idx;
   uint32_t current_buffer_handle;
+  unsigned int dma_num_transfers;
+  uint16_t dma_region_x0;
+  uint16_t dma_region_y0;
+  uint16_t dma_region_x1;
+  uint16_t dma_region_y1;
 };
 
 static struct ili9341 ili9341;
@@ -428,19 +438,40 @@ typedef enum {
 static ili9341_nonstop_refresh_state_t
 ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
 
-int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t))
+int ili9341_nonstop_refresh_init(display_dma_done_cb_isr cb,
+  uint32_t region_x0, uint32_t region_y0,
+  uint32_t region_x1, uint32_t region_y1)
 {
+  size_t bytes_per_region;
+
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
     os_log("WARN: tried to initialized nonstop refresh twice\r\n");
     return ERR_GENERIC;
   }
 
-  ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH,
-    DISPLAY_HEIGHT);
+  if (region_x0 >= region_x1 || region_y0 >= region_y1) {
+    return ERR_INVAL;
+  }
+
+  ili9341.dma_region_x0 = region_x0;
+  ili9341.dma_region_y0 = region_y0;
+  ili9341.dma_region_x1 = region_x1;
+  ili9341.dma_region_y1 = region_y1;
+
+  bytes_per_region = BYTES_PER_REGION(region_x1 - region_x0,
+    region_y1 - region_y0);
+
+  ili9341.dma_num_transfers = __NUM_DMA_TRANSFERS(bytes_per_region);
+
+  ili9341_set_region_coords(ili9341.gpio.pin_dc,
+    ili9341.dma_region_x0,
+    ili9341.dma_region_y0,
+    ili9341.dma_region_x1 - ili9341.dma_region_x0 - 1,
+    ili9341.dma_region_y1 - ili9341.dma_region_y0 - 1);
 
   SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
 
-  ili9341_dma_done_cb_irq = dma_done_cb_irq;
+  ili9341_dma_done_cb_irq = cb;
 
   ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_READY;
   ili9341.transfer_done = true;
@@ -465,7 +496,7 @@ int ili9341_nonstop_refresh_get_buffers(struct ili9341_buffer_info *buffers,
 
   for (i = 0; i < ARRAY_SIZE(ili9341.dma_bufs); ++i) {
     buffers[i].buffer = ili9341.dma_bufs[i].raw_buf;
-    buffers[i].buffer_size = NUM_BYTES_PER_FRAME;
+    buffers[i].buffer_size = NUM_BYTES_PER_REGION;
     buffers[i].handle = (uint32_t)i;
   }
 
@@ -489,17 +520,16 @@ int ili9341_nonstop_refresh_start(void)
 
 int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
 {
+  size_t i;
+
   if (!ili9341.transfer_done) {
-    // printf("** [Not accepted %08x]\r\n", buf_handle);
     return ERR_GENERIC;
   }
 
   if (buf_handle >= ARRAY_SIZE(ili9341.dma_bufs)) {
-    // printf("Wrong buf handle %d\r\n", buf_handle);
     return ERR_GENERIC;
   }
 
-  // printf("> [Accepted %08x]\r\n", buf_handle);
   ili9341.current_buffer_handle = buf_handle;
   ili9341.current_buf = &ili9341.dma_bufs[buf_handle];
   ili9341.transfer_done = false;
@@ -510,7 +540,7 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
 
   ili9341.last_transfer_idx = 0;
 
-  for (size_t i = 0; i < NUM_DMA_TRANSFERS; ++i) {
+  for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
     bcm2835_dma_update_cb_src(ili9341.current_buf->tx_cbs[i],
       RAM_PHY_TO_BUS_UNCACHED(ili9341.current_buf->raw_buf +
         i * MAX_BYTES_PER_TRANSFER));
@@ -547,7 +577,7 @@ void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
   ili9341_dma_done_cb_irq = dma_done_cb_irq;
 
   if (!ili9341_first) {
-    ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
     if (ili9341_use_dma) {
       SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, data, data_sz);
       return;
@@ -630,7 +660,7 @@ static inline void ili9341_init_transport(void)
 static inline size_t ili9341_transfer_size(int transfer_idx)
 {
   size_t bytes_already = transfer_idx * MAX_BYTES_PER_TRANSFER;
-  size_t bytes_left = NUM_BYTES_PER_FRAME - bytes_already;
+  size_t bytes_left = NUM_BYTES_PER_REGION - bytes_already;
   return MIN(MAX_BYTES_PER_TRANSFER, bytes_left);
 }
 
@@ -719,7 +749,7 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
 
 static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf, int i)
 {
-  uint8_t *b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
+  uint8_t *b = dma_alloc(NUM_BYTES_PER_REGION, 0);
 
   if (!b) {
     os_log("Failed to allocate DMA buffer #%d for ili9341\r\n", i);

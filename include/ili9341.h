@@ -6,7 +6,11 @@ int ili9341_init(void);
 void ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
   void (*dma_done_cb_irq)(uint32_t));
 
-int ili9341_nonstop_refresh_init(void (*dma_done_cb_irq)(uint32_t));
+typedef void (*display_dma_done_cb_isr)(uint32_t);
+
+int ili9341_nonstop_refresh_init(display_dma_done_cb_isr cb,
+  uint32_t region_x0, uint32_t region_y0,
+  uint32_t region_x1, uint32_t region_y1);
 
 struct ili9341_buffer_info {
   uint8_t *buffer;
