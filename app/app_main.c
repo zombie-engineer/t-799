@@ -24,7 +24,7 @@ void app_main(void)
   const int frame_width = 1920;
   const int frame_height = 1080;
   const int preview_width = 320;
-  const int preview_height = 240;
+  const int preview_height = 180;
   const bool preview_enable = true;
   const uint32_t camera_bit_rate = 4 * 1000 * 1000;
   const int camera_frame_rate = 30;
