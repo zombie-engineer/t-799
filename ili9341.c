@@ -14,6 +14,19 @@
 #include <mmu.h>
 #include <memory_map.h>
 
+/* horizontal refresh direction */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_MH  (1<<2)
+/* pixel format default is bgr, with this flag it's rgb */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_BGR (1<<3)
+/* horizontal refresh direction */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_ML  (1<<4)
+/* swap rows and columns default is PORTRAIT, this flags makes it ALBUM */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_MV  (1<<5)
+/* column address order */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_MX  (1<<6)
+/* row address order */
+#define ILI9341_CMD_MEM_ACCESS_CONTROL_MY  (1<<7)
+
 #define ILI9341_CMD_SOFT_RESET            0x01
 #define ILI9341_CMD_READ_ID               0x04
 #define ILI9341_CMD_SLEEP_OUT             0x11
@@ -87,6 +100,18 @@
 
 #define SPI_CS_7E   0x7e204000
 #define SPI_FIFO_7E 0x7e204004
+
+#ifdef DISPLAY_MODE_PORTRAIT
+#define ACCESS_CONTROL_BYTE (ILI9341_CMD_MEM_ACCESS_CONTROL_BGR | \
+  ILI9341_CMD_MEM_ACCESS_CONTROL_MX | \
+  ILI9341_CMD_MEM_ACCESS_CONTROL_MY
+#else
+#define ACCESS_CONTROL_BYTE \
+    ILI9341_CMD_MEM_ACCESS_CONTROL_BGR \
+    | ILI9341_CMD_MEM_ACCESS_CONTROL_MX \
+    | ILI9341_CMD_MEM_ACCESS_CONTROL_MY \
+    | ILI9341_CMD_MEM_ACCESS_CONTROL_MV
+#endif
 
 struct ili9341_gpio {
   int pin_blk;
@@ -831,33 +856,8 @@ int ili9341_init(int gpio_blk, int gpio_dc, int gpio_reset)
   SEND_CMD(ILI9341_CMD_SOFT_RESET);
   os_wait_ms(5);
   SEND_CMD(ILI9341_CMD_DISPLAY_OFF);
-
-/* horizontal refresh direction */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MH  (1<<2)
-/* pixel format default is bgr, with this flag it's rgb */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_BGR (1<<3)
-/* horizontal refresh direction */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_ML  (1<<4)
-/*
- * swap rows and columns default is PORTRAIT, this flags makes it ALBUM
- */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MV  (1<<5)
-/* column address order */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MX  (1<<6)
-/* row address order */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MY  (1<<7)
-  data[0] = ILI9341_CMD_MEM_ACCESS_CONTROL_BGR
-    | ILI9341_CMD_MEM_ACCESS_CONTROL_MX
-    | ILI9341_CMD_MEM_ACCESS_CONTROL_MY
-#ifndef DISPLAY_MODE_PORTRAIT
-    | ILI9341_CMD_MEM_ACCESS_CONTROL_MV
-#endif
-  ;
+  data[0] = ACCESS_CONTROL_BYTE;
   SEND_CMD_DATA(ILI9341_CMD_MEM_ACCESS_CONTROL, data, 1);
-
-  // data[0] = 0b101 | (0b101 << 4);
-  // SEND_CMD_DATA(ILI9341_CMD_SET_PIXEL_FORMAT, data, 1);
-
   SEND_CMD(ILI9341_CMD_SLEEP_OUT);
   os_wait_ms(120);
   SEND_CMD(ILI9341_CMD_DISPLAY_ON);
