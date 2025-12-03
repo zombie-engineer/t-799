@@ -66,7 +66,7 @@
 #define DISPLAY_HEIGHT 320
 #else
 #define DISPLAY_WIDTH  320
-#define DISPLAY_HEIGHT 240
+#define DISPLAY_HEIGHT 180
 #endif
 
 #define SPI_CS   ((volatile uint32_t *)0x3f204000)
@@ -141,8 +141,8 @@ struct ili9341 {
 
   bool transfer_done;
 
-  int dma_channel_idx_spi_tx;
-  int dma_channel_idx_spi_rx;
+  int dma_ch_tx;
+  int dma_ch_rx;
   uint32_t *spi_dma_headers;
   int last_transfer_idx;
   uint32_t current_buffer_handle;
@@ -157,7 +157,7 @@ static struct ili9341 ili9341;
 
 static void (*ili9341_dma_done_cb_irq)(uint32_t) = NULL;
 
-static void ili9341_dma_irq_callback_spi_rx(void)
+static void ili9341_dma_rx_done_irq(void)
 {
   if (ili9341.last_transfer_idx == NUM_DMA_TRANSFERS - 1) {
     *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
@@ -174,17 +174,17 @@ static void ili9341_dma_irq_callback_spi_rx(void)
   ili9341.last_transfer_idx++;
   *(int *)0x3f204000 |= SPI_CS_CLEAR;
 
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx,
+  bcm2835_dma_set_cb(ili9341.dma_ch_tx,
     ili9341.current_buf->header_cbs[ili9341.last_transfer_idx]);
 
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx,
+  bcm2835_dma_set_cb(ili9341.dma_ch_rx,
     ili9341.current_buf->rx_cbs[ili9341.last_transfer_idx]);
 
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
+  bcm2835_dma_activate(ili9341.dma_ch_rx);
+  bcm2835_dma_activate(ili9341.dma_ch_tx);
 }
 
-static void ili9341_dma_irq_callback_spi_tx(void)
+static void ili9341_dma_tx_done_irq(void)
 {
 }
 
@@ -535,8 +535,8 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
   ili9341.transfer_done = false;
 
   *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+  bcm2835_dma_reset(ili9341.dma_ch_tx);
+  bcm2835_dma_reset(ili9341.dma_ch_rx);
 
   ili9341.last_transfer_idx = 0;
 
@@ -546,10 +546,8 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
         i * MAX_BYTES_PER_TRANSFER));
   }
 
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx,
-    ili9341.current_buf->header_cbs[0]);
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx,
-    ili9341.current_buf->rx_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->header_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->rx_cbs[0]);
 
     /*
      * Observations:
@@ -562,8 +560,8 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
      * - Activation of RX and TX channels is not done atomically, but RX will
      *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
      */
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
+  bcm2835_dma_activate(ili9341.dma_ch_rx);
+  bcm2835_dma_activate(ili9341.dma_ch_tx);
   return SUCCESS;
 }
 
@@ -603,14 +601,12 @@ void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
 #endif
 
   *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+  bcm2835_dma_reset(ili9341.dma_ch_tx);
+  bcm2835_dma_reset(ili9341.dma_ch_rx);
 
   ili9341.last_transfer_idx = 0;
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_tx,
-    ili9341.current_buf->header_cbs[0]);
-  bcm2835_dma_set_cb(ili9341.dma_channel_idx_spi_rx,
-    ili9341.current_buf->rx_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->header_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->rx_cbs[0]);
 
   /*
    * Observations:
@@ -623,8 +619,8 @@ void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
    * - Activation of RX and TX channels is not done atomically, but RX will
    *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
    */
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_rx);
-  bcm2835_dma_activate(ili9341.dma_channel_idx_spi_tx);
+  bcm2835_dma_activate(ili9341.dma_ch_rx);
+  bcm2835_dma_activate(ili9341.dma_ch_tx);
 }
 
 static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
@@ -759,7 +755,7 @@ static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf, int i)
   dma_buf->raw_buf = b;
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i)
-    ili9341_setup_spi_dma_transfer(dma_buf, i, i == (NUM_DMA_TRANSFERS - 1));
+    ili9341_setup_spi_dma_transfer(dma_buf, i, i == NUM_DMA_TRANSFERS - 1);
 
   return SUCCESS;
 }
@@ -769,13 +765,11 @@ static int ili9341_setup_dma(void)
   int err;
   size_t i;
 
-  ili9341.dma_channel_idx_spi_rx = bcm2835_dma_request_channel();
-  BUG_IF(ili9341.dma_channel_idx_spi_rx == -1,
-    "Failed to request DMA channel for SPI RX");
+  ili9341.dma_ch_rx = bcm2835_dma_request_channel();
+  BUG_IF(ili9341.dma_ch_rx == -1, "Failed to request DMA channel for SPI RX");
 
-  ili9341.dma_channel_idx_spi_tx = bcm2835_dma_request_channel();
-  BUG_IF(ili9341.dma_channel_idx_spi_tx == -1,
-    "Failed to request DMA channel for SPI TX");
+  ili9341.dma_ch_tx = bcm2835_dma_request_channel();
+  BUG_IF(ili9341.dma_ch_tx == -1, "Failed to request DMA channel for SPI TX");
 
   err = ili9341_setup_spi_dma_headers();
   if (err != SUCCESS) {
@@ -789,19 +783,16 @@ static int ili9341_setup_dma(void)
       return err;
   }
 
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_tx);
-  bcm2835_dma_reset(ili9341.dma_channel_idx_spi_rx);
+  bcm2835_dma_reset(ili9341.dma_ch_tx);
+  bcm2835_dma_reset(ili9341.dma_ch_rx);
 
-  bcm2835_dma_set_irq_callback(ili9341.dma_channel_idx_spi_tx,
-    ili9341_dma_irq_callback_spi_tx);
+  bcm2835_dma_set_irq_callback(ili9341.dma_ch_tx, ili9341_dma_tx_done_irq);
+  bcm2835_dma_set_irq_callback(ili9341.dma_ch_rx, ili9341_dma_rx_done_irq);
 
-  bcm2835_dma_set_irq_callback(ili9341.dma_channel_idx_spi_rx,
-    ili9341_dma_irq_callback_spi_rx);
-
-  bcm2835_dma_irq_enable(ili9341.dma_channel_idx_spi_tx);
-  bcm2835_dma_irq_enable(ili9341.dma_channel_idx_spi_rx);
-  bcm2835_dma_enable(ili9341.dma_channel_idx_spi_tx);
-  bcm2835_dma_enable(ili9341.dma_channel_idx_spi_rx);
+  bcm2835_dma_irq_enable(ili9341.dma_ch_tx);
+  bcm2835_dma_irq_enable(ili9341.dma_ch_rx);
+  bcm2835_dma_enable(ili9341.dma_ch_tx);
+  bcm2835_dma_enable(ili9341.dma_ch_rx);
 
   return SUCCESS;
 }
