@@ -100,11 +100,11 @@ struct ili9341_gpio {
 #define BYTES_PER_PIXEL 3
 #define MAX_BYTES_PER_TRANSFER 0xfff8
 
-#define BYTES_PER_REGION(__width, __height) \
+#define BYTES_PER_FRAME(__width, __height) \
   ((__width) * (__height) * BYTES_PER_PIXEL)
 
 /* 230400 */
-#define NUM_BYTES_PER_REGION BYTES_PER_REGION(DISPLAY_HEIGHT, DISPLAY_WIDTH)
+#define NUM_BYTES_PER_FRAME BYTES_PER_FRAME(DISPLAY_HEIGHT, DISPLAY_WIDTH)
 
 /*
  * Precalculated transfer of image via SPI and DMA:
@@ -123,14 +123,17 @@ struct ili9341_gpio {
   (((__bytes_per_frame) + (MAX_BYTES_PER_TRANSFER - 1))\
     / MAX_BYTES_PER_TRANSFER)
 
-#define NUM_DMA_TRANSFERS __NUM_DMA_TRANSFERS(NUM_BYTES_PER_REGION)
+#define NUM_DMA_TRANSFERS __NUM_DMA_TRANSFERS(NUM_BYTES_PER_FRAME)
 
 struct ili9341_dma_buf {
   /* DMA control blocks */
-  int tx_cbs[NUM_DMA_TRANSFERS];
-  int rx_cbs[NUM_DMA_TRANSFERS];
-  int header_cbs[NUM_DMA_TRANSFERS];
-  uint8_t *raw_buf;
+  struct {
+    int tx;
+    int rx;
+    int header;
+  } cbs[NUM_DMA_TRANSFERS];
+
+  uint8_t *buf;
 };
 
 struct ili9341 {
@@ -175,10 +178,10 @@ static void ili9341_dma_rx_done_irq(void)
   *(int *)0x3f204000 |= SPI_CS_CLEAR;
 
   bcm2835_dma_set_cb(ili9341.dma_ch_tx,
-    ili9341.current_buf->header_cbs[ili9341.last_transfer_idx]);
+    ili9341.current_buf->cbs[ili9341.last_transfer_idx].header);
 
   bcm2835_dma_set_cb(ili9341.dma_ch_rx,
-    ili9341.current_buf->rx_cbs[ili9341.last_transfer_idx]);
+    ili9341.current_buf->cbs[ili9341.last_transfer_idx].rx);
 
   bcm2835_dma_activate(ili9341.dma_ch_rx);
   bcm2835_dma_activate(ili9341.dma_ch_tx);
@@ -458,7 +461,7 @@ int ili9341_nonstop_refresh_init(display_dma_done_cb_isr cb,
   ili9341.dma_region_x1 = region_x1;
   ili9341.dma_region_y1 = region_y1;
 
-  bytes_per_region = BYTES_PER_REGION(region_x1 - region_x0,
+  bytes_per_region = BYTES_PER_FRAME(region_x1 - region_x0,
     region_y1 - region_y0);
 
   ili9341.dma_num_transfers = __NUM_DMA_TRANSFERS(bytes_per_region);
@@ -495,8 +498,8 @@ int ili9341_nonstop_refresh_get_buffers(struct ili9341_buffer_info *buffers,
     return ERR_INVAL;
 
   for (i = 0; i < ARRAY_SIZE(ili9341.dma_bufs); ++i) {
-    buffers[i].buffer = ili9341.dma_bufs[i].raw_buf;
-    buffers[i].buffer_size = NUM_BYTES_PER_REGION;
+    buffers[i].buffer = ili9341.dma_bufs[i].buf;
+    buffers[i].buffer_size = NUM_BYTES_PER_FRAME;
     buffers[i].handle = (uint32_t)i;
   }
 
@@ -541,13 +544,13 @@ int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
   ili9341.last_transfer_idx = 0;
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
-    bcm2835_dma_update_cb_src(ili9341.current_buf->tx_cbs[i],
-      RAM_PHY_TO_BUS_UNCACHED(ili9341.current_buf->raw_buf +
+    bcm2835_dma_update_cb_src(ili9341.current_buf->cbs[i].tx,
+      RAM_PHY_TO_BUS_UNCACHED(ili9341.current_buf->buf +
         i * MAX_BYTES_PER_TRANSFER));
   }
 
-  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->header_cbs[0]);
-  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->rx_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->cbs[0].header);
+  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->cbs[0].rx);
 
     /*
      * Observations:
@@ -595,7 +598,7 @@ void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
 
 #if 0
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
-    bcm2835_dma_update_cb_src(ili9341.current_buf->tx_cbs[i],
+    bcm2835_dma_update_cb_src(ili9341.current_buf->cbs[i].tx,
       RAM_PHY_TO_BUS_UNCACHED(data + i * MAX_BYTES_PER_TRANSFER));
   }
 #endif
@@ -605,8 +608,8 @@ void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
   bcm2835_dma_reset(ili9341.dma_ch_rx);
 
   ili9341.last_transfer_idx = 0;
-  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->header_cbs[0]);
-  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->rx_cbs[0]);
+  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->cbs[0].header);
+  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->cbs[0].rx);
 
   /*
    * Observations:
@@ -646,9 +649,9 @@ static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
   return SUCCESS;
 }
 
-static inline void ili9341_init_transport(void)
+static inline void ili9341_init_spi(int gpio_blk, int gpio_dc, int gpio_reset)
 {
-  ili9341_init_gpio(19, 13, 6);
+  ili9341_init_gpio(gpio_blk, gpio_dc, gpio_reset);
   *SPI_CS = SPI_CS_CLEAR_TX | SPI_CS_CLEAR_RX;
   *SPI_CLK = 8;
 }
@@ -656,7 +659,7 @@ static inline void ili9341_init_transport(void)
 static inline size_t ili9341_transfer_size(int transfer_idx)
 {
   size_t bytes_already = transfer_idx * MAX_BYTES_PER_TRANSFER;
-  size_t bytes_left = NUM_BYTES_PER_REGION - bytes_already;
+  size_t bytes_left = NUM_BYTES_PER_FRAME - bytes_already;
   return MIN(MAX_BYTES_PER_TRANSFER, bytes_left);
 }
 
@@ -671,7 +674,7 @@ static int ili9341_setup_spi_dma_headers(void)
    * register settings - [31:16 - transfer length, 15:8 - nothing, 7:0 -
    * control register first 8 bits]
    */
-  ili9341.spi_dma_headers = dma_alloc(4 * NUM_DMA_TRANSFERS, 0);
+  ili9341.spi_dma_headers = dma_alloc(4 * NUM_DMA_TRANSFERS, false);
   if (!ili9341.spi_dma_headers)
     return ERR_RESOURCE;
 
@@ -689,14 +692,14 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
   size_t transfer_size = ili9341_transfer_size(transfer_idx);
 
   uint32_t src_addr = NARROW_PTR(
-    b->raw_buf + transfer_idx * MAX_BYTES_PER_TRANSFER);
+    b->buf + transfer_idx * MAX_BYTES_PER_TRANSFER);
 
-  b->header_cbs[transfer_idx] = bcm2835_dma_reserve_cb();
-  BUG_IF(b->header_cbs[transfer_idx] == -1, "SPI DMA cb allocation failed");
-  b->tx_cbs[transfer_idx] = bcm2835_dma_reserve_cb();
-  BUG_IF(b->tx_cbs[transfer_idx] == -1, "SPI DMA cb allocation failed");
-  b->rx_cbs[transfer_idx] = bcm2835_dma_reserve_cb();
-  BUG_IF(b->rx_cbs[transfer_idx] == -1, "SPI DMA cb allocation failed");
+  b->cbs[transfer_idx].header = bcm2835_dma_reserve_cb();
+  BUG_IF(b->cbs[transfer_idx].header == -1, "SPI DMA cb allocation failed");
+  b->cbs[transfer_idx].tx = bcm2835_dma_reserve_cb();
+  BUG_IF(b->cbs[transfer_idx].tx == -1, "SPI DMA cb allocation failed");
+  b->cbs[transfer_idx].rx = bcm2835_dma_reserve_cb();
+  BUG_IF(b->cbs[transfer_idx].rx == -1, "SPI DMA cb allocation failed");
 
   /*
    * SPI DMA header goes first, it is a 4 byte word written to SPI_FIFO to
@@ -713,7 +716,7 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
   r.len       = 4;
   r.enable_irq = false;
 
-  bcm2835_dma_program_cb(&r, b->header_cbs[transfer_idx]);
+  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].header);
 
   /*
    * After SPI header goes data, source address is either the start of the
@@ -728,7 +731,7 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.len       = transfer_size;
   r.enable_irq = false;
-  bcm2835_dma_program_cb(&r, b->tx_cbs[transfer_idx]);
+  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].tx);
 
   r.dreq      = DMA_DREQ_SPI_RX;
   r.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
@@ -738,21 +741,21 @@ static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
   r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
   r.len       = transfer_size;
   r.enable_irq = true;
-  bcm2835_dma_program_cb(&r, b->rx_cbs[transfer_idx]);
+  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].rx);
 
-  bcm2835_dma_link_cbs(b->header_cbs[transfer_idx], b->tx_cbs[transfer_idx]);
+  bcm2835_dma_link_cbs(b->cbs[transfer_idx].header, b->cbs[transfer_idx].tx);
 }
 
 static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf, int i)
 {
-  uint8_t *b = dma_alloc(NUM_BYTES_PER_REGION, 0);
+  uint8_t *b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
 
   if (!b) {
     os_log("Failed to allocate DMA buffer #%d for ili9341\r\n", i);
     return ERR_RESOURCE;
   }
 
-  dma_buf->raw_buf = b;
+  dma_buf->buf = b;
 
   for (i = 0; i < NUM_DMA_TRANSFERS; ++i)
     ili9341_setup_spi_dma_transfer(dma_buf, i, i == NUM_DMA_TRANSFERS - 1);
@@ -797,11 +800,24 @@ static int ili9341_setup_dma(void)
   return SUCCESS;
 }
 
-int ili9341_init(void)
+int ili9341_regions_init(const struct ili9341_region_cfg *regions,
+  int num_regions)
 {
   int err;
+
+  err = ili9341_setup_dma();
+  if (err != SUCCESS) {
+    os_log("ili9341: failed to initialize DMA, err: %d\r\n", err);
+    return err;
+  }
+
+  return SUCCESS;
+}
+
+int ili9341_init(int gpio_blk, int gpio_dc, int gpio_reset)
+{
   char data[8];
-  ili9341_init_transport();
+  ili9341_init_spi(gpio_blk, gpio_dc, gpio_reset);
 
   gpio_set_pin_output(ili9341.gpio.pin_reset, true);
   os_wait_ms(120);
@@ -846,13 +862,12 @@ int ili9341_init(void)
   os_wait_ms(120);
   SEND_CMD(ILI9341_CMD_DISPLAY_ON);
   os_wait_ms(120);
-  err = ili9341_setup_dma();
-  if (err != SUCCESS) {
-    os_log("ili9341: failed to initialize DMA, err: %d\r\n", err);
-    return err;
-  }
-
   ili9341_fill_screen(ili9341.gpio.pin_dc);
 
   return SUCCESS;
+}
+
+size_t ili9341_get_frame_byte_size(int frame_width, int frame_height)
+{
+  return BYTES_PER_FRAME(frame_width, frame_height);
 }
