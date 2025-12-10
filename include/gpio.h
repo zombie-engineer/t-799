@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <ioreg.h>
 
 /*
  * gpio_set_pin_function - selects one of the functions
@@ -77,3 +78,19 @@ void gpio_set_pin_output(int pin, bool is_set);
 void gpio_toggle_pin_output(int pin);
 bool gpio_pin_is_set(int pin);
 
+typedef enum {
+  GPIO_REG_ADDR_SET,
+  GPIO_REG_ADDR_CLR,
+} gpio_reg_type_t;
+
+/*
+ * Returns an address to a 32bit gpio register of specified type,
+ * t - type of register, 2 possible types are write-only set and write-only get
+ * pin - pin number, that will affect also which register is returned
+ * out - result is written to this address
+ * returns true if agruments are good and out is written with a good value.
+ * returns false if agruments did not pass validation, nothing is written to
+ *   out
+ */
+bool gpio_get_reg32_addr(gpio_reg_type_t t, unsigned pin, ioreg32_t *out,
+  unsigned *bitmask);

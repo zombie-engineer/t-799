@@ -36,11 +36,16 @@
 #define DMA_DREQ_SLIMBUS_DC8   30
 #define DMA_DREQ_SLIMBUS_DC9   31
 
+#define DMA_CB_FLAG_NO_IRQ 0
+#define DMA_CB_FLAG_IRQ 1
+
 typedef enum {
   BCM2835_DMA_ENDPOINT_TYPE_IGNORE,
   BCM2835_DMA_ENDPOINT_TYPE_INCREMENT,
   BCM2835_DMA_ENDPOINT_TYPE_NOINC
 } bcm2835_dma_endpoint_type_t;
+
+#define BCM2835_DMA_ENDPOINT_TYPE_INC BCM2835_DMA_ENDPOINT_TYPE_INCREMENT
 
 typedef enum {
   BCM2835_DMA_DREQ_TYPE_NONE = 0,
@@ -59,6 +64,29 @@ struct bcm2835_dma_request_param {
   bool enable_irq;
 };
 
+#define DMA_CB_CONFIG(__p, __d, __t, __src, __dst, __st, __dt, __l, __i) \
+  __p.dreq = DMA_DREQ_##__d; \
+  __p.dreq_type = BCM2835_DMA_DREQ_TYPE_ ##__t; \
+  __p.src = __src; \
+  __p.dst = __dst; \
+  __p.src_type = BCM2835_DMA_ENDPOINT_TYPE_ ## __st; \
+  __p.dst_type = BCM2835_DMA_ENDPOINT_TYPE_ ## __dt; \
+  __p.len = __l; \
+  __p.enable_irq = __i;
+
+#define _DMA_CB_P(__d, __t, __src, __dst, __st, __dt, __l, __i) \
+  { \
+    .dreq = DMA_DREQ_##__d, \
+    .dreq_type = BCM2835_DMA_DREQ_TYPE_ ##__t, \
+    .src = __src, \
+    .dst = __dst, \
+    .src_type = BCM2835_DMA_ENDPOINT_TYPE_ ## __st, \
+    .dst_type = BCM2835_DMA_ENDPOINT_TYPE_ ## __dt, \
+    .len = __l, \
+    .enable_irq = __i, \
+  }
+
+
 void bcm2835_dma_init(void);
 void bcm2835_dma_enable(int channel);
 void bcm2835_dma_irq_enable(int channel);
@@ -73,6 +101,8 @@ bool bcm2835_dma_program_cb(const struct bcm2835_dma_request_param *p,
   int cb_handle);
 
 bool bcm2835_dma_update_cb_src(int cb_handle, uint32_t src);
+
+#define CB_HANDLE_NEXT_NONE -2
 
 bool bcm2835_dma_link_cbs(int cb_handle, int cb_handle_next);
 void bcm2835_dma_set_cb(int channel, int cb_handle);

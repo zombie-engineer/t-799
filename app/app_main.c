@@ -13,6 +13,7 @@
 #include <logger.h>
 #include <bcm2835/bcm_sdhost.h>
 #include <kmalloc.h>
+#include <spi.h>
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
@@ -32,6 +33,7 @@
 static struct block_device bdev_sdcard;
 static struct block_device *bdev_partition;
 static struct sdhc sdhc;
+static struct ili9341_drawframe drawframes[2];
 
 static inline int app_init_sdcard(void)
 {
@@ -74,79 +76,83 @@ static inline int app_init_sdcard(void)
   return SUCCESS;
 }
 
-static inline int init_display_region_configs(struct ili9341_region_cfg *c,
+struct ili9341_per_frame_dma dmabuf_camera[1];
+struct ili9341_per_frame_dma dmabuf_app;
+
+static __attribute__((optimize("O0"))) int init_display_region_configs(
+  struct ili9341_drawframe *df_cam,
+  struct ili9341_drawframe *df_app,
   int preview_width, int preview_height,
   int display_width, int display_height)
 {
   int i;
-  uint8_t *cam_dma_bufs[2];
-  uint8_t *app_dma_buf;
   size_t buf_size;
-  struct ili9341_region_cfg *cfg_cam = &c[0];
-  struct ili9341_region_cfg *cfg_app = &c[1];
 
-  cfg_cam->frame.pos.x = 0;
-  cfg_cam->frame.pos.y = 0;
-  cfg_cam->frame.size.x = preview_width;
-  cfg_cam->frame.size.y = preview_height;
-  cfg_app->frame.pos.x = 0;
-  cfg_app->frame.pos.y = cfg_cam->frame.size.y;
-  cfg_app->frame.size.x = display_width;
-  cfg_app->frame.size.y = display_height - cfg_cam->frame.size.y;
+  df_cam->frame.pos.x = 0;
+  df_cam->frame.pos.y = 0;
+  df_cam->frame.size.x = preview_width;
+  df_cam->frame.size.y = preview_height;
+  df_app->frame.pos.x = 0;
+  df_app->frame.pos.y = df_cam->frame.size.y;
+  df_app->frame.size.x = display_width;
+  df_app->frame.size.y = display_height - df_cam->frame.size.y;
 
-  buf_size = ili9341_get_frame_byte_size(cfg_cam->frame.size.x,
-    cfg_cam->frame.size.y);
+  buf_size = ili9341_get_frame_byte_size(df_cam->frame.size.x,
+    df_cam->frame.size.y);
 
-  for (i = 0; i < ARRAY_SIZE(cam_dma_bufs); ++i) {
-    cam_dma_bufs[i] = dma_alloc(buf_size, false);
-    if (!cam_dma_bufs[i]) {
+  for (i = 0; i < ARRAY_SIZE(dmabuf_camera); ++i) {
+    INIT_LIST_HEAD(&dmabuf_camera[i].draw_tasks);
+    dmabuf_camera[i].buf = dma_alloc(buf_size, false);
+    if (!dmabuf_camera[i].buf) {
       os_log("Failed to alloc display buf#%d for cam preview\r\n", i);
       return ERR_RESOURCE;
     }
     os_log("Allocated %d bytes dma buf#%d for camera\r\n", buf_size, i);
+    dmabuf_camera[i].buf_size = buf_size;
+    dmabuf_camera[i].handle = i;
   }
 
-  app_dma_buf = dma_alloc(buf_size, false);
-  if (!app_dma_buf) {
+  df_cam->bufs = dmabuf_camera;
+  df_cam->num_bufs = ARRAY_SIZE(dmabuf_camera);
+
+  INIT_LIST_HEAD(&dmabuf_app.draw_tasks);
+  buf_size = ili9341_get_frame_byte_size(df_app->frame.size.x,
+    df_app->frame.size.y);
+  dmabuf_app.buf = dma_alloc(buf_size, false);
+  if (!dmabuf_app.buf) {
     os_log("Failed to alloc display buf for app");
     return ERR_RESOURCE;
   }
   os_log("Allocated %d bytes dma buf#%d for app\r\n", buf_size);
+  dmabuf_app.buf_size = buf_size;
 
-  buf_size = ili9341_get_frame_byte_size(cfg_cam->frame.size.x,
-    cfg_cam->frame.size.y);
+  df_app->bufs = &dmabuf_app;
+  df_app->num_bufs = 1;
 
-  cfg_cam->dma_buffers = cam_dma_bufs;
-  cfg_cam->num_dma_buffers = ARRAY_SIZE(cam_dma_bufs);
+  buf_size = ili9341_get_frame_byte_size(df_cam->frame.size.x,
+    df_cam->frame.size.y);
 
-  cfg_app->dma_buffers = &app_dma_buf;
-  cfg_app->num_dma_buffers = 1;
+  df_app->bufs = &dmabuf_app;
+  df_app->num_bufs = 1;
 
   return SUCCESS;
 }
 
-static inline int app_init_display(void)
+static int app_init_display(void)
 {
   int err;
 
-  struct ili9341_region_cfg regions[2];
-
-  err = ili9341_init(GPIO_BLK, GPIO_DC, GPIO_RESET);
-  if (err != SUCCESS) {
-    os_log("Failed to init ili9341 display, err: %d", err);
-    return err;
-  }
-
-  err = init_display_region_configs(regions, PREVIEW_WIDTH, PREVIEW_HEIGHT,
-    DISPLAY_WIDTH, DISPLAY_HEIGHT);
+  err = init_display_region_configs(&drawframes[0], &drawframes[1],
+    PREVIEW_WIDTH, PREVIEW_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   if (err) {
     os_log("Failed to init ili9341 region config for camera, err: %d", err);
     return err;
   }
 
-  err = ili9341_regions_init(regions, ARRAY_SIZE(regions));
+  err = ili9341_init(GPIO_BLK, GPIO_DC, GPIO_RESET, drawframes,
+    ARRAY_SIZE(drawframes));
   if (err != SUCCESS) {
-    printf("Failed to init ili9341 frames, err: %d\r\n", err);
+    os_log("Failed to init ili9341 display, err: %d", err);
     return err;
   }
 
@@ -168,7 +174,7 @@ static inline void app_init_camera(void)
     FRAME_WIDTH, FRAME_HEIGHT,
     CAMERA_FRAME_RATE,
     CAMERA_BIT_RATE,
-    PREVIEW_ENABLE, PREVIEW_WIDTH,
+    PREVIEW_ENABLE, &drawframes[0], PREVIEW_WIDTH,
     PREVIEW_HEIGHT);
   BUG_IF(err != SUCCESS, "failed to init camera");
 
@@ -182,6 +188,8 @@ static inline void app_init_camera(void)
 void app_main(void)
 {
   os_log("Application main");
+
+  spi_init();
 
   if (app_init_sdcard() != SUCCESS)
     goto out;

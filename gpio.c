@@ -143,3 +143,24 @@ void gpio_toggle_pin_output(int pin)
 {
   gpio_set_pin_output(pin, !gpio_pin_is_set(pin));
 }
+
+bool gpio_get_reg32_addr(gpio_reg_type_t t, unsigned pin, ioreg32_t *out,
+  unsigned *bitmask)
+{
+  if (pin / 32 > 1)
+    return false;
+
+  if (t == GPIO_REG_ADDR_SET) {
+    *out = GPIO_REG_GPSET0 + pin / 32;
+    *bitmask = 1 << (pin % 32);
+    return true;
+  }
+
+  if (t == GPIO_REG_ADDR_CLR) {
+    *out = GPIO_REG_GPCLR0 + pin / 32;
+    *bitmask = 1 << (pin % 32);
+    return true;
+  }
+
+  return false;
+}

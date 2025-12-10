@@ -5,6 +5,7 @@
 #include <log.h>
 #include <gpio.h>
 #include <os_api.h>
+#include <printf.h>
 #include <spi.h>
 #include <errcode.h>
 #include <cpu.h>
@@ -13,66 +14,21 @@
 #include <common.h>
 #include <mmu.h>
 #include <memory_map.h>
+#include <bitops.h>
+#include "ili9341_command.h"
 
-/* horizontal refresh direction */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MH  (1<<2)
-/* pixel format default is bgr, with this flag it's rgb */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_BGR (1<<3)
-/* horizontal refresh direction */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_ML  (1<<4)
-/* swap rows and columns default is PORTRAIT, this flags makes it ALBUM */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MV  (1<<5)
-/* column address order */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MX  (1<<6)
-/* row address order */
-#define ILI9341_CMD_MEM_ACCESS_CONTROL_MY  (1<<7)
+typedef enum {
+  DISPLAY_STATE_UNKNOWN = 0,
+  DISPLAY_STATE_CMD_STEP0,
+  DISPLAY_STATE_DMA_PIXEL_DATA
+} display_state_t;
 
-#define ILI9341_CMD_SOFT_RESET            0x01
-#define ILI9341_CMD_READ_ID               0x04
-#define ILI9341_CMD_SLEEP_OUT             0x11
-#define ILI9341_CMD_DISPLAY_OFF           0x28
-#define ILI9341_CMD_DISPLAY_ON            0x29
-#define ILI9341_CMD_SET_CURSOR_X          0x2a
-#define ILI9341_CMD_SET_CURSOR_Y          0x2b
-#define ILI9341_CMD_WRITE_PIXELS          0x2c
-#define ILI9341_CMD_MEM_ACCESS_CONTROL    0x36
-#define ILI9341_CMD_SET_PIXEL_FORMAT      0x3a
-#define ILI9341_CMD_WRITE_MEMORY_CONTINUE 0x3c
-#define ILI9341_CMD_POWER_CTL_A           0xcb
-#define ILI9341_CMD_POWER_CTL_B           0xcf
-#define ILI9341_CMD_TIMING_CTL_A          0xe8
-#define ILI9341_CMD_TIMING_CTL_B          0xea
-#define ILI9341_CMD_POWER_ON_SEQ          0xed
-#define ILI9341_CMD_PUMP_RATIO            0xf7
-#define ILI9341_CMD_POWER_CTL_1           0xc0
-#define ILI9341_CMD_POWER_CTL_2           0xc1
-#define ILI9341_CMD_VCOM_CTL_1            0xc5
-#define ILI9341_CMD_VCOM_CTL_2            0xc7
-#define ILI9341_CMD_FRAME_RATE_CTL        0xb1
-#define ILI9341_CMD_BLANK_PORCH           0xb5
-#define ILI9341_CMD_DISPL_FUNC            0xb6
-
-/*
- * ILI9341 displays are able to update at any rate between 61Hz to up to
- *  119Hz. Default at power on is 70Hz.
- */
-#define ILI9341_FRAMERATE_61_HZ 0x1F
-#define ILI9341_FRAMERATE_63_HZ 0x1E
-#define ILI9341_FRAMERATE_65_HZ 0x1D
-#define ILI9341_FRAMERATE_68_HZ 0x1C
-#define ILI9341_FRAMERATE_70_HZ 0x1B
-#define ILI9341_FRAMERATE_73_HZ 0x1A
-#define ILI9341_FRAMERATE_76_HZ 0x19
-#define ILI9341_FRAMERATE_79_HZ 0x18
-#define ILI9341_FRAMERATE_83_HZ 0x17
-#define ILI9341_FRAMERATE_86_HZ 0x16
-#define ILI9341_FRAMERATE_90_HZ 0x15
-#define ILI9341_FRAMERATE_95_HZ 0x14
-#define ILI9341_FRAMERATE_100_HZ 0x13
-#define ILI9341_FRAMERATE_106_HZ 0x12
-#define ILI9341_FRAMERATE_112_HZ 0x11
-#define ILI9341_FRAMERATE_119_HZ 0x10
-#define ILI9341_UPDATE_FRAMERATE ILI9341_FRAMERATE_119_HZ
+typedef enum {
+  ILI9341_NONSTOP_REFRESH_NONE = 0,
+  ILI9341_NONSTOP_REFRESH_READY,
+  ILI9341_NONSTOP_REFRESH_RUNNING,
+  ILI9341_NONSTOP_REFRESH_PAUSED
+} ili9341_nonstop_refresh_state_t;
 
 #ifdef DISPLAY_MODE_PORTRAIT
 #define DISPLAY_WIDTH  240
@@ -116,20 +72,65 @@
 struct ili9341_gpio {
   int pin_blk;
   int pin_reset;
-  int pin_dc;
+  int dc;
   int pin_mosi;
   int pin_miso;
   int pin_sclk;
 };
 
+struct ili9341_5byte_cmd {
+  uint8_t cmd;
+  uint8_t data[4];
+};
+
+struct ili9341_spi_tasks {
+  struct ili9341_5byte_cmd caset;
+  struct ili9341_5byte_cmd paset;
+  uint8_t cmdbyte_ramwr;
+
+  struct spi_async_task spi_caset_cmd;
+  struct spi_async_task spi_caset_data;
+  struct spi_async_task spi_paset_cmd;
+  struct spi_async_task spi_paset_data;
+  struct spi_async_task spi_ramwr_cmd;
+};
+
+struct ili9341 {
+  struct ili9341_gpio gpio;
+  struct spi_device spi;
+  struct list_head draw_tasks;
+
+  bool transfer_done;
+
+  int dma_ch_tx;
+  int dma_ch_rx;
+  int num_dma_xfer_done;
+  struct ili9341_drawframe *drawframes;
+  int num_drawframes;
+  struct ili9341_per_frame_dma *dma_io_current;
+  struct ili9341_spi_tasks *spi_tasks;
+  uint32_t spi_header_max;
+  uint32_t dma_rx_dst;
+  ioreg32_t reg_addr_dc_clear;
+  uint32_t reg_val_dc_clear;
+  ioreg32_t reg_addr_dc_set;
+  uint32_t reg_val_dc_set;
+  display_state_t state;
+};
+
 #define BYTES_PER_PIXEL 3
-#define MAX_BYTES_PER_TRANSFER 0xfff8
+#define SPI_ACTIVATE_VALUE(__num_bytes) (((__num_bytes) << 16) | SPI_CS_TA)
 
 #define BYTES_PER_FRAME(__width, __height) \
   ((__width) * (__height) * BYTES_PER_PIXEL)
 
 /* 230400 */
 #define NUM_BYTES_PER_FRAME BYTES_PER_FRAME(DISPLAY_HEIGHT, DISPLAY_WIDTH)
+
+static struct ili9341 ili9341;
+
+static ili9341_nonstop_refresh_state_t ili9341_nonstop_refresh_state
+ = ILI9341_NONSTOP_REFRESH_NONE;
 
 /*
  * Precalculated transfer of image via SPI and DMA:
@@ -144,516 +145,161 @@ struct ili9341_gpio {
  * Number of 65532 byte transfers we need to transfer 230400 is:
  * roundup(230400 / 65532) = roundup(3.51584) = 4
  */
-#define __NUM_DMA_TRANSFERS(__bytes_per_frame) \
-  (((__bytes_per_frame) + (MAX_BYTES_PER_TRANSFER - 1))\
-    / MAX_BYTES_PER_TRANSFER)
+static inline int get_num_transfers(size_t length)
+{
+  return ROUND_UP_DIV(length, spi_get_max_transfer_size());
+}
 
-#define NUM_DMA_TRANSFERS __NUM_DMA_TRANSFERS(NUM_BYTES_PER_FRAME)
+static inline int ili9341_get_parent_drawframe(
+  struct ili9341_per_frame_dma *dma_io,
+  struct ili9341_drawframe **out_drawframe,
+  struct ili9341_spi_tasks **out_spi_task)
+{
+  int i, j;
+  struct ili9341 *dev = &ili9341;
+  struct ili9341_drawframe *drawframe;
 
-struct ili9341_dma_buf {
-  /* DMA control blocks */
-  struct {
-    int tx;
-    int rx;
-    int header;
-  } cbs[NUM_DMA_TRANSFERS];
+  for (i = 0; i < dev->num_drawframes; ++i) {
+    drawframe = &dev->drawframes[i];
+    for (j = 0; j < drawframe->num_bufs; ++j) {
+      if (&drawframe->bufs[j] == dma_io) {
+        *out_drawframe = drawframe;
+        *out_spi_task = &dev->spi_tasks[i];
+        return 0;
+      }
+    }
+  }
 
-  uint8_t *buf;
-};
-
-struct ili9341 {
-  struct ili9341_gpio gpio;
-  struct spi_device spi;
-  struct ili9341_dma_buf dma_bufs[2];
-  struct ili9341_dma_buf *current_buf;
-
-  bool transfer_done;
-
-  int dma_ch_tx;
-  int dma_ch_rx;
-  uint32_t *spi_dma_headers;
-  int last_transfer_idx;
-  uint32_t current_buffer_handle;
-  unsigned int dma_num_transfers;
-  uint16_t dma_region_x0;
-  uint16_t dma_region_y0;
-  uint16_t dma_region_x1;
-  uint16_t dma_region_y1;
-};
-
-static struct ili9341 ili9341;
-
-static void (*ili9341_dma_done_cb_irq)(uint32_t) = NULL;
+  return ERR_NOT_FOUND;
+}
 
 static void ili9341_dma_rx_done_irq(void)
 {
-  if (ili9341.last_transfer_idx == NUM_DMA_TRANSFERS - 1) {
-    *(int *)0x3f204000 &= ~SPI_CS_DMAEN;
-    *(int *)0x3f204000 |= SPI_CS_CLEAR;
+  struct ili9341 *dev = &ili9341;
+  struct ili9341_per_frame_dma *dma_io = dev->dma_io_current;
+  struct spi_dma_xfer_cb *cbs;
+  struct ili9341_drawframe *current_drawframe;
+  struct ili9341_spi_tasks *current_spi_task;
 
-    // printf("< [Done %08x]\r\n", ili9341.current_buffer_handle);
+  *SPI_CS &= ~SPI_CS_DMAEN;
+  *SPI_CS |= SPI_CS_CLEAR;
 
-    if (ili9341_dma_done_cb_irq)
-      ili9341_dma_done_cb_irq(ili9341.current_buffer_handle);
-    ili9341.transfer_done = true;
+  dev->num_dma_xfer_done++;
+
+  if (dev->num_dma_xfer_done == dma_io->num_transfers) {
+    if (ili9341_get_parent_drawframe(dma_io, &current_drawframe,
+      &current_spi_task)) {
+      printf("PROBLEM3\n");
+      asm volatile ("wfe");
+    }
+
+    if (current_drawframe->on_dma_done_irq)
+      current_drawframe->on_dma_done_irq(dma_io);
+
+    dev->dma_io_current = NULL;
     return;
   }
 
-  ili9341.last_transfer_idx++;
-  *(int *)0x3f204000 |= SPI_CS_CLEAR;
+  cbs = &dma_io->cbs[dev->num_dma_xfer_done];
+  bcm2835_dma_set_cb(dev->dma_ch_tx, cbs->spi_start);
+  bcm2835_dma_set_cb(dev->dma_ch_rx, cbs->rx);
 
-  bcm2835_dma_set_cb(ili9341.dma_ch_tx,
-    ili9341.current_buf->cbs[ili9341.last_transfer_idx].header);
+  spi_dma_enable();
 
-  bcm2835_dma_set_cb(ili9341.dma_ch_rx,
-    ili9341.current_buf->cbs[ili9341.last_transfer_idx].rx);
-
-  bcm2835_dma_activate(ili9341.dma_ch_rx);
-  bcm2835_dma_activate(ili9341.dma_ch_tx);
+  bcm2835_dma_activate(dev->dma_ch_rx);
+  bcm2835_dma_activate(dev->dma_ch_tx);
 }
 
 static void ili9341_dma_tx_done_irq(void)
 {
+  printf("hello\r\n");
 }
 
-#define SPI_DC_SET() \
-  ioreg32_write((ioreg32_t)0x3f20001c, 1 << ili9341.gpio.pin_dc)
-
-#define SPI_DC_CLEAR() \
-  ioreg32_write((ioreg32_t)0x3f200028, 1 << ili9341.gpio.pin_dc)
-
-static void ili9341_cmd(char cmd)
+static void ili9341_write_command_byte(uint8_t cmd)
 {
-  if(*SPI_CS & SPI_CS_RXD)
-    *SPI_CS = SPI_CS_TA | SPI_CS_CLEAR_RX;
-
-  SPI_DC_CLEAR();
-  while(!(*SPI_CS & SPI_CS_TXD));
-  *SPI_FIFO = cmd;
-  while(!(*SPI_CS & SPI_CS_DONE));
-  SPI_DC_SET();
+  struct ili9341 *dev = &ili9341;
+  uint8_t bytestream_tx = cmd;
+  *dev->reg_addr_dc_clear = dev->reg_val_dc_clear;
+  spi_io_interrupt(&bytestream_tx, NULL, 1);
+  *dev->reg_addr_dc_set = dev->reg_val_dc_set;
 }
 
-#define SEND_CMD(__cmd) ili9341_cmd(__cmd)
-
-#define SEND_CMD_DATA(__cmd, __data, __datalen) do { \
-  char *__ptr = (char *)(__data);\
-  char *__end = __ptr + __datalen;\
-  uint32_t r;\
-  SEND_CMD(__cmd);\
-  while(__ptr < __end) {\
-    char __d = *(__ptr++);\
-    r = ioreg32_read(SPI_CS);\
-    if (r & SPI_CS_RXD) \
-      ioreg32_write(SPI_CS, SPI_CS_TA | SPI_CS_CLEAR_RX);\
-    while(1) {\
-      r = ioreg32_read(SPI_CS);\
-      if (r & SPI_CS_TXD)\
-        break;\
-    }\
-    ioreg32_write(SPI_FIFO, __d);\
-  }\
-  while(1) {\
-    r = ioreg32_read(SPI_CS);\
-    if (r & SPI_CS_DONE)\
-      break;\
-    if (r & SPI_CS_RXR) \
-      ioreg32_write(SPI_CS, SPI_CS_TA | SPI_CS_CLEAR_RX);\
-  }\
-} while(0)
-
-#define SEND_CMD_CHAR_REP(__cmd, __r, __g, __b, __reps) do { \
-  uint32_t r;\
-  int __rep = 0;\
-  SEND_CMD(__cmd);\
-  while(__rep++ < __reps) {\
-    r = ioreg32_read(SPI_CS);\
-    if (r & SPI_CS_RXD) \
-      ioreg32_write(SPI_CS, SPI_CS_TA | SPI_CS_CLEAR_RX);\
-    while(1) {\
-      r = ioreg32_read(SPI_CS);\
-      if (r & SPI_CS_TXD)\
-        break;\
-    }\
-    ioreg32_write(SPI_FIFO, __r);\
-    while(1) {\
-      r = ioreg32_read(SPI_CS);\
-      if (r & SPI_CS_TXD)\
-        break;\
-    }\
-    ioreg32_write(SPI_FIFO, __g);\
-    while(1) {\
-      r = ioreg32_read(SPI_CS);\
-      if (r & SPI_CS_TXD)\
-        break;\
-    }\
-    ioreg32_write(SPI_FIFO, __b);\
-  }\
-  while(1) {\
-    r = ioreg32_read(SPI_CS);\
-    if (r & SPI_CS_DONE)\
-      break;\
-    if (r & SPI_CS_RXR) \
-      ioreg32_write(SPI_CS, SPI_CS_TA | SPI_CS_CLEAR_RX);\
-  }\
-} while(0)
-
-#define RECV_CMD_DATA(__cmd, __data, __datalen) do { \
-  char *__ptr = (char *)(__data);\
-  char *__end = __ptr + __datalen;\
-  uint32_t r;\
-  SEND_CMD(__cmd);\
-  ioreg32_write(SPI_CS, SPI_CS_CLEAR_RX | SPI_CS_CLEAR_TX);\
-  ioreg32_write(SPI_CS, SPI_CS_CLEAR_RX | SPI_CS_CLEAR_TX | SPI_CS_TA);\
-  while(__ptr < __end) {\
-    uint8_t c;\
-    r = ioreg32_read(SPI_CS);\
-    if (ioreg32_read(SPI_CS) & SPI_CS_TXD) {\
-      ioreg32_write(SPI_FIFO, 0);\
-      while (ioreg32_read(SPI_CS) & SPI_CS_DONE);\
-      while (ioreg32_read(SPI_CS) & SPI_CS_RXD) {\
-        c = ioreg32_read(SPI_FIFO);\
-        *(__ptr++) = c;\
-      }\
-    }\
-  }\
-} while(0)
-
-static inline void ili9341_set_region_coords(int gpio_pin_dc, uint16_t x0,
-  uint16_t y0, uint16_t x1, uint16_t y1)
+static void ili9341_write_data_bytes(const uint8_t *data, size_t count)
 {
-#define LO8(__v) (__v & 0xff)
-#define HI8(__v) ((__v >> 8) & 0xff)
-  char data_x[4] = { HI8(x0), LO8(x0), HI8(x1), LO8(x1) };
-  char data_y[4] = { HI8(y0), LO8(y0), HI8(y1), LO8(y1) };
-  SEND_CMD_DATA(ILI9341_CMD_SET_CURSOR_X, data_x, sizeof(data_x));
-  SEND_CMD_DATA(ILI9341_CMD_SET_CURSOR_Y, data_y, sizeof(data_y));
-#undef LO8
-#undef HI8
+  spi_io_interrupt(data, NULL, count);
 }
 
-#define WAIT_Y true
-#define WAIT_N false
-
-#define TI(__src_type, __dst_type, __dreq, __dreq_type, __wait)\
-  DMA_TI_ADDR_TYPE_##__src_type,\
-  DMA_TI_ADDR_TYPE_##__dst_type,\
-  DMA_DREQ_##__dreq,\
-  DMA_TI_DREQ_T_##__dreq_type,\
-  __wait
-
-/* MEM -> SPI FIFO */
-#define TI_TX_PIPE TI(INC_Y, INC_N, SPI_TX, DST, WAIT_Y)
-/* SPI FIFO -> MEM */
-#define TI_RX_PIPE TI(INC_N, IGNOR, SPI_RX, SRC, WAIT_N)
-/* MEM -> MEM */
-#define TI_MM_PIPE TI(INC_Y, INC_Y, NONE, NONE, WAIT_Y)
-
-/*
- * ili9341_fill_rect
- * gpio_pin_dc - used in SPI macro to send command
- * x0, x1 - range of fill from [x0, x1), x1 not included
- * x1, x2 - range of fill from [y0, y1), y1 not included
- * r,g,b  - obviously color components of fill
- *
- * Speed: optimized version is using 3 64-bit values to compress rgb inside of them
- * this way 3 stores of 64bit words substitute 8 * 3 = 24 char stores, which are slower
- * anyway even in 1:1 compare.
- * Counts are incremented 19200000 per second = 19.2MHz
- * Rates are:
- * - buffer fill with chars                 : 269449  (0.014  sec) (14 millisec)
- * - buffer fill with 64-bitwords           : 16817   (0.0008 sec) (0.800 millisec)
- * - buffer transfer via SPI CLK=34 no DLEN : 5414663 (0.2820 sec) (280 millisec)
- * - buffer transfer via SPI CLK=34         : 4813039 (0.2506 sec) (250 millisec)
- * - buffer transfer via SPI CLK=32         : 4529939 (0.2359 sec) (239 millisec)
- * - buffer transfer via SPI CLK=24         : 3397452 (0.1769 sec) (176 millisec)
- * - buffer transfer via SPI CLK=16         : 2501551 (0.1302 sec) (130 millisec)
- * - buffer transfer via SPI CLK=8          : 2194014 (0.1142 sec) (114 millisec) < best
- * - buffer transfer via SPI CLK=4          : 2448441 (0.1275 sec) (127 millisec)
- * DLEN = 2 gives a considerable optimization
- */
-
-#define ili9341_fast_fill(__dst, __count, __v1, __v2, __v3) \
-  asm volatile(\
-    "mov x0, %0\n"\
-    "to .req x0\n"\
-    "mov x1, #3\n"\
-    "mul x1, x1, %1\n"\
-    "add x1, x0, x1, lsl 3\n"\
-    "to_end .req x1\n"\
-    "mov x2, %2\n"\
-    "val1 .req x2\n"\
-    "mov x3, %3\n"\
-    "val2 .req x3\n"\
-    "mov x4, %4\n"\
-    "val3 .req x4\n"\
-    "1:\n"\
-    "stp val1, val2, [to], #16\n"\
-    "str val3, [to], #8\n"\
-    "cmp to, to_end\n"\
-    "bne 1b\n"\
-    ".unreq to\n"\
-    ".unreq to_end\n"\
-    ".unreq val1\n"\
-    ".unreq val2\n"\
-    ".unreq val3\n"\
-    ::"r"(__dst), "r"(__count), "r"(__v1), "r"(__v2), "r"(__v3): "x0", "x1", "x2", "x3", "x4")
-
-static char ili9341_canvas[DISPLAY_WIDTH * DISPLAY_HEIGHT * BYTES_PER_PIXEL] ALIGNED(64);
-
-static void OPTIMIZED ili9341_fill_rect(int gpio_pin_dc, int x0, int y0,
-  int x1, int y1, uint8_t r, uint8_t g, uint8_t b)
+void ili9341_set_region_coords(uint16_t x0, uint16_t y0, uint16_t x1,
+  uint16_t y1)
 {
-  int y, x;
-  int local_width, local_height;
-  uint8_t *c;
-  uint64_t v1, v2, v3, iters;
+  uint8_t data_x[] = ILI9341_CASET_INIT_ARG(x0, x1);
+  uint8_t data_y[] = ILI9341_PASET_INIT_ARG(y0, y1);
 
-  local_width = x1 - x0;
-  local_height = y1 - y0;
-  if (local_width * local_height > 8) {
-#define BP(v, p) ((uint64_t)v << (p * 8))
-    v1 = BP(r, 0) | BP(g, 1) | BP(b, 2) | BP(r, 3) | BP(g, 4) | BP(b, 5) | BP(r, 6) | BP(g, 7);
-    v2 = BP(b, 0) | BP(r, 1) | BP(g, 2) | BP(b, 3) | BP(r, 4) | BP(g, 5) | BP(b, 6) | BP(r, 7);
-    v3 = BP(g, 0) | BP(b, 1) | BP(r, 2) | BP(g, 3) | BP(b, 4) | BP(r, 5) | BP(g, 6) | BP(b, 7);
-#undef BP
-    iters = local_width * local_height / 8;
-    ili9341_fast_fill(ili9341_canvas, iters, v1, v2, v3);
-  } else {
-    c = (uint8_t *)ili9341_canvas;
-    for (x = 0; x < local_width; ++x) {
-      for (y = 0; y < local_height; ++y) {
-        c = (uint8_t *)(ili9341_canvas + (y * local_width + x) * 3);
-        *(c++) = r;
-        *(c++) = g;
-        *(c++) = b;
-      }
-    }
-  }
-  ili9341_set_region_coords(gpio_pin_dc, x0, y0, x1, y1);
-
-  SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, ili9341_canvas,
-    local_width * local_height * 3);
+  ili9341_write_command_byte(ILI9341_CMD_CASET);
+  ili9341_write_data_bytes(data_x, sizeof(data_x));
+  ili9341_write_command_byte(ILI9341_CMD_PASET);
+  ili9341_write_data_bytes(data_y, sizeof(data_y));
 }
 
-static void OPTIMIZED ili9341_fill_screen(int gpio_pin_dc)
+int ili9341_drawframe_set_irq(struct ili9341_drawframe *r,
+  ili9341_on_dma_done_irq on_dma_done_irq)
 {
-  ili9341_fill_rect(gpio_pin_dc, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
-    255, 0);
-}
-
-int line_y = 0;
-
-static void draw_line(int y, uint8_t *data, uint8_t color)
-{
-  uint8_t *ptr = (uint8_t *)data;
-  ptr += 320 * 3 * y;
-  for (int i = 32; i < 64; ++i) {
-    ptr[i * 3] = color;
-    ptr[i * 3 + 1] = color;
-  }
-}
-
-volatile int ili9341_use_dma = 0;
-bool ili9341_first = false;
-typedef enum {
-  ILI9341_NONSTOP_REFRESH_NONE = 0,
-  ILI9341_NONSTOP_REFRESH_READY,
-  ILI9341_NONSTOP_REFRESH_RUNNING,
-  ILI9341_NONSTOP_REFRESH_PAUSED
-} ili9341_nonstop_refresh_state_t;
-
-static ili9341_nonstop_refresh_state_t
-ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_NONE;
-
-int ili9341_nonstop_refresh_init(display_dma_done_cb_isr cb,
-  uint32_t region_x0, uint32_t region_y0,
-  uint32_t region_x1, uint32_t region_y1)
-{
-  size_t bytes_per_region;
+  struct ili9341 *dev = &ili9341;
 
   if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
     os_log("WARN: tried to initialized nonstop refresh twice\r\n");
     return ERR_GENERIC;
   }
 
-  if (region_x0 >= region_x1 || region_y0 >= region_y1) {
-    return ERR_INVAL;
-  }
-
-  ili9341.dma_region_x0 = region_x0;
-  ili9341.dma_region_y0 = region_y0;
-  ili9341.dma_region_x1 = region_x1;
-  ili9341.dma_region_y1 = region_y1;
-
-  bytes_per_region = BYTES_PER_FRAME(region_x1 - region_x0,
-    region_y1 - region_y0);
-
-  ili9341.dma_num_transfers = __NUM_DMA_TRANSFERS(bytes_per_region);
-
-  ili9341_set_region_coords(ili9341.gpio.pin_dc,
-    ili9341.dma_region_x0,
-    ili9341.dma_region_y0,
-    ili9341.dma_region_x1 - ili9341.dma_region_x0 - 1,
-    ili9341.dma_region_y1 - ili9341.dma_region_y0 - 1);
-
-  SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
-
-  ili9341_dma_done_cb_irq = cb;
+  r->on_dma_done_irq = on_dma_done_irq;
 
   ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_READY;
-  ili9341.transfer_done = true;
+  dev->transfer_done = true;
   return SUCCESS;
 }
 
-size_t ili9341_get_nr_display_buffers(void)
+static void ili9143_write_pixels_prep_done_isr(void)
 {
-  return ARRAY_SIZE(ili9341.dma_bufs);
+  struct ili9341 *dev = &ili9341;
+
+  spi_dma_enable();
+
+  bcm2835_dma_activate(dev->dma_ch_rx);
+  bcm2835_dma_activate(dev->dma_ch_tx);
 }
 
-int ili9341_nonstop_refresh_get_buffers(struct ili9341_buffer_info *buffers,
-  size_t num_buffers)
+static void ili9341_fill_screen_dma_async(struct ili9341_per_frame_dma *dma_io,
+  struct ili9341_spi_tasks *t)
 {
-  size_t i;
+  struct ili9341 *dev = &ili9341;
 
-  if (ili9341_nonstop_refresh_state == ILI9341_NONSTOP_REFRESH_NONE)
-    return ERR_GENERIC;
+  dev->num_dma_xfer_done = 0;
+  dev->dma_io_current = dma_io;
+  bcm2835_dma_set_cb(dev->dma_ch_tx, dma_io->cbs[0].spi_start);
+  bcm2835_dma_set_cb(dev->dma_ch_rx, dma_io->cbs[0].rx);
 
-  if (!buffers || num_buffers < ARRAY_SIZE(ili9341.dma_bufs))
-    return ERR_INVAL;
-
-  for (i = 0; i < ARRAY_SIZE(ili9341.dma_bufs); ++i) {
-    buffers[i].buffer = ili9341.dma_bufs[i].buf;
-    buffers[i].buffer_size = NUM_BYTES_PER_FRAME;
-    buffers[i].handle = (uint32_t)i;
-  }
-
-  return SUCCESS;
+  spi_io_async(&t->spi_caset_cmd, ili9143_write_pixels_prep_done_isr);
 }
 
-#if 0
-int ili9341_nonstop_refresh_start(void)
+void OPTIMIZED ili9341_draw_dma_buf(struct ili9341_per_frame_dma *dma_io)
 {
-  ili9341.transfer_done = true;
+  struct ili9341_drawframe *drawframe;
+  struct ili9341_spi_tasks *spi_task;
 
-  if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_READY) {
-    printf("Failed to start nontstop refresh mode for ili9341,"
-        " should be in READY state\r\n");
-    return ERR_GENERIC;
-  }
-
-  return SUCCESS;
-}
-#endif
-
-int OPTIMIZED ili9341_draw_dma_buf(uint32_t buf_handle)
-{
-  size_t i;
-
-  if (!ili9341.transfer_done) {
-    return ERR_GENERIC;
-  }
-
-  if (buf_handle >= ARRAY_SIZE(ili9341.dma_bufs)) {
-    return ERR_GENERIC;
-  }
-
-  ili9341.current_buffer_handle = buf_handle;
-  ili9341.current_buf = &ili9341.dma_bufs[buf_handle];
-  ili9341.transfer_done = false;
-
-  *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
-  bcm2835_dma_reset(ili9341.dma_ch_tx);
-  bcm2835_dma_reset(ili9341.dma_ch_rx);
-
-  ili9341.last_transfer_idx = 0;
-
-  for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
-    bcm2835_dma_update_cb_src(ili9341.current_buf->cbs[i].tx,
-      RAM_PHY_TO_BUS_UNCACHED(ili9341.current_buf->buf +
-        i * MAX_BYTES_PER_TRANSFER));
-  }
-
-  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->cbs[0].header);
-  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->cbs[0].rx);
-
-    /*
-     * Observations:
-     * - We only write to display, so naively we would only use one channel for
-     *   TX DMA
-     * - But RX fifo will be full rather quick and stall transmission
-     * - That is why it is required to have second DMA channel to serve SPI RX
-     * - If SPI RX TI has DST_IGNORE flag set - this will lead no LEN register
-     *   not being decremented, and control block for RX will not be switched
-     * - Activation of RX and TX channels is not done atomically, but RX will
-     *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
-     */
-  bcm2835_dma_activate(ili9341.dma_ch_rx);
-  bcm2835_dma_activate(ili9341.dma_ch_tx);
-  return SUCCESS;
-}
-
-void OPTIMIZED ili9341_draw_bitmap(const uint8_t *data, size_t data_sz,
-  void (*dma_done_cb_irq)(uint32_t))
-{
-  if (!ili9341.transfer_done)
-    return;
-
-  ili9341.transfer_done = false;
-  ili9341_dma_done_cb_irq = dma_done_cb_irq;
-
-  if (!ili9341_first) {
-    ili9341_set_region_coords(ili9341.gpio.pin_dc, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-    if (ili9341_use_dma) {
-      SEND_CMD_DATA(ILI9341_CMD_WRITE_PIXELS, data, data_sz);
-      return;
+  if (ili9341_get_parent_drawframe(dma_io, &drawframe, &spi_task)) {
+    printf("PROBLEM2\r\n");
+    while (1) {
+      asm volatile ("wfe");
     }
-
-    SEND_CMD(ILI9341_CMD_WRITE_PIXELS);
-    ili9341_first = true;
   }
 
-#if 1
-  draw_line(line_y, (uint8_t *)data, 0xff);
-
-  line_y += 10;
-  if (line_y >= 240)
-    line_y = 0;
-#endif
-
-#if 0
-  for (i = 0; i < NUM_DMA_TRANSFERS; ++i) {
-    bcm2835_dma_update_cb_src(ili9341.current_buf->cbs[i].tx,
-      RAM_PHY_TO_BUS_UNCACHED(data + i * MAX_BYTES_PER_TRANSFER));
-  }
-#endif
-
-  *(int *)0x3f204000 |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
-  bcm2835_dma_reset(ili9341.dma_ch_tx);
-  bcm2835_dma_reset(ili9341.dma_ch_rx);
-
-  ili9341.last_transfer_idx = 0;
-  bcm2835_dma_set_cb(ili9341.dma_ch_tx, ili9341.current_buf->cbs[0].header);
-  bcm2835_dma_set_cb(ili9341.dma_ch_rx, ili9341.current_buf->cbs[0].rx);
-
-  /*
-   * Observations:
-   * - We only write to display, so naively we would only use one channel for
-   *   TX DMA
-   * - But RX fifo will be full rather quick and stall transmission
-   * - That is why it is required to have second DMA channel to serve SPI RX
-   * - If SPI RX TI has DST_IGNORE flag set - this will lead no LEN register
-   *   not being decremented, and control block for RX will not be switched
-   * - Activation of RX and TX channels is not done atomically, but RX will
-   *   wait for TX, because only first CB write for TX will enable SPI_CS.TA
-   */
-  bcm2835_dma_activate(ili9341.dma_ch_rx);
-  bcm2835_dma_activate(ili9341.dma_ch_tx);
+  ili9341_fill_screen_dma_async(dma_io, spi_task);
 }
 
-static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
+static inline int ili9341_init_gpio(int gpio_blk, int gpio_dc, int gpio_reset)
 {
-  struct ili9341_gpio *gpio = &ili9341.gpio;
+  struct ili9341 *dev = &ili9341;
+  struct ili9341_gpio *gpio = &dev->gpio;
   gpio->pin_mosi  = GPIO_PIN_10;
   gpio->pin_miso  = GPIO_PIN_9;
   gpio->pin_sclk  = GPIO_PIN_11;
@@ -661,16 +307,20 @@ static inline int ili9341_init_gpio(int pin_blk, int pin_dc, int pin_reset)
   gpio_set_pin_function(gpio->pin_miso, GPIO_FUNCTION_ALT_0);
   gpio_set_pin_function(gpio->pin_sclk, GPIO_FUNCTION_ALT_0);
 
-  gpio->pin_blk   = pin_blk;
-  gpio->pin_dc    = pin_dc;
-  gpio->pin_reset = pin_reset;
+  gpio->pin_blk   = gpio_blk;
+  gpio->dc = gpio_dc;
+  gpio->pin_reset = gpio_reset;
 
   gpio_set_pin_function(gpio->pin_blk, GPIO_FUNCTION_OUTPUT);
   gpio_set_pin_function(gpio->pin_reset, GPIO_FUNCTION_OUTPUT);
-  gpio_set_pin_function(gpio->pin_dc, GPIO_FUNCTION_OUTPUT);
-  gpio_set_pin_output(gpio->pin_dc, true);
+  gpio_set_pin_function(gpio->dc, GPIO_FUNCTION_OUTPUT);
+  gpio_set_pin_output(gpio->dc, true);
   gpio_set_pin_output(gpio->pin_blk, true);
   gpio_set_pin_output(gpio->pin_reset, false);
+  gpio_get_reg32_addr(GPIO_REG_ADDR_CLR, gpio->dc, &dev->reg_addr_dc_clear,
+    &dev->reg_val_dc_clear);
+  gpio_get_reg32_addr(GPIO_REG_ADDR_SET, gpio->dc, &dev->reg_addr_dc_set,
+    &dev->reg_val_dc_set);
   return SUCCESS;
 }
 
@@ -681,156 +331,237 @@ static inline void ili9341_init_spi(int gpio_blk, int gpio_dc, int gpio_reset)
   *SPI_CLK = 8;
 }
 
-static inline size_t ili9341_transfer_size(int transfer_idx)
+static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
+  struct ili9341_per_frame_dma *dma_io)
 {
-  size_t bytes_already = transfer_idx * MAX_BYTES_PER_TRANSFER;
-  size_t bytes_left = NUM_BYTES_PER_FRAME - bytes_already;
-  return MIN(MAX_BYTES_PER_TRANSFER, bytes_left);
+  size_t num_transfers;
+  size_t last_transfer_size;
+  struct bcm2835_dma_request_param cb_tx_conf;
+  struct bcm2835_dma_request_param cb_rx_conf;
+  uint32_t *spi_word;
+  uint32_t len;
+  bool is_last_trans;
+
+  struct ili9341 *dev = &ili9341;
+  struct spi_dma_xfer_cb *cbs;
+  uint32_t current_src = RAM_PHY_TO_BUS_UNCACHED(dma_io->buf);
+
+  num_transfers = get_num_transfers(dma_io->buf_size);
+  dma_io->cbs = kmalloc(sizeof(*dma_io->cbs) * num_transfers);
+
+  last_transfer_size = dma_io->buf_size % spi_get_max_transfer_size();
+
+  for (int i = 0; i < num_transfers; ++i) {
+    cbs = &dma_io->cbs[i];
+    cbs->spi_start = bcm2835_dma_reserve_cb();
+    cbs->tx = bcm2835_dma_reserve_cb();
+    cbs->rx = bcm2835_dma_reserve_cb();
+
+    is_last_trans = i == num_transfers - 1;
+    spi_word = is_last_trans ? &drawframe->spi_header_last
+      : &dev->spi_header_max;
+
+    len = is_last_trans ? last_transfer_size : spi_get_max_transfer_size();
+
+    cb_tx_conf.dreq = DMA_DREQ_SPI_TX;
+    cb_tx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+    cb_tx_conf.src = RAM_PHY_TO_BUS_UNCACHED(spi_word);
+    cb_tx_conf.dst = SPI_FIFO_7E;
+    cb_tx_conf.src_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    cb_tx_conf.dst_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    cb_tx_conf.len = 4;
+    cb_tx_conf.enable_irq = false;
+    bcm2835_dma_program_cb(&cb_tx_conf, cbs->spi_start);
+
+    cb_tx_conf.dreq = DMA_DREQ_SPI_TX;
+    cb_tx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
+    cb_tx_conf.src = current_src;
+    cb_tx_conf.dst = SPI_FIFO_7E;
+    cb_tx_conf.src_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
+    cb_tx_conf.dst_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    cb_tx_conf.len = len;
+    cb_tx_conf.enable_irq = false;
+    bcm2835_dma_program_cb(&cb_tx_conf, cbs->tx);
+
+    cb_rx_conf.dreq      = DMA_DREQ_SPI_RX;
+    cb_rx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
+    cb_rx_conf.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    cb_rx_conf.src       = SPI_FIFO_7E;
+    cb_rx_conf.dst       = RAM_PHY_TO_BUS_UNCACHED(&dev->dma_rx_dst);
+    cb_rx_conf.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
+    cb_rx_conf.len       = len;
+    cb_rx_conf.enable_irq = true;
+
+    bcm2835_dma_program_cb(&cb_rx_conf, cbs->rx);
+
+    current_src += len;
+
+    bcm2835_dma_link_cbs(cbs->spi_start, cbs->tx);
+  }
+
+  if (num_transfers > 1) {
+    dcache_flush(&drawframe->spi_header_last,
+      sizeof(drawframe->spi_header_last));
+  }
 }
 
-static int ili9341_setup_spi_dma_headers(void)
+static void ili9341_cmd_dc_clear_isr(void)
 {
-  size_t i;
+  struct ili9341 *dev = &ili9341;
+  *dev->reg_addr_dc_clear = dev->reg_val_dc_clear;
+}
+
+static void ili9341_cmd_dc_set_isr(void)
+{
+  struct ili9341 *dev = &ili9341;
+  *dev->reg_addr_dc_set = dev->reg_val_dc_set;
+}
+
+static inline void ili9341_5byte_cmd_init(struct ili9341_5byte_cmd *c,
+  uint8_t cmd, uint8_t arg0, uint8_t arg1, uint8_t arg2, uint8_t arg3)
+{
+  c->cmd = cmd;
+  c->data[0] = arg0;
+  c->data[1] = arg1;
+  c->data[2] = arg2;
+  c->data[3] = arg3;
+}
+
+static void ili9341_spi_tasks_init(struct ili9341_spi_tasks *t,
+  int x0, int y0, int x1, int y1)
+{
+  ili9341_5byte_cmd_init(&t->caset, ILI9341_CMD_CASET,
+    BYTE_EXTRACT32(x0, 1), BYTE_EXTRACT32(x0, 0),
+    BYTE_EXTRACT32(x1, 1), BYTE_EXTRACT32(x1, 0));
+
+  ili9341_5byte_cmd_init(&t->paset, ILI9341_CMD_PASET,
+    BYTE_EXTRACT32(y0, 1), BYTE_EXTRACT32(y0, 0),
+    BYTE_EXTRACT32(y1, 1), BYTE_EXTRACT32(y1, 0));
+
+  t->cmdbyte_ramwr = ILI9341_CMD_RAMWR;
+
+  t->spi_caset_cmd.next = &t->spi_caset_data;
+  t->spi_caset_cmd.io.rx = NULL;
+  t->spi_caset_cmd.io.tx = &t->caset.cmd;
+  t->spi_caset_cmd.io.num_bytes = 1;
+  t->spi_caset_cmd.pre_cb_isr = ili9341_cmd_dc_clear_isr;
+  t->spi_caset_cmd.post_cb_isr = ili9341_cmd_dc_set_isr;
+
+  t->spi_caset_data.next = &t->spi_paset_cmd;
+  t->spi_caset_data.io.rx = NULL;
+  t->spi_caset_data.io.tx = t->caset.data;
+  t->spi_caset_data.io.num_bytes = 4;
+  t->spi_caset_data.pre_cb_isr = NULL;
+  t->spi_caset_data.post_cb_isr = NULL;
+
+  t->spi_paset_cmd.next = &t->spi_paset_data;
+  t->spi_paset_cmd.io.rx = NULL;
+  t->spi_paset_cmd.io.tx = &t->paset.cmd;
+  t->spi_paset_cmd.io.num_bytes = 1;
+  t->spi_paset_cmd.pre_cb_isr = ili9341_cmd_dc_clear_isr;
+  t->spi_paset_cmd.post_cb_isr = ili9341_cmd_dc_set_isr;
+
+  t->spi_paset_data.next = &t->spi_ramwr_cmd;
+  t->spi_paset_data.io.rx = NULL;
+  t->spi_paset_data.io.tx = t->paset.data;
+  t->spi_paset_data.io.num_bytes = 4;
+  t->spi_paset_data.pre_cb_isr = NULL;
+  t->spi_paset_data.post_cb_isr = NULL;
+
+  t->spi_ramwr_cmd.next = NULL;
+  t->spi_ramwr_cmd.io.rx = NULL;
+  t->spi_ramwr_cmd.io.tx = &t->cmdbyte_ramwr;
+  t->spi_ramwr_cmd.io.num_bytes = 1;
+  t->spi_ramwr_cmd.pre_cb_isr = ili9341_cmd_dc_clear_isr;
+  t->spi_ramwr_cmd.post_cb_isr = ili9341_cmd_dc_set_isr;
+}
+
+static void __attribute__((optimize("O0"))) ili9341_drawframe_init(struct ili9341_drawframe *fr,
+  struct ili9341_spi_tasks *t)
+{
+  int i;
+  struct ili9341_per_frame_dma *dma_io;
+  struct rectangle *rect = &fr->frame;
+  size_t last_transfer_size;
+
+  ili9341_spi_tasks_init(t, rect->pos.x, rect->pos.y,
+    rect->pos.x + rect->size.x,
+    rect->pos.y + rect->size.y);
+
   /*
+   * SPI DMA transfer is split in chain of smaller transfers of size
+   * MAX_BYTES_PER_TRANSFER.
+   * Each transfer starts with a write to spi control reg, they are also done
+   * by DMA, here they are called spi_header.
+   * We need to program spi header values upfront.
+   * If transfer size contains multiple MAX_BYTES_PER_TRANSFER, spi_header_max
+   * is reused and its address is inserted into the chain of dma control blocks
+   * DMA chain building logic will add per-region spi_header_last if required
+   * by buffer_size, that is not evenly devisible by MAX SIZE
+   *
    * Spi headers are first 4 bytes written to SPI FIFO to initiate SPI periph
-   * for a specified size of DMA transaction, from datasheet bcm2835
-   * 10.6.3 DMA:
+   * for a specified size of DMA transaction, from datasheet bcm2835 10.6.3 DMA
    * 1 word to SPI FIFO: top 16 bits - transfer length, bottom 8 bits - control
    * register settings - [31:16 - transfer length, 15:8 - nothing, 7:0 -
    * control register first 8 bits]
    */
-  ili9341.spi_dma_headers = dma_alloc(4 * NUM_DMA_TRANSFERS, false);
-  if (!ili9341.spi_dma_headers)
-    return ERR_RESOURCE;
-
-  for (i = 0; i < NUM_DMA_TRANSFERS; ++i)
-    ili9341.spi_dma_headers[i] = (ili9341_transfer_size(i) << 16) | SPI_CS_TA;
-
-  return SUCCESS;
-}
-
-static void ili9341_setup_spi_dma_transfer(struct ili9341_dma_buf *b,
-  int transfer_idx, bool is_last)
-{
-  struct bcm2835_dma_request_param r = { 0 };
-
-  size_t transfer_size = ili9341_transfer_size(transfer_idx);
-
-  uint32_t src_addr = NARROW_PTR(
-    b->buf + transfer_idx * MAX_BYTES_PER_TRANSFER);
-
-  b->cbs[transfer_idx].header = bcm2835_dma_reserve_cb();
-  BUG_IF(b->cbs[transfer_idx].header == -1, "SPI DMA cb allocation failed");
-  b->cbs[transfer_idx].tx = bcm2835_dma_reserve_cb();
-  BUG_IF(b->cbs[transfer_idx].tx == -1, "SPI DMA cb allocation failed");
-  b->cbs[transfer_idx].rx = bcm2835_dma_reserve_cb();
-  BUG_IF(b->cbs[transfer_idx].rx == -1, "SPI DMA cb allocation failed");
-
-  /*
-   * SPI DMA header goes first, it is a 4 byte word written to SPI_FIFO to
-   * prepare SPI peripheral to proper DMA operation, it includes transfer size
-   * and SPI_CS lower byte flags
-   */
-  r.dreq      = DMA_DREQ_SPI_TX;
-  r.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
-  r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.dst       = SPI_FIFO_7E;
-  r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
-  r.src       = RAM_PHY_TO_BUS_UNCACHED(
-    &ili9341.spi_dma_headers[transfer_idx]);
-  r.len       = 4;
-  r.enable_irq = false;
-
-  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].header);
-
-  /*
-   * After SPI header goes data, source address is either the start of the
-   * diplay buffer, or the next chunk inside of the buffer depending on
-   * index of transfer being set up
-   */
-  r.dreq      = DMA_DREQ_SPI_TX;
-  r.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
-  r.dst       = SPI_FIFO_7E;
-  r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
-  r.src       = RAM_PHY_TO_BUS_UNCACHED(src_addr);
-  r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.len       = transfer_size;
-  r.enable_irq = false;
-  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].tx);
-
-  r.dreq      = DMA_DREQ_SPI_RX;
-  r.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
-  r.src       = SPI_FIFO_7E;
-  r.dst       = RAM_PHY_TO_BUS_UNCACHED(ili9341_canvas);
-  r.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-  r.len       = transfer_size;
-  r.enable_irq = true;
-  bcm2835_dma_program_cb(&r, b->cbs[transfer_idx].rx);
-
-  bcm2835_dma_link_cbs(b->cbs[transfer_idx].header, b->cbs[transfer_idx].tx);
-}
-
-static int ili9341_setup_single_dma_buf(struct ili9341_dma_buf *dma_buf, int i)
-{
-  uint8_t *b = dma_alloc(NUM_BYTES_PER_FRAME, 0);
-
-  if (!b) {
-    os_log("Failed to allocate DMA buffer #%d for ili9341\r\n", i);
-    return ERR_RESOURCE;
+  if (fr->bufs[0].buf_size > spi_get_max_transfer_size()) {
+    last_transfer_size = fr->bufs[0].buf_size % spi_get_max_transfer_size();
+    fr->spi_header_last = SPI_ACTIVATE_VALUE(last_transfer_size);
   }
 
-  dma_buf->buf = b;
-
-  for (i = 0; i < NUM_DMA_TRANSFERS; ++i)
-    ili9341_setup_spi_dma_transfer(dma_buf, i, i == NUM_DMA_TRANSFERS - 1);
-
-  return SUCCESS;
+  fr->num_transfers = get_num_transfers(fr->bufs[0].buf_size);
+  for (i = 0; i < fr->num_bufs; ++i) {
+    dma_io = &fr->bufs[i];
+    dma_io->num_transfers = fr->num_transfers;
+    ili9341_dma_chain_prep(fr, dma_io);
+  }
 }
 
-static int ili9341_setup_dma(void)
+static int ili9341_setup_dma(struct ili9341_drawframe *drawframes,
+  int num_drawframes)
 {
-  int err;
+  struct ili9341 *dev = &ili9341;
   size_t i;
 
-  ili9341.dma_ch_rx = bcm2835_dma_request_channel();
-  BUG_IF(ili9341.dma_ch_rx == -1, "Failed to request DMA channel for SPI RX");
+  dev->dma_ch_rx = bcm2835_dma_request_channel();
+  BUG_IF(dev->dma_ch_rx == -1, "Failed to request DMA channel for SPI RX");
 
-  ili9341.dma_ch_tx = bcm2835_dma_request_channel();
-  BUG_IF(ili9341.dma_ch_tx == -1, "Failed to request DMA channel for SPI TX");
+  dev->dma_ch_tx = bcm2835_dma_request_channel();
+  BUG_IF(dev->dma_ch_tx == -1, "Failed to request DMA channel for SPI TX");
 
-  err = ili9341_setup_spi_dma_headers();
-  if (err != SUCCESS) {
-    os_log("Failed to setup SPI DMA headers, err: %d\r\n", err);
-    return err;
+  bcm2835_dma_reset(dev->dma_ch_tx);
+  bcm2835_dma_reset(dev->dma_ch_rx);
+
+  bcm2835_dma_set_irq_callback(dev->dma_ch_tx, ili9341_dma_tx_done_irq);
+  bcm2835_dma_set_irq_callback(dev->dma_ch_rx, ili9341_dma_rx_done_irq);
+
+  bcm2835_dma_irq_enable(dev->dma_ch_tx);
+  bcm2835_dma_irq_enable(dev->dma_ch_rx);
+  bcm2835_dma_enable(dev->dma_ch_tx);
+  bcm2835_dma_enable(dev->dma_ch_rx);
+
+  dev->spi_header_max = SPI_ACTIVATE_VALUE(spi_get_max_transfer_size());
+  dcache_flush(&dev->spi_header_max, sizeof(dev->spi_header_max));
+
+  dev->spi_tasks = kmalloc(sizeof(struct ili9341_spi_tasks) * num_drawframes);
+
+  for (i = 0; i < num_drawframes; ++i) {
+    ili9341_drawframe_init(&drawframes[i], &dev->spi_tasks[i]);
   }
 
-  for (i = 0; i < ARRAY_SIZE(ili9341.dma_bufs); ++i) {
-    err = ili9341_setup_single_dma_buf(&ili9341.dma_bufs[i], i);
-    if (err != SUCCESS)
-      return err;
-  }
-
-  bcm2835_dma_reset(ili9341.dma_ch_tx);
-  bcm2835_dma_reset(ili9341.dma_ch_rx);
-
-  bcm2835_dma_set_irq_callback(ili9341.dma_ch_tx, ili9341_dma_tx_done_irq);
-  bcm2835_dma_set_irq_callback(ili9341.dma_ch_rx, ili9341_dma_rx_done_irq);
-
-  bcm2835_dma_irq_enable(ili9341.dma_ch_tx);
-  bcm2835_dma_irq_enable(ili9341.dma_ch_rx);
-  bcm2835_dma_enable(ili9341.dma_ch_tx);
-  bcm2835_dma_enable(ili9341.dma_ch_rx);
+  dev->drawframes = drawframes;
+  dev->num_drawframes = num_drawframes;
 
   return SUCCESS;
 }
 
-int ili9341_regions_init(const struct ili9341_region_cfg *regions,
-  int num_regions)
+static int ili9341_init_drawframes(struct ili9341_drawframe *drawframe,
+  int num_drawframes)
 {
   int err;
 
-  err = ili9341_setup_dma();
+  err = ili9341_setup_dma(drawframe, num_drawframes);
   if (err != SUCCESS) {
     os_log("ili9341: failed to initialize DMA, err: %d\r\n", err);
     return err;
@@ -839,9 +570,15 @@ int ili9341_regions_init(const struct ili9341_region_cfg *regions,
   return SUCCESS;
 }
 
-int ili9341_init(int gpio_blk, int gpio_dc, int gpio_reset)
+int ili9341_init(int gpio_blk, int gpio_dc, int gpio_reset,
+  struct ili9341_drawframe *drawframes, int num_drawframes)
 {
-  char data[8];
+  int err;
+  struct ili9341 *dev = &ili9341;
+  uint8_t data[8];
+
+  INIT_LIST_HEAD(&dev->draw_tasks);
+
   ili9341_init_spi(gpio_blk, gpio_dc, gpio_reset);
 
   gpio_set_pin_output(ili9341.gpio.pin_reset, true);
@@ -851,19 +588,29 @@ int ili9341_init(int gpio_blk, int gpio_dc, int gpio_reset)
   gpio_set_pin_output(ili9341.gpio.pin_reset, true);
   os_wait_ms(120);
 
-  ioreg32_write(SPI_CS, SPI_CS_TA);
-
-  SEND_CMD(ILI9341_CMD_SOFT_RESET);
+  ili9341_write_command_byte(ILI9341_CMD_SOFT_RESET);
   os_wait_ms(5);
-  SEND_CMD(ILI9341_CMD_DISPLAY_OFF);
+  ili9341_write_command_byte(ILI9341_CMD_DISPLAY_OFF);
   data[0] = ACCESS_CONTROL_BYTE;
-  SEND_CMD_DATA(ILI9341_CMD_MEM_ACCESS_CONTROL, data, 1);
-  SEND_CMD(ILI9341_CMD_SLEEP_OUT);
-  os_wait_ms(120);
-  SEND_CMD(ILI9341_CMD_DISPLAY_ON);
-  os_wait_ms(120);
-  ili9341_fill_screen(ili9341.gpio.pin_dc);
+  ili9341_write_command_byte(ILI9341_CMD_MEM_ACCESS_CONTROL);
+  ili9341_write_data_bytes(data, 1);
 
+  ili9341_write_command_byte(ILI9341_CMD_COLMOD);
+  data[0] = 0x66;
+  ili9341_write_data_bytes(data, 1);
+
+  ili9341_write_command_byte(ILI9341_CMD_SLEEP_OUT);
+  os_wait_ms(120);
+  ili9341_write_command_byte(ILI9341_CMD_DISPLAY_ON);
+  os_wait_ms(120);
+
+  err = ili9341_init_drawframes(drawframes, num_drawframes);
+  if (err != SUCCESS) {
+    os_log("Failed to init ili9341 frames, err: %d", err);
+    return err;
+  }
+
+  spi_clear_rx_tx_fifo();
   return SUCCESS;
 }
 

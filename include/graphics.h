@@ -9,4 +9,3 @@ struct rectangle {
   struct vec2 pos;
   struct vec2 size;
 };
-

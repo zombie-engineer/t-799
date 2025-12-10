@@ -9,7 +9,7 @@
 #include <logger.h>
 #include "bcm2835_dma_regs.h"
 
-#define BCM2835_DMA_NUM_SCBS 32
+#define BCM2835_DMA_NUM_SCBS 256
 #define BCM2835_DMA_NUM_CHANNELS 12
 
 #define BCM2835_DMA_MAX_PER_CHANNEL_IRQ_CBS 4
@@ -160,7 +160,9 @@ bool bcm2835_dma_link_cbs(int cb_handle, int cb_handle_next)
     return false;
 
   cb = &bcm2835_dma.cbs[cb_handle];
-  cb_next = &bcm2835_dma.cbs[cb_handle_next];
+  cb_next = cb_handle_next == CB_HANDLE_NEXT_NONE ? NULL :
+    &bcm2835_dma.cbs[cb_handle_next];
+
   cb->next_cb_addr = cb_next ? RAM_PHY_TO_BUS_UNCACHED(cb_next) : 0;
   return true;
 }
@@ -287,15 +289,17 @@ void bcm2835_dma_irq_enable(int channel)
 
 void bcm2835_dma_init(void)
 {
-  size_t total_size = 256 * (BCM2835_DMA_NUM_SCBS + 1);
   uint64_t addr;
+  size_t control_blocks_size;
+  control_blocks_size = sizeof(struct bcm2835_dma_cb) * BCM2835_DMA_NUM_SCBS;
 
-  bcm2835_dma.cb_area = dma_alloc(total_size, 1);
+  bcm2835_dma.cb_area = dma_alloc(control_blocks_size, 1);
   if (!bcm2835_dma.cb_area)
     return;
 
   addr = ((uint64_t)bcm2835_dma.cb_area + 0xff - 1) & ~0xfful;
-  total_size -= addr - (uint64_t)bcm2835_dma.cb_area;
+  printf("Allocatd %d DMA control blocks at %p/%p, cb size:%d\r\n",
+    BCM2835_DMA_NUM_SCBS, addr, bcm2835_dma.cb_area, control_blocks_size);
 
   bcm2835_dma.cbs = (void *)addr;
   bcm2835_dma.cb_bitmap.data = bcm2835_dma_cb_bitmap;

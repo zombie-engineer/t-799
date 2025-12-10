@@ -12,6 +12,7 @@
 #include <vc/service_mmal_encoding.h>
 #include <write_stream_buffer.h>
 #include <memory_map.h>
+#include <printf.h>
 
 #define MODULE_UNIT_TAG "cam"
 #include <module_common.h>
@@ -60,6 +61,9 @@ struct camera {
   struct mmal_port *port_h264_stream;
 
   int stat_frames;
+
+  /* size = 2 is hardcoded but might be extended */
+  struct ili9341_per_frame_dma *preview_dma_bufs[2];
 };
 
 struct encoder_h264_params {
@@ -81,13 +85,15 @@ static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
   return node ? list_entry(node, struct mmal_buffer, list) : NULL;
 }
 
-static OPTIMIZED int camera_on_preview_buffer_ready(struct mmal_buffer *b)
+static int OPTIMIZED camera_on_preview_buffer_ready(struct mmal_buffer *b)
 {
   int err;
   int irqflags;
   bool should_draw;
   struct mmal_buffer *b2;
   struct mmal_port *p = cam.port_preview_stream;
+  struct ili9341_per_frame_dma *dma_buf;
+
 
   disable_irq_save_flags(irqflags);
   b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
@@ -110,10 +116,19 @@ static OPTIMIZED int camera_on_preview_buffer_ready(struct mmal_buffer *b)
   if (!should_draw)
     goto to_remote;
 
-  err = ili9341_draw_dma_buf(b->user_handle);
-  if (err != SUCCESS)
-    MODULE_ERR("Failed to send display buffer to draw");
-  return err;
+  dma_buf = NULL;
+  for (int i = 0; i < ARRAY_SIZE(cam.preview_dma_bufs); ++i) {
+    if (cam.preview_dma_bufs[i]->buf == b->buffer)
+      dma_buf = cam.preview_dma_bufs[i];
+  }
+
+  if (!dma_buf) {
+    MODULE_ERR("Failed to find matching dma buffer");
+    return ERR_INVAL;
+  }
+
+  ili9341_draw_dma_buf(dma_buf);
+  return SUCCESS;
 
 to_remote:
   err = mmal_port_buffer_to_remote(p, b);
@@ -240,13 +255,14 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
   return ret;
 }
 
-static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
+static void OPTIMIZED camera_on_preview_data_consumed_isr(
+  struct ili9341_per_frame_dma *buf)
 {
   struct mmal_port *p = cam.port_preview_stream;
   struct mmal_buffer *b = NULL, *tmp;
 
   list_for_each_entry_safe(b, tmp, &p->bufs.os_side_in_process, list) {
-    if (buf_handle == b->user_handle) {
+    if (buf->handle == b->user_handle) {
       list_move_tail(&b->list, &p->bufs.os_side_free);
       mmal_port_buffer_consumed_isr(p, b);
       return;
@@ -254,16 +270,6 @@ static void OPTIMIZED camera_on_preview_data_consumed_isr(uint32_t buf_handle)
   }
 
   MODULE_ERR("Failed to find display buffer\r\n");
-}
-
-static inline void camera_display_buffers_dump(
-  const struct ili9341_buffer_info *b,
-  size_t num_buffers)
-{
-  for (size_t i = 0; i < num_buffers; ++i)
-    MODULE_INFO("display buffer: %08x(size %ld),handle:%d", b[i].buffer,
-      b[i].buffer_size,
-      b[i].handle);
 }
 
 static inline int camera_cam_info_request(struct mmal_component *c,
@@ -363,18 +369,17 @@ static int camera_encoder_params_set(struct mmal_port *e,
   MMAL_PARAM_SET32(VIDEO_ENCODE_MAX_QUANT, p->q_max);
   MMAL_PARAM_SET32(INTRAPERIOD, p->intraperiod);
   MMAL_PARAM_SET32(VIDEO_BIT_RATE, p->bitrate);
-  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_HEADER, 1);
-
-  /* INLINE VECTORS gives a stream that ffplay does not support */
-#if 0
-  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_VECTORS, 1);
-#endif
-
-  MMAL_PARAM_SET32(VIDEO_ENCODE_SPS_TIMING, 1);
 
   err = mmal_port_parameter_set(e, MMAL_PARAM_PROFILE,
     &video_profile, sizeof(video_profile));
   CHECK_ERR("Failed to set h264 MMAL_PARAM_PROFILE param");
+
+  /* INLINE VECTORS gives a stream that ffplay does not support */
+  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_HEADER, 1);
+#if 0
+  MMAL_PARAM_SET32(VIDEO_ENCODE_INLINE_VECTORS, 1);
+#endif
+
 
 #if 0
   v32 = 1;
@@ -401,7 +406,7 @@ out_err:
 }
 
 static int camera_make_resizer(int in_width, int in_height, int out_width,
-  int out_height)
+  int out_height, int num_buffers)
 {
   int err = SUCCESS;
   struct mmal_component *c;
@@ -433,7 +438,7 @@ static int camera_make_resizer(int in_width, int in_height, int out_width,
   c->input[0].format.es->video.height = in_height;
   c->input[0].format.es->video.crop.width = in_width;
   c->input[0].format.es->video.crop.height = in_height;
-  c->output[0].current_buffer.num = 2;
+  c->output[0].current_buffer.num = num_buffers;
   err = mmal_port_set_format(&c->input[0]);
   CHECK_ERR("Failed to set format for resizer.IN port");
 
@@ -657,6 +662,7 @@ int camera_video_start(void)
 
   cam.bdev->ops.write_stream_open(cam.bdev, 0);
 
+  os_log("Starting capture...\r\n");
   return mmal_port_parameter_set(cam.camera.video, MMAL_PARAM_CAPTURE,
     &frame_count, sizeof(frame_count));
 }
@@ -670,20 +676,26 @@ int camera_video_stop(void)
 }
 
 static int camera_init_preview_buffers(struct mmal_port *p,
-  struct ili9341_buffer_info *buffers, size_t num_buffers)
+  struct ili9341_drawframe *drawframe)
 {
   size_t i;
   int err;
+  struct ili9341_per_frame_dma *buf;
 
-  for (i = 0; i < num_buffers; ++i) {
-    err = mmal_port_add_buffer(p, buffers[i].buffer,
-      buffers[i].buffer_size, buffers[i].handle);
+  for (i = 0; i < drawframe->num_bufs; ++i) {
+    buf = &drawframe->bufs[i];
+    if (i >= ARRAY_SIZE(cam.preview_dma_bufs)) {
+      MODULE_ERR("Too many buffers provided");
+      return ERR_INVAL;
+    }
+    cam.preview_dma_bufs[i] = buf;
+    err = mmal_port_add_buffer(p, buf->buf, buf->buf_size, buf->handle);
     CHECK_ERR("Failed to import display buffer #%d", i);
     MODULE_INFO("mmal_apply_display_buffers: port:%s, ptr:%08x, size:%d"
       " handle:%d, port_enabled:%s",
       p->name,
-      buffers[i].buffer,
-      buffers[i].buffer_size, buffers[i].handle,
+      buf->buf,
+      buf->buf_size, buf->handle,
       p->enabled ? "yes" : "no");
   }
 
@@ -693,23 +705,17 @@ out_err:
   return err;
 }
 
-static int camera_preview_init(int input_width, int input_height,
-    int preview_width, int preview_height, bool start)
+static int camera_preview_init(struct ili9341_drawframe *drawframe,
+  int input_width, int input_height, int preview_width, int preview_height,
+  bool start)
 {
   int err;
 
-  struct ili9341_buffer_info display_buffers[2];
-  err = ili9341_nonstop_refresh_init(camera_on_preview_data_consumed_isr,
-    0, 0, preview_width, preview_height);
-  CHECK_ERR("Failed to init display in non-stop refresh mode");
-  err = ili9341_nonstop_refresh_get_buffers(display_buffers,
-    ARRAY_SIZE(display_buffers));
-  CHECK_ERR("Failed to get display dma buffers");
-
-  camera_display_buffers_dump(display_buffers, ARRAY_SIZE(display_buffers));
+  err = ili9341_drawframe_set_irq(drawframe,
+    camera_on_preview_data_consumed_isr);
 
   err = camera_make_resizer(input_width, input_height, preview_width,
-    preview_height);
+    preview_height, drawframe->num_bufs);
 
   CHECK_ERR("Failed to make resizer port");
 
@@ -728,8 +734,7 @@ static int camera_preview_init(int input_width, int input_height,
   err = mmal_port_enable(cam.resizer.out);
   CHECK_ERR("Failed to enable resizer.OUT");
 
-  err = camera_init_preview_buffers(cam.resizer.out, display_buffers,
-    ARRAY_SIZE(display_buffers));
+  err = camera_init_preview_buffers(cam.resizer.out, drawframe);
   CHECK_ERR("Failed to add display buffers");
 
   if (start) {
@@ -752,7 +757,8 @@ out_err:
 }
 
 int camera_init(struct block_device *bdev, int frame_width, int frame_height,
-  int frame_rate, uint32_t bit_rate, bool preview_enable, int preview_width,
+  int frame_rate, uint32_t bit_rate, bool preview_enable,
+  struct ili9341_drawframe *preview_drawframe, int preview_width,
   int preview_height)
 {
   int err;
@@ -786,8 +792,8 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   cam.port_h264_stream = cam.encoder.out;
 
   if (preview_enable) {
-    err = camera_preview_init(frame_width, frame_height, preview_width,
-      preview_height, true);
+    err = camera_preview_init(preview_drawframe, frame_width, frame_height,
+      preview_width, preview_height, true);
     CHECK_ERR("Failed to enable preview graph when requested");
   }
 
@@ -812,4 +818,3 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
 out_err:
   return err;
 }
-

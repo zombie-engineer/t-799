@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <ioreg.h>
+#include <list.h>
 
 struct spi_device;
 
@@ -43,3 +45,34 @@ struct spi_device *spi_get_device(spi_device_id_t device_id);
 
 int spi_configure_bitbang(struct spi_device *d, int sck, int mosi,
   int miso, const int *cs, int num_cs_pins);
+
+typedef enum {
+  SPI_REG_ADDR_CTRL,
+  SPI_REG_ADDR_DATA
+} spi_reg_type_t;
+
+bool spi_get_reg32_addr(spi_reg_type_t t, ioreg32_t *out);
+
+void spi_init(void);
+void spi_io_interrupt(const uint8_t *bytestream_tx, uint8_t *bytesteam_rx,
+  size_t count);
+
+struct spi_io {
+  size_t num_bytes;
+  uint8_t *rx;
+  const uint8_t *tx;
+};
+
+struct spi_async_task {
+  struct spi_async_task *next;
+  void (*pre_cb_isr)(void);
+  void (*post_cb_isr)(void);
+  struct spi_io io;
+};
+
+void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void));
+
+void spi_reset_for_dma(void);
+void spi_dma_enable(void);
+void spi_clear_rx_tx_fifo(void);
+uint32_t spi_get_max_transfer_size(void);

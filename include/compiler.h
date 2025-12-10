@@ -2,6 +2,7 @@
 
 #define NOINLINE __attribute__((noinline))
 #define OPTIMIZED __attribute__((optimize("O2")))
+#define NOOPT __attribute__((optimize("O0")))
 #define ALIGNED(bytes) __attribute__((aligned(bytes)))
 #define PACKED __attribute__((packed))
 #define NORETURN __attribute__((noreturn))

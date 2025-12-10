@@ -24,8 +24,7 @@ void bcm2835_ic_write_irq_reg(int irqnr, ioreg32_t basereg)
     reg++;
   }
   
-  regval = ioreg32_read(reg);
-  regval |= 1 << irqnr;
+  regval = 1 << irqnr;
   ioreg32_write(reg, regval);
 }
 

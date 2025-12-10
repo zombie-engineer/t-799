@@ -5,7 +5,8 @@
 #define ASSERT(__a) {}
 #define MAX(__a, __b) (((__a) > (__b)) ? (__a) : (__b))
 #define MIN(__a, __b) (__a) < (__b) ? (__a) : (__b)
-#define ROUND_UP (__v, __to) ((((__v) + (__to) - 1) / (__to)) * (__to))
+#define ROUND_UP_DIV(__a, __b) (((__a) + (__b) - 1) / (__b))
+#define ROUND_UP (__v, __to) (ROUND_UP_DIV((__v), (__to)) * (__to))
 #define ALIGN_UP_4(__sz) (((__sz) + 3) & ~3)
 
 

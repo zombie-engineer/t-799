@@ -8,7 +8,13 @@
 #include <bitops.h>
 #include <io_flags.h>
 #include <delay.h>
+#include <event.h>
+#include <printf.h>
+#include <os_api.h>
+#include <irq.h>
+#include <bcm2835/bcm2835_ic.h>
 
+#define MAX_BYTES_PER_TRANSFER 0xfff8
 #define SPI_BASE ((unsigned long long)BCM2835_MEM_PERIPH_BASE + 0x00204000)
 
 /*
@@ -68,6 +74,13 @@
 #define SPI_CLK  ((ioreg32_t)(SPI_BASE + 0x08))
 #define SPI_DLEN ((ioreg32_t)(SPI_BASE + 0x0c))
 
+struct spi_async_tasks {
+  struct spi_async_task *current;
+  bool should_run_precb;
+  struct spi_io current_io;
+  void (*done_cb_isr)(void);
+};
+
 struct spi_gpio_pin_desc {
   int pin;
   int function;
@@ -123,6 +136,7 @@ struct spi_bitbang_state {
 };
 
 struct spi_bitbang_state spi_bb_state = { 0 };
+struct spi_async_tasks spi_async_tasks = { 0 };
 
 static struct spi_gpio_group_desc spi_bb_gpio_desc = { 0 };
 // static bool spi_bb_gpio_desc_filled = false;
@@ -480,4 +494,219 @@ struct spi_device *spi_get_device(spi_device_id_t device_id)
   if (device_id == SPI_DEVICE_ID_BITBANG)
     return &spi_bb_dev;
   return NULL;
+}
+
+bool spi_get_reg32_addr(spi_reg_type_t t, ioreg32_t *out)
+{
+  if (t == SPI_REG_ADDR_CTRL) {
+    *out = SPI_CS;
+    return true;
+  }
+
+  if (t == SPI_REG_ADDR_DATA) {
+    *out = SPI_FIFO;
+    return true;
+  }
+
+  return false;
+}
+
+struct spi_io_nonasync {
+  struct spi_io io;
+  struct event ev;
+};
+
+struct spi_io_nonasync spi_io_nonasync = { 0 };
+struct spi_io *spi_io_current = NULL;
+
+static inline void NOOPT spi_transfer_done_async_isr(uint32_t cs)
+{
+  struct spi_async_task *current;
+
+  cs &= ~SPI_CS_TA;
+  ioreg32_write(SPI_CS, cs);
+
+  current = spi_async_tasks.current;
+  if (current->post_cb_isr)
+    current->post_cb_isr();
+
+  current = current->next;
+  spi_async_tasks.current = current;
+  if (!current) {
+    /* Async task list is completed */
+
+    cs &= ~(SPI_CS_INTD | SPI_CS_INTR);
+    ioreg32_write(SPI_CS, cs);
+    if (spi_async_tasks.done_cb_isr) {
+      spi_async_tasks.done_cb_isr();
+      spi_async_tasks.done_cb_isr = NULL;
+    }
+    return;
+  }
+
+  /* Start next async task */
+  spi_async_tasks.should_run_precb = current->pre_cb_isr != NULL;
+  *spi_io_current = current->io;
+
+  cs = ioreg32_read(SPI_CS);
+  cs |= SPI_CS_TA;
+  ioreg32_write(SPI_CS, cs);
+}
+
+static inline void OPTIMIZED
+spi_transfer_done_nonasync_isr(uint32_t cs)
+{
+  cs &= ~(SPI_CS_INTD | SPI_CS_INTR | SPI_CS_TA);
+  ioreg32_write(SPI_CS, cs);
+  os_event_notify_isr(&spi_io_nonasync.ev);
+}
+
+uint32_t cs_history[32];
+int cs_history_idx = 0;
+
+static inline uint32_t OPTIMIZED spi_isr_do(uint32_t *out_cs)
+{
+  int i;
+  uint32_t intmask;
+  uint32_t rx;
+  int max_bytes;
+  uint32_t cs = ioreg32_read(SPI_CS);
+  intmask = SPI_CS_DONE | SPI_CS_RXR;
+  struct spi_io *io = spi_io_current;
+  cs_history[cs_history_idx++] = cs;
+
+  if ((cs & intmask) == intmask) {
+    printf("cs:%08x\r\n");
+    while(1);
+  }
+  else if ((cs & intmask) == 0) {
+    printf("cs:%08x\r\n");
+    while(1);
+  }
+
+  if (cs & SPI_CS_DONE) {
+    max_bytes = MIN(16, io->num_bytes);
+    if (max_bytes == 0) {
+      *out_cs = cs;
+      return true;
+    }
+  }
+  else if (cs & SPI_CS_RXR)
+    max_bytes = MIN(12, io->num_bytes);
+  else
+    max_bytes = 0;
+
+  for (i = 0; i < max_bytes; ++i) {
+    ioreg32_write(SPI_FIFO, *io->tx);
+    io->tx++;
+    rx = ioreg32_read(SPI_FIFO);
+
+    if (io->rx) {
+      *io->rx = (uint8_t)rx;
+      io->rx++;
+    }
+
+    io->num_bytes--;
+    cs = ioreg32_read(SPI_CS);
+    if (!(cs & SPI_CS_TXD))
+      break;
+  }
+  *out_cs = cs;
+  return false;
+}
+
+void NOOPT spi_isr(void)
+{
+  struct spi_async_task *async;
+  uint32_t cs;
+
+  struct spi_io *io = spi_io_current;
+
+  async = (io == &spi_async_tasks.current_io) ? spi_async_tasks.current : NULL;
+
+  if (async) {
+    if (async->pre_cb_isr && spi_async_tasks.should_run_precb) {
+      spi_async_tasks.should_run_precb = false;
+      async->pre_cb_isr();
+    }
+  }
+
+  /* Not done yet, wait until DONE */
+  if (!spi_isr_do(&cs)) {
+    return;
+  }
+
+  /* Transfer is done */
+  if (async)
+    spi_transfer_done_async_isr(cs);
+ else
+    spi_transfer_done_nonasync_isr(cs);
+}
+
+static inline void OPTIMIZED spi_io_start(struct spi_io *io,
+  const uint8_t *bytestream_tx, uint8_t *bytestream_rx, size_t count)
+{
+  uint32_t cs;
+
+  io->num_bytes = count;
+  io->tx = bytestream_tx;
+  io->rx = bytestream_rx;
+  spi_io_current = io;
+
+  cs = ioreg32_read(SPI_CS);
+  cs |= SPI_CS_INTD | SPI_CS_INTR | SPI_CS_TA;
+  ioreg32_write(SPI_CS, cs);
+}
+
+void OPTIMIZED spi_io_interrupt(const uint8_t *bytestream_tx,
+  uint8_t *bytestream_rx, size_t count)
+{
+  spi_io_start(&spi_io_nonasync.io, bytestream_tx, bytestream_rx, count);
+  os_event_wait(&spi_io_nonasync.ev);
+  os_event_clear(&spi_io_nonasync.ev);
+}
+
+void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void))
+{
+  struct spi_async_task *t = tasks;
+  spi_async_tasks.current = t;
+  spi_async_tasks.should_run_precb = t->pre_cb_isr != NULL;
+  spi_async_tasks.done_cb_isr = done_cb_isr;
+
+  spi_io_start(&spi_async_tasks.current_io, t->io.tx, t->io.rx,
+    t->io.num_bytes);
+}
+
+void spi_init(void)
+{
+  os_event_init(&spi_io_nonasync.ev);
+  bcm2835_ic_enable_irq(BCM2835_IRQNR_SPI);
+  irq_set(BCM2835_IRQNR_SPI, spi_isr);
+  while (ioreg32_read(SPI_CS) & SPI_CS_RXD)
+    ioreg32_read(SPI_FIFO);
+  ioreg32_write(SPI_CS, 0);
+}
+
+void spi_reset_for_dma(void)
+{
+  ioreg32_write(SPI_CS, SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR);
+}
+
+void spi_dma_enable(void)
+{
+  uint32_t cs = ioreg32_read(SPI_CS);
+  cs |= SPI_CS_DMAEN | SPI_CS_ADCS | SPI_CS_CLEAR;
+  ioreg32_write(SPI_CS, cs);
+}
+
+void spi_clear_rx_tx_fifo(void)
+{
+  uint32_t cs = ioreg32_read(SPI_CS);
+  cs |= SPI_CS_CLEAR;
+  ioreg32_write(SPI_CS, cs);
+}
+
+uint32_t spi_get_max_transfer_size(void)
+{
+  return MAX_BYTES_PER_TRANSFER;
 }
