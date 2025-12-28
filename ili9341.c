@@ -38,25 +38,6 @@ typedef enum {
 #define DISPLAY_HEIGHT 180
 #endif
 
-#define SPI_CS   ((volatile uint32_t *)0x3f204000)
-#define SPI_FIFO ((volatile uint32_t *)0x3f204004)
-#define SPI_CLK  ((volatile uint32_t *)0x3f204008)
-#define SPI_DLEN ((volatile uint32_t *)0x3f20400c)
-#define SPI_CS_CLEAR_TX (1 << 4)
-#define SPI_CS_CLEAR_RX (1 << 5)
-#define SPI_CS_CLEAR    (3 << 4)
-#define SPI_CS_TA       (1 << 7)
-#define SPI_CS_DMAEN    (1 << 8)
-#define SPI_CS_ADCS     (1 << 11)
-#define SPI_CS_DONE     (1 << 16)
-#define SPI_CS_RXD      (1 << 17)
-#define SPI_CS_TXD      (1 << 18)
-#define SPI_CS_RXR      (1 << 19)
-#define SPI_CS_RXF      (1 << 20)
-
-#define SPI_CS_7E   0x7e204000
-#define SPI_FIFO_7E 0x7e204004
-
 #ifdef DISPLAY_MODE_PORTRAIT
 #define ACCESS_CONTROL_BYTE (ILI9341_CMD_MEM_ACCESS_CONTROL_BGR | \
   ILI9341_CMD_MEM_ACCESS_CONTROL_MX | \
@@ -115,11 +96,11 @@ struct ili9341 {
   uint32_t reg_val_dc_clear;
   ioreg32_t reg_addr_dc_set;
   uint32_t reg_val_dc_set;
+  uint32_t reg_addr_spi_fifo;
   display_state_t state;
 };
 
 #define BYTES_PER_PIXEL 3
-#define SPI_ACTIVATE_VALUE(__num_bytes) (((__num_bytes) << 16) | SPI_CS_TA)
 
 #define BYTES_PER_FRAME(__width, __height) \
   ((__width) * (__height) * BYTES_PER_PIXEL)
@@ -181,8 +162,7 @@ static void ili9341_dma_rx_done_irq(void)
   struct ili9341_drawframe *current_drawframe;
   struct ili9341_spi_tasks *current_spi_task;
 
-  *SPI_CS &= ~SPI_CS_DMAEN;
-  *SPI_CS |= SPI_CS_CLEAR;
+  spi_dma_disable();
 
   dev->num_dma_xfer_done++;
 
@@ -326,9 +306,14 @@ static inline int ili9341_init_gpio(int gpio_blk, int gpio_dc, int gpio_reset)
 
 static inline void ili9341_init_spi(int gpio_blk, int gpio_dc, int gpio_reset)
 {
+  struct ili9341 *dev = &ili9341;
+
+  ioreg32_t reg_spi_fifo;
   ili9341_init_gpio(gpio_blk, gpio_dc, gpio_reset);
-  *SPI_CS = SPI_CS_CLEAR_TX | SPI_CS_CLEAR_RX;
-  *SPI_CLK = 8;
+  spi_set_clk(8);
+  spi_clear_rx_tx_fifo();
+  spi_get_reg32_addr(SPI_REG_ADDR_DATA, &reg_spi_fifo);
+  dev->reg_addr_spi_fifo = PERIPH_ADDR_TO_DMA(reg_spi_fifo);
 }
 
 static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
@@ -366,7 +351,7 @@ static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
     cb_tx_conf.dreq = DMA_DREQ_SPI_TX;
     cb_tx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
     cb_tx_conf.src = RAM_PHY_TO_BUS_UNCACHED(spi_word);
-    cb_tx_conf.dst = SPI_FIFO_7E;
+    cb_tx_conf.dst = dev->reg_addr_spi_fifo;
     cb_tx_conf.src_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
     cb_tx_conf.dst_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
     cb_tx_conf.len = 4;
@@ -376,7 +361,7 @@ static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
     cb_tx_conf.dreq = DMA_DREQ_SPI_TX;
     cb_tx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_DST;
     cb_tx_conf.src = current_src;
-    cb_tx_conf.dst = SPI_FIFO_7E;
+    cb_tx_conf.dst = dev->reg_addr_spi_fifo;
     cb_tx_conf.src_type = BCM2835_DMA_ENDPOINT_TYPE_INCREMENT;
     cb_tx_conf.dst_type = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
     cb_tx_conf.len = len;
@@ -386,7 +371,7 @@ static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
     cb_rx_conf.dreq      = DMA_DREQ_SPI_RX;
     cb_rx_conf.dreq_type = BCM2835_DMA_DREQ_TYPE_SRC;
     cb_rx_conf.dst_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
-    cb_rx_conf.src       = SPI_FIFO_7E;
+    cb_rx_conf.src       = dev->reg_addr_spi_fifo;
     cb_rx_conf.dst       = RAM_PHY_TO_BUS_UNCACHED(&dev->dma_rx_dst);
     cb_rx_conf.src_type  = BCM2835_DMA_ENDPOINT_TYPE_NOINC;
     cb_rx_conf.len       = len;
@@ -507,7 +492,7 @@ static void __attribute__((optimize("O0"))) ili9341_drawframe_init(struct ili934
    */
   if (fr->bufs[0].buf_size > spi_get_max_transfer_size()) {
     last_transfer_size = fr->bufs[0].buf_size % spi_get_max_transfer_size();
-    fr->spi_header_last = SPI_ACTIVATE_VALUE(last_transfer_size);
+    fr->spi_header_last = spi_get_dma_word0(last_transfer_size);
   }
 
   fr->num_transfers = get_num_transfers(fr->bufs[0].buf_size);
@@ -541,7 +526,7 @@ static int ili9341_setup_dma(struct ili9341_drawframe *drawframes,
   bcm2835_dma_enable(dev->dma_ch_tx);
   bcm2835_dma_enable(dev->dma_ch_rx);
 
-  dev->spi_header_max = SPI_ACTIVATE_VALUE(spi_get_max_transfer_size());
+  dev->spi_header_max = spi_get_dma_word0(spi_get_max_transfer_size());
   dcache_flush(&dev->spi_header_max, sizeof(dev->spi_header_max));
 
   dev->spi_tasks = kmalloc(sizeof(struct ili9341_spi_tasks) * num_drawframes);

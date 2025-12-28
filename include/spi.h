@@ -74,5 +74,8 @@ void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void));
 
 void spi_reset_for_dma(void);
 void spi_dma_enable(void);
+void spi_dma_disable(void);
+void spi_set_clk(uint32_t clk);
 void spi_clear_rx_tx_fifo(void);
 uint32_t spi_get_max_transfer_size(void);
+uint32_t spi_get_dma_word0(uint16_t transfer_size);

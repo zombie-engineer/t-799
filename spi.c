@@ -517,9 +517,10 @@ struct spi_io_nonasync {
 };
 
 struct spi_io_nonasync spi_io_nonasync = { 0 };
+
 struct spi_io *spi_io_current = NULL;
 
-static inline void NOOPT spi_transfer_done_async_isr(uint32_t cs)
+static inline void spi_transfer_done_async_isr(uint32_t cs)
 {
   struct spi_async_task *current;
 
@@ -553,16 +554,12 @@ static inline void NOOPT spi_transfer_done_async_isr(uint32_t cs)
   ioreg32_write(SPI_CS, cs);
 }
 
-static inline void OPTIMIZED
-spi_transfer_done_nonasync_isr(uint32_t cs)
+static inline void OPTIMIZED spi_transfer_done_nonasync_isr(uint32_t cs)
 {
   cs &= ~(SPI_CS_INTD | SPI_CS_INTR | SPI_CS_TA);
   ioreg32_write(SPI_CS, cs);
   os_event_notify_isr(&spi_io_nonasync.ev);
 }
-
-uint32_t cs_history[32];
-int cs_history_idx = 0;
 
 static inline uint32_t OPTIMIZED spi_isr_do(uint32_t *out_cs)
 {
@@ -571,9 +568,8 @@ static inline uint32_t OPTIMIZED spi_isr_do(uint32_t *out_cs)
   uint32_t rx;
   int max_bytes;
   uint32_t cs = ioreg32_read(SPI_CS);
-  intmask = SPI_CS_DONE | SPI_CS_RXR;
   struct spi_io *io = spi_io_current;
-  cs_history[cs_history_idx++] = cs;
+  intmask = SPI_CS_DONE | SPI_CS_RXR;
 
   if ((cs & intmask) == intmask) {
     printf("cs:%08x\r\n");
@@ -615,7 +611,7 @@ static inline uint32_t OPTIMIZED spi_isr_do(uint32_t *out_cs)
   return false;
 }
 
-void NOOPT spi_isr(void)
+void spi_isr(void)
 {
   struct spi_async_task *async;
   uint32_t cs;
@@ -639,7 +635,7 @@ void NOOPT spi_isr(void)
   /* Transfer is done */
   if (async)
     spi_transfer_done_async_isr(cs);
- else
+  else
     spi_transfer_done_nonasync_isr(cs);
 }
 
@@ -684,6 +680,7 @@ void spi_init(void)
   irq_set(BCM2835_IRQNR_SPI, spi_isr);
   while (ioreg32_read(SPI_CS) & SPI_CS_RXD)
     ioreg32_read(SPI_FIFO);
+
   ioreg32_write(SPI_CS, 0);
 }
 
@@ -699,6 +696,14 @@ void spi_dma_enable(void)
   ioreg32_write(SPI_CS, cs);
 }
 
+void spi_dma_disable(void)
+{
+  uint32_t cs = ioreg32_read(SPI_CS);
+  cs &= ~SPI_CS_DMAEN;
+  cs |= SPI_CS_CLEAR;
+  ioreg32_write(SPI_CS, cs);
+}
+
 void spi_clear_rx_tx_fifo(void)
 {
   uint32_t cs = ioreg32_read(SPI_CS);
@@ -710,3 +715,14 @@ uint32_t spi_get_max_transfer_size(void)
 {
   return MAX_BYTES_PER_TRANSFER;
 }
+
+void spi_set_clk(uint32_t clk)
+{
+  *SPI_CLK = clk;
+}
+
+uint32_t spi_get_dma_word0(uint16_t transfer_size)
+{
+  return (transfer_size << 16) | SPI_CS_TA;
+}
+
