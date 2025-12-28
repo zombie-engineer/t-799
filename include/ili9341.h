@@ -18,6 +18,9 @@ struct ili9341_per_frame_dma {
   uint8_t *buf;
   size_t buf_size;
   uint8_t handle;
+
+  int drawframe_idx;
+  int dma_io_idx;
 };
 
 typedef void (*ili9341_on_dma_done_irq)(struct ili9341_per_frame_dma *buf);

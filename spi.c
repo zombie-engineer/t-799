@@ -662,7 +662,8 @@ void OPTIMIZED spi_io_interrupt(const uint8_t *bytestream_tx,
   os_event_clear(&spi_io_nonasync.ev);
 }
 
-void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void))
+void OPTIMIZED spi_io_async_isr(struct spi_async_task *tasks,
+  void (*done_cb_isr)(void))
 {
   struct spi_async_task *t = tasks;
   spi_async_tasks.current = t;
@@ -671,6 +672,12 @@ void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void))
 
   spi_io_start(&spi_async_tasks.current_io, t->io.tx, t->io.rx,
     t->io.num_bytes);
+}
+
+void OPTIMIZED spi_io_async(struct spi_async_task *tasks,
+  void (*done_cb_isr)(void))
+{
+  spi_io_async_isr(tasks, done_cb_isr);
 }
 
 void spi_init(void)

@@ -17,19 +17,6 @@
 #include <bitops.h>
 #include "ili9341_command.h"
 
-typedef enum {
-  DISPLAY_STATE_UNKNOWN = 0,
-  DISPLAY_STATE_CMD_STEP0,
-  DISPLAY_STATE_DMA_PIXEL_DATA
-} display_state_t;
-
-typedef enum {
-  ILI9341_NONSTOP_REFRESH_NONE = 0,
-  ILI9341_NONSTOP_REFRESH_READY,
-  ILI9341_NONSTOP_REFRESH_RUNNING,
-  ILI9341_NONSTOP_REFRESH_PAUSED
-} ili9341_nonstop_refresh_state_t;
-
 #ifdef DISPLAY_MODE_PORTRAIT
 #define DISPLAY_WIDTH  240
 #define DISPLAY_HEIGHT 320
@@ -79,25 +66,58 @@ struct ili9341_spi_tasks {
 struct ili9341 {
   struct ili9341_gpio gpio;
   struct spi_device spi;
+
+  /* List of draw task */
   struct list_head draw_tasks;
 
-  bool transfer_done;
-
-  int dma_ch_tx;
-  int dma_ch_rx;
-  int num_dma_xfer_done;
-  struct ili9341_drawframe *drawframes;
-  int num_drawframes;
+  /* Current draw task */
   struct ili9341_per_frame_dma *dma_io_current;
+
+  /* DMA channel for TX */
+  int dma_ch_tx;
+
+  /* DMA channel for RX */
+  int dma_ch_rx;
+
+  /*
+   * Counts number of partial DMA transfers during current draw task. A draw
+   * task consists of several SPI commands to ili9341, followed by a series of
+   * DMA transfers. The task is completed when 'num_dma_xfer_done' reaches the
+   * same value as the total number of DMA transfers in the current draw task.
+   */
+  int num_dma_xfer_done;
+
+  /* An array of draw frames set once during initialization */
+  struct ili9341_drawframe *drawframes;
+  /* An array of spi tasks, with same length as drawframes */
   struct ili9341_spi_tasks *spi_tasks;
+  /* Length of drawframes AND spi tasks arrays */
+  int num_drawframes;
+
+  /* Uncached value for first DMA word that is written to SPI FIFO */
   uint32_t spi_header_max;
+
+  /*
+   * Stub address for receiving DMA from SPI RX path, RX is needed only for
+   * counting amount of bytes processed by SPI and then IRQ, so this value
+   * is just a stub placeholder
+   */
   uint32_t dma_rx_dst;
+
+  /* GPIO register address to clear DC pin */
   ioreg32_t reg_addr_dc_clear;
+
+  /* GPIO register value to clear DC pin */
   uint32_t reg_val_dc_clear;
+
+  /* GPIO register address to set DC pin */
   ioreg32_t reg_addr_dc_set;
+
+  /* GPIO register value to set DC pin */
   uint32_t reg_val_dc_set;
+
+  /* SPI register address to be destination for DMA pixel writes */
   uint32_t reg_addr_spi_fifo;
-  display_state_t state;
 };
 
 #define BYTES_PER_PIXEL 3
@@ -109,9 +129,6 @@ struct ili9341 {
 #define NUM_BYTES_PER_FRAME BYTES_PER_FRAME(DISPLAY_HEIGHT, DISPLAY_WIDTH)
 
 static struct ili9341 ili9341;
-
-static ili9341_nonstop_refresh_state_t ili9341_nonstop_refresh_state
- = ILI9341_NONSTOP_REFRESH_NONE;
 
 /*
  * Precalculated transfer of image via SPI and DMA:
@@ -131,51 +148,10 @@ static inline int get_num_transfers(size_t length)
   return ROUND_UP_DIV(length, spi_get_max_transfer_size());
 }
 
-static inline int ili9341_get_parent_drawframe(
-  const struct ili9341_per_frame_dma *dma_io,
-  struct ili9341_drawframe **out_drawframe,
-  struct ili9341_spi_tasks **out_spi_task)
-{
-  int i, j;
-  struct ili9341 *dev = &ili9341;
-  struct ili9341_drawframe *drawframe;
-
-  for (i = 0; i < dev->num_drawframes; ++i) {
-    drawframe = &dev->drawframes[i];
-    for (j = 0; j < drawframe->num_bufs; ++j) {
-      if (&drawframe->bufs[j] == dma_io) {
-        *out_drawframe = drawframe;
-        *out_spi_task = &dev->spi_tasks[i];
-        return 0;
-      }
-    }
-  }
-
-  return ERR_NOT_FOUND;
-}
-
-static inline void ili9341_on_draw_task_completed_isr(
-  struct ili9341_per_frame_dma *dma_io)
+static inline void ili9341_start_next_dma_xfer_isr(void)
 {
   struct ili9341 *dev = &ili9341;
-
-  struct ili9341_drawframe *drawframe;
-  struct ili9341_spi_tasks *spi_task;
-  if (ili9341_get_parent_drawframe(dma_io, &drawframe, &spi_task)) {
-    printf("PROBLEM3\n");
-    asm volatile ("wfe");
-  }
-
-  if (drawframe->on_dma_done_irq)
-    drawframe->on_dma_done_irq(dma_io);
-
-  dev->dma_io_current = NULL;
-}
-
-static inline void ili9341_start_next_dma_xfer_isr(
-  const struct ili9341_per_frame_dma *dma_io)
-{
-  struct ili9341 *dev = &ili9341;
+  struct ili9341_per_frame_dma *dma_io = dev->dma_io_current;
   struct spi_dma_xfer_cb *cbs = &dma_io->cbs[dev->num_dma_xfer_done];
 
   bcm2835_dma_set_cb(dev->dma_ch_tx, cbs->spi_start);
@@ -185,6 +161,51 @@ static inline void ili9341_start_next_dma_xfer_isr(
 
   bcm2835_dma_activate(dev->dma_ch_rx);
   bcm2835_dma_activate(dev->dma_ch_tx);
+}
+
+static void ili9341_start_draw_task_isr(struct ili9341_per_frame_dma *dma_io)
+{
+  struct ili9341 *dev = &ili9341;
+  struct ili9341_spi_tasks *spi_task;
+
+  if (dma_io->drawframe_idx >= dev->num_drawframes) {
+    printf("drawframe_idx %d too big\n", dma_io->drawframe_idx);
+    asm volatile ("wfe");
+  }
+
+  spi_task = &dev->spi_tasks[dma_io->drawframe_idx];
+  dev->num_dma_xfer_done = 0;
+  dev->dma_io_current = dma_io;
+  spi_io_async_isr(&spi_task->spi_caset_cmd, ili9341_start_next_dma_xfer_isr);
+}
+
+static inline void ili9341_on_draw_task_completed_isr(
+  struct ili9341_per_frame_dma *dma_io)
+{
+  struct ili9341 *dev = &ili9341;
+
+  struct ili9341_drawframe *drawframe;
+
+  if (dma_io->drawframe_idx >= dev->num_drawframes) {
+    printf("drawframe_idx %d too big\n", dma_io->drawframe_idx);
+    asm volatile ("wfe");
+  }
+
+  drawframe = &dev->drawframes[dma_io->drawframe_idx];
+
+  if (drawframe->on_dma_done_irq)
+    drawframe->on_dma_done_irq(dma_io);
+
+  dev->dma_io_current = NULL;
+  list_del_init(&dma_io->draw_tasks);
+
+  if (list_empty(&dev->draw_tasks))
+    return;
+
+  dma_io = container_of(dev->draw_tasks.next, struct ili9341_per_frame_dma,
+    draw_tasks);
+
+  ili9341_start_draw_task_isr(dma_io);
 }
 
 static void ili9341_dma_rx_done_irq(void)
@@ -199,7 +220,7 @@ static void ili9341_dma_rx_done_irq(void)
   if (dev->num_dma_xfer_done == dma_io->num_transfers)
     ili9341_on_draw_task_completed_isr(dma_io);
   else
-    ili9341_start_next_dma_xfer_isr(dma_io);
+    ili9341_start_next_dma_xfer_isr();
 }
 
 static void ili9341_dma_tx_done_irq(void)
@@ -236,56 +257,24 @@ void ili9341_set_region_coords(uint16_t x0, uint16_t y0, uint16_t x1,
 int ili9341_drawframe_set_irq(struct ili9341_drawframe *r,
   ili9341_on_dma_done_irq on_dma_done_irq)
 {
-  struct ili9341 *dev = &ili9341;
-
-  if (ili9341_nonstop_refresh_state != ILI9341_NONSTOP_REFRESH_NONE) {
-    os_log("WARN: tried to initialized nonstop refresh twice\r\n");
-    return ERR_GENERIC;
-  }
-
   r->on_dma_done_irq = on_dma_done_irq;
-
-  ili9341_nonstop_refresh_state = ILI9341_NONSTOP_REFRESH_READY;
-  dev->transfer_done = true;
   return SUCCESS;
-}
-
-static void ili9143_write_pixels_prep_done_isr(void)
-{
-  struct ili9341 *dev = &ili9341;
-
-  spi_dma_enable();
-
-  bcm2835_dma_activate(dev->dma_ch_rx);
-  bcm2835_dma_activate(dev->dma_ch_tx);
-}
-
-static void ili9341_fill_screen_dma_async(struct ili9341_per_frame_dma *dma_io,
-  struct ili9341_spi_tasks *t)
-{
-  struct ili9341 *dev = &ili9341;
-
-  dev->num_dma_xfer_done = 0;
-  dev->dma_io_current = dma_io;
-  bcm2835_dma_set_cb(dev->dma_ch_tx, dma_io->cbs[0].spi_start);
-  bcm2835_dma_set_cb(dev->dma_ch_rx, dma_io->cbs[0].rx);
-
-  spi_io_async(&t->spi_caset_cmd, ili9143_write_pixels_prep_done_isr);
 }
 
 void OPTIMIZED ili9341_draw_dma_buf(struct ili9341_per_frame_dma *dma_io)
 {
-  struct ili9341_drawframe *drawframe;
-  struct ili9341_spi_tasks *spi_task;
+  struct ili9341 *dev = &ili9341;
+  bool no_task_in_progress;
+  int irq;
 
-  if (ili9341_get_parent_drawframe(dma_io, &drawframe, &spi_task)) {
-    printf("PROBLEM2\r\n");
-    while (1) {
-      asm volatile ("wfe");
-    }
+  disable_irq_save_flags(irq);
+  no_task_in_progress = dev->dma_io_current == NULL;
+  list_add_tail(&dma_io->draw_tasks, &dev->draw_tasks);
+  restore_irq_flags(irq);
+
+  if (no_task_in_progress) {
+    ili9341_start_draw_task_isr(dma_io);
   }
-
-  ili9341_fill_screen_dma_async(dma_io, spi_task);
 }
 
 static inline int ili9341_init_gpio(int gpio_blk, int gpio_dc, int gpio_reset)
@@ -473,8 +462,8 @@ static void ili9341_spi_tasks_init(struct ili9341_spi_tasks *t,
   t->spi_ramwr_cmd.post_cb_isr = ili9341_cmd_dc_set_isr;
 }
 
-static void __attribute__((optimize("O0"))) ili9341_drawframe_init(struct ili9341_drawframe *fr,
-  struct ili9341_spi_tasks *t)
+static void ili9341_drawframe_init(int drawframe_idx,
+  struct ili9341_drawframe *fr, struct ili9341_spi_tasks *t)
 {
   int i;
   struct ili9341_per_frame_dma *dma_io;
@@ -511,6 +500,8 @@ static void __attribute__((optimize("O0"))) ili9341_drawframe_init(struct ili934
   for (i = 0; i < fr->num_bufs; ++i) {
     dma_io = &fr->bufs[i];
     dma_io->num_transfers = fr->num_transfers;
+    dma_io->drawframe_idx = drawframe_idx;
+    dma_io->dma_io_idx = i;
     ili9341_dma_chain_prep(fr, dma_io);
   }
 }
@@ -544,7 +535,7 @@ static int ili9341_setup_dma(struct ili9341_drawframe *drawframes,
   dev->spi_tasks = kmalloc(sizeof(struct ili9341_spi_tasks) * num_drawframes);
 
   for (i = 0; i < num_drawframes; ++i) {
-    ili9341_drawframe_init(&drawframes[i], &dev->spi_tasks[i]);
+    ili9341_drawframe_init(i, &drawframes[i], &dev->spi_tasks[i]);
   }
 
   dev->drawframes = drawframes;

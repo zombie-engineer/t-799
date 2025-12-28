@@ -72,6 +72,9 @@ struct spi_async_task {
 
 void spi_io_async(struct spi_async_task *tasks, void (*done_cb_isr)(void));
 
+void spi_io_async_isr(struct spi_async_task *tasks,
+  void (*done_cb_isr)(void));
+
 void spi_reset_for_dma(void);
 void spi_dma_enable(void);
 void spi_dma_disable(void);
