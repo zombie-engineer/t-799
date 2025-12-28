@@ -132,7 +132,7 @@ static inline int get_num_transfers(size_t length)
 }
 
 static inline int ili9341_get_parent_drawframe(
-  struct ili9341_per_frame_dma *dma_io,
+  const struct ili9341_per_frame_dma *dma_io,
   struct ili9341_drawframe **out_drawframe,
   struct ili9341_spi_tasks **out_spi_task)
 {
@@ -154,33 +154,30 @@ static inline int ili9341_get_parent_drawframe(
   return ERR_NOT_FOUND;
 }
 
-static void ili9341_dma_rx_done_irq(void)
+static inline void ili9341_on_draw_task_completed_isr(
+  struct ili9341_per_frame_dma *dma_io)
 {
   struct ili9341 *dev = &ili9341;
-  struct ili9341_per_frame_dma *dma_io = dev->dma_io_current;
-  struct spi_dma_xfer_cb *cbs;
-  struct ili9341_drawframe *current_drawframe;
-  struct ili9341_spi_tasks *current_spi_task;
 
-  spi_dma_disable();
-
-  dev->num_dma_xfer_done++;
-
-  if (dev->num_dma_xfer_done == dma_io->num_transfers) {
-    if (ili9341_get_parent_drawframe(dma_io, &current_drawframe,
-      &current_spi_task)) {
-      printf("PROBLEM3\n");
-      asm volatile ("wfe");
-    }
-
-    if (current_drawframe->on_dma_done_irq)
-      current_drawframe->on_dma_done_irq(dma_io);
-
-    dev->dma_io_current = NULL;
-    return;
+  struct ili9341_drawframe *drawframe;
+  struct ili9341_spi_tasks *spi_task;
+  if (ili9341_get_parent_drawframe(dma_io, &drawframe, &spi_task)) {
+    printf("PROBLEM3\n");
+    asm volatile ("wfe");
   }
 
-  cbs = &dma_io->cbs[dev->num_dma_xfer_done];
+  if (drawframe->on_dma_done_irq)
+    drawframe->on_dma_done_irq(dma_io);
+
+  dev->dma_io_current = NULL;
+}
+
+static inline void ili9341_start_next_dma_xfer_isr(
+  const struct ili9341_per_frame_dma *dma_io)
+{
+  struct ili9341 *dev = &ili9341;
+  struct spi_dma_xfer_cb *cbs = &dma_io->cbs[dev->num_dma_xfer_done];
+
   bcm2835_dma_set_cb(dev->dma_ch_tx, cbs->spi_start);
   bcm2835_dma_set_cb(dev->dma_ch_rx, cbs->rx);
 
@@ -188,6 +185,21 @@ static void ili9341_dma_rx_done_irq(void)
 
   bcm2835_dma_activate(dev->dma_ch_rx);
   bcm2835_dma_activate(dev->dma_ch_tx);
+}
+
+static void ili9341_dma_rx_done_irq(void)
+{
+  struct ili9341 *dev = &ili9341;
+  struct ili9341_per_frame_dma *dma_io = dev->dma_io_current;
+
+  spi_dma_disable();
+
+  dev->num_dma_xfer_done++;
+
+  if (dev->num_dma_xfer_done == dma_io->num_transfers)
+    ili9341_on_draw_task_completed_isr(dma_io);
+  else
+    ili9341_start_next_dma_xfer_isr(dma_io);
 }
 
 static void ili9341_dma_tx_done_irq(void)
