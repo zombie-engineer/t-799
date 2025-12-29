@@ -185,7 +185,41 @@ static inline void app_init_camera(void)
 #endif
 }
 
-void app_main(void)
+static bool app_ui_draw_done = true;
+
+static void app_ui_draw_done_isr(struct ili9341_per_frame_dma *buf)
+{
+  app_ui_draw_done = true;
+}
+
+static NOOPT void app_ui_loop(void)
+{
+  struct ili9341_drawframe *df = &drawframes[1];
+  struct ili9341_per_frame_dma *dma_io = &df->bufs[0];
+
+  ili9341_drawframe_set_irq(df, app_ui_draw_done_isr);
+
+  int x = 0;
+  while (1) {
+    // os_wait_ms(1000);
+    if (!app_ui_draw_done) {
+      continue;
+    }
+
+    printf("ui draw\r\n");
+
+    app_ui_draw_done = false;
+    x += 1;
+    if (x > 0xff)
+      x = 0;
+
+    memset(dma_io->buf, x, dma_io->buf_size);
+    dcache_flush(dma_io->buf, dma_io->buf_size);
+    ili9341_draw_dma_buf(dma_io);
+  }
+}
+
+void NOOPT app_main(void)
 {
   os_log("Application main");
 
@@ -198,6 +232,7 @@ void app_main(void)
     goto out;
 
   app_init_camera();
+  app_ui_loop();
 
 out:
   while (1) {

@@ -268,7 +268,7 @@ void OPTIMIZED ili9341_draw_dma_buf(struct ili9341_per_frame_dma *dma_io)
   int irq;
 
   disable_irq_save_flags(irq);
-  no_task_in_progress = dev->dma_io_current == NULL;
+  no_task_in_progress = list_empty(&dev->draw_tasks);
   list_add_tail(&dma_io->draw_tasks, &dev->draw_tasks);
   restore_irq_flags(irq);
 
@@ -384,11 +384,6 @@ static void ili9341_dma_chain_prep(struct ili9341_drawframe *drawframe,
 
     bcm2835_dma_link_cbs(cbs->spi_start, cbs->tx);
   }
-
-  if (num_transfers > 1) {
-    dcache_flush(&drawframe->spi_header_last,
-      sizeof(drawframe->spi_header_last));
-  }
 }
 
 static void ili9341_cmd_dc_clear_isr(void)
@@ -491,10 +486,9 @@ static void ili9341_drawframe_init(int drawframe_idx,
    * register settings - [31:16 - transfer length, 15:8 - nothing, 7:0 -
    * control register first 8 bits]
    */
-  if (fr->bufs[0].buf_size > spi_get_max_transfer_size()) {
-    last_transfer_size = fr->bufs[0].buf_size % spi_get_max_transfer_size();
-    fr->spi_header_last = spi_get_dma_word0(last_transfer_size);
-  }
+  last_transfer_size = fr->bufs[0].buf_size % spi_get_max_transfer_size();
+  fr->spi_header_last = spi_get_dma_word0(last_transfer_size);
+  dcache_flush(&fr->spi_header_last, sizeof(fr->spi_header_last));
 
   fr->num_transfers = get_num_transfers(fr->bufs[0].buf_size);
   for (i = 0; i < fr->num_bufs; ++i) {
