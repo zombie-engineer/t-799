@@ -1,4 +1,4 @@
-CROSSCOMPILE := /home/user_user/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
+CROSSCOMPILE := aarch64-none-elf
 
 # Using fixed version of openocd to support configuration scripts for
 # Raspberry PI 3B+, found on the internet
@@ -9,107 +9,62 @@ CC := $(CROSSCOMPILE)-gcc
 LD := $(CROSSCOMPILE)-ld
 OBJDUMP := $(CROSSCOMPILE)-objdump
 OBJCOPY := $(CROSSCOMPILE)-objcopy
+BUILDDIR := build
+SRCDIR := $(PWD)/src
+$(info $(SRCDIR))
 
 CFLAGS := -Iinclude -g -Werror -Wall
 # Required to implement standard library functions like sprintf and memset
 CFLAGS += -ffreestanding
 
-OBJS := \
-  app/app_main \
-  app/camera \
-  armv8 \
-  armv8_mmu \
-  armv8_cpu_context \
-  armv8_exception \
-  armv8_exception_sync \
-  armv8_exception_vector \
-  atomic \
-  bcm2835_systimer \
-  bcm2835_pll \
-  bcm_cm \
-  bcm2835_emmc/bcm2835_emmc \
-  bcm2835_emmc/bcm2835_emmc_cmd \
-  bcm2835_emmc/bcm2835_emmc_priv \
-  bcm2835_emmc/bcm2835_emmc_initialize \
-  bcm2835_emmc/bcm2835_emmc_utils \
-  bcm_sdhost/bcm_sdhost \
-  bcm2835_dma \
-  bcm2835_ic \
-  blockdev \
-  debug_led \
-  delay \
-  dma_memory \
-  ili9341 \
-  irq \
-  fs/fs \
-  fs/fat32 \
-  kmalloc \
-  logger \
-  mbox/mbox_routines \
-  mbox/mbox \
-  mbox/mbox_props \
-  os_api \
-  panic \
-  partition \
-  partition_table \
-  printf \
-  sdhc \
-  sdhc_test \
-  sched \
-  sched_mon \
-  semaphore \
-  sprintf \
-  start \
-  stringlib \
-  task \
-  main \
-  uart_pl011 \
-  gpio \
-  self_test_context_switch \
-  spi \
-  vc/vchiq \
-  vc/service_mmal \
-  vc/service_smem
+include src/Makefile
+CFILES := $(addprefix src/, $(addsuffix .c, $(OBJS)))
+OBJS_REL := $(addsuffix .o, $(OBJS))
+OBJS := $(addprefix build/, $(addsuffix .o, $(OBJS)))
+OBJ_DIRS := $(sort $(dir $(OBJS)))
 
-OBJS := $(addsuffix .o, $(OBJS))
-
-kernel8.bin: kernel8.elf os.json
+$(BUILDDIR)/kernel8.bin: $(BUILDDIR)/kernel8.elf $(BUILDDIR)/os.json
 	$(OBJCOPY) -O binary $< $@
 
-.PHONY: os.json
-.PHONE: .force
-.force:
+.PHONY: .force
+.force: $(OBJS) $(OBJ_DIRS)
 
-task_offsets.o: task_offsets.c .force
+$(BUILDDIR)/kernel8.elf: $(OBJ_DIRS) $(OBJS) src/link.ld
+	cd $(BUILDDIR) && $(LD) $(OBJS_REL) -o kernel8.elf -T $(SRCDIR)/link.ld -Map=kernel8.map -print-memory-usage
+
+$(BUILDDIR)/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-task_offsets.bin: task_offsets.o
+$(BUILDDIR)/%.o: src/%.S
+	$(CC) -Iinclude -g -c $< -o $@
+
+$(OBJ_DIRS):
+	@echo Recepie for $(OBJ_DIRS)
+	mkdir -p $(OBJ_DIRS)
+
+.PHONY: os.json
+
+$(BUILDDIR)/task_offsets.o: src/task_offsets.c .force
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/task_offsets.bin: $(BUILDDIR)/task_offsets.o
 	$(OBJCOPY) -O binary --only-section .task_struct_layout $< $@
 
-os.json: kernel8.elf task_offsets.bin
-	. scripts/gen_gdb_json.sh > os.json
-	cat os.json
-
-kernel8.elf: $(OBJS) link.ld
-	$(LD) $(OBJS) -o $@ -T link.ld -Map=kernel8.map -print-memory-usage
-
-%.o: %.S
-	$(CC) -Iinclude -g -c $? -o $@
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $? -o $@
+$(BUILDDIR)/os.json: $(BUILDDIR)/kernel8.elf $(BUILDDIR)/task_offsets.bin
+	. scripts/gen_gdb_json.sh > $@
+	cat $@
 
 ddb:
-	$(OBJDUMP) -d start.o
+	$(OBJDUMP) -d $(BUILDDIR)/start.o
 
-db: kernel8.bin
+db: $(BUILDDIR)/kernel8.bin
 	$(OBJDUMP) -z -m aarch64 -b binary -D $^
 
-dbe: kernel8.elf
+dbe: $(BUILDDIR)/kernel8.elf
 	$(OBJDUMP) -D $^
 
-e: kernel8.bin
-	./emulate_pi.sh
+e: $(BUILDDIR)/kernel8.bin
+	./scripts/gdb/emulate_pi.sh
 
 j:
 	@echo "Connecting to Raspberry PI 3B+ over JTAG"
@@ -117,15 +72,15 @@ j:
 
 de:
 	@echo "Starting session to debug emulated Raspberry PI 3B+"
-	./debug_emulated_pi.sh
+	./scripts/gdb/debug_emulated_pi.sh
 
 dj:
 	@echo "Starting session to debug emulated Raspberry PI 3B+"
-	./debug_pi_jtag.sh
+	./scripts/gdb/debug_pi_jtag.sh
 
 dja:
 	@echo "Starting session to debug emulated Raspberry PI 3B+"
-	./debug_pi_jtag.sh --attach
+	./scripts/gdb/debug_pi_jtag.sh --attach
 
 gitclean:
 	git clean -xfd

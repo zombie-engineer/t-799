@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-TASK_OFFSETS_BIN=task_offsets.bin
+TASK_OFFSETS_BIN=build/task_offsets.bin
 
 read8() {
     local FILENAME=$1
@@ -9,8 +9,8 @@ read8() {
 }
 
 CROSS=/home/user_user/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
-current_task=0x$($CROSS-objdump kernel8.elf -x  | grep -w sched | grep ff | cut -d' ' -f1)
-tasks_array=0x$($CROSS-objdump kernel8.elf -x  | grep -w tasks_array | grep ff | cut -d' ' -f1)
+current_task=0x$($CROSS-objdump build/kernel8.elf -x  | grep -w sched | grep ff | cut -d' ' -f1)
+tasks_array=0x$($CROSS-objdump build/kernel8.elf -x  | grep -w tasks_array | grep ff | cut -d' ' -f1)
 task_size=$(read8 $TASK_OFFSETS_BIN 0)
 task_offset_name=$(read8 $TASK_OFFSETS_BIN 1)
 task_offset_id=$(read8 $TASK_OFFSETS_BIN 2)

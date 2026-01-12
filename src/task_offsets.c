@@ -7,7 +7,7 @@ struct task_offsets {
   uint8_t task_offset_ctx;
 };
 
-const struct task_offsets offsets __attribute__((section(".task_struct_layout")))  = {
+const struct task_offsets offsets __attribute__((section(".task_struct_layout"))) = {
   .task_size = sizeof(struct task),
   .task_offset_name = offsetof(struct task, name),
   .task_offset_id = offsetof(struct task, task_id),
