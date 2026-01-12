@@ -268,7 +268,7 @@ void OPTIMIZED ili9341_draw_dma_buf(struct ili9341_per_frame_dma *dma_io)
   int irq;
 
   disable_irq_save_flags(irq);
-  no_task_in_progress = list_empty(&dev->draw_tasks);
+  no_task_in_progress = list_empty(&dev->draw_tasks); //dev->dma_io_current == NULL;
   list_add_tail(&dma_io->draw_tasks, &dev->draw_tasks);
   restore_irq_flags(irq);
 

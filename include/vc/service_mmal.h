@@ -68,7 +68,7 @@ struct mmal_port_buffers {
    */
   struct list_head remote_side;
 
-  size_t nr_in_process;
+  size_t on_vc;
 
 };
 

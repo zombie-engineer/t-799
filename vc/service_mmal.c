@@ -271,6 +271,7 @@ static int mmal_send_msg_buffer_from_host(struct mmal_port *p,
   m->payload_in_message = 0;
 
   VCHIQ_MMAL_MSG_COMMUNICATE_ASYNC();
+  p->bufs.on_vc++;
   return SUCCESS;
 }
 
@@ -630,6 +631,7 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
   struct mmal_buffer *b;
 
   err = mmal_buffer_to_host_msg_to_port(&m->u.buffer_from_host, &p, &b);
+  p->bufs.on_vc--;
   if (p->bufs.acks_count < p->bufs.total_count) {
     if (b->length || b->flags) {
       MODULE_ERR("non-0 buf during ack %d/%d", p->bufs.acks_count,
