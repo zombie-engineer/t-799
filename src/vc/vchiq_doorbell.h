@@ -2,7 +2,7 @@
 #include <irq.h>
 #include <ioreg.h>
 #include <memory_map.h>
-#include <bcm2835/bcm2835_ic.h>
+#include <drivers/intc/intc_bcm2835.h>
 
 /*
  * ARM doorbells are used by VCHIQ as a way of  interprocessor communicaiton

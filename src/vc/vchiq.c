@@ -10,7 +10,7 @@
 #include <kmalloc.h>
 #include <errcode.h>
 #include <os_api.h>
-#include <mbox_props.h>
+#include <drivers/mbox/mbox_bcm2835_props.h>
 #include <task.h>
 #include "vchiq_priv.h"
 #include "vchiq_doorbell.h"

@@ -2,56 +2,56 @@
 OBJS := \
   app/app_main \
   app/camera \
-  armv8 \
-  armv8_mmu \
-  armv8_cpu_context \
-  armv8_exception \
-  armv8_exception_sync \
-  armv8_exception_vector \
+  arch/armv8/armv8 \
+  arch/armv8/armv8_mmu \
+  arch/armv8/armv8_cpu_context \
+  arch/armv8/armv8_exception \
+  arch/armv8/armv8_exception_sync \
+  arch/armv8/armv8_exception_vector \
   atomic \
-  bcm2835_systimer \
-  bcm2835_pll \
   bcm_cm \
-  bcm2835_emmc/bcm2835_emmc \
-  bcm2835_emmc/bcm2835_emmc_cmd \
-  bcm2835_emmc/bcm2835_emmc_priv \
-  bcm2835_emmc/bcm2835_emmc_initialize \
-  bcm2835_emmc/bcm2835_emmc_utils \
-  bcm_sdhost/bcm_sdhost \
-  bcm2835_dma \
-  bcm2835_ic \
   blockdev \
   debug_led \
   delay \
-  dma_memory \
-  ili9341 \
-  irq \
   fs/fs \
   fs/fat32 \
-  kmalloc \
   logger \
-  mbox/mbox_routines \
-  mbox/mbox \
-  mbox/mbox_props \
-  os_api \
-  panic \
   partition \
   partition_table \
   printf \
-  sdhc \
-  sdhc_test \
-  sched \
-  sched_mon \
-  semaphore \
+  kernel/dma_memory \
+  kernel/irq \
+  kernel/kmalloc \
+  kernel/main \
+  kernel/os_api \
+  kernel/panic \
+  kernel/sched \
+  kernel/sched_mon \
+  kernel/semaphore \
+  kernel/start \
+  kernel/task \
   sprintf \
-  start \
   stringlib \
-  task \
-  main \
-  uart_pl011 \
-  gpio \
+  drivers/intc/intc_bcm2835 \
+  drivers/display/display_ili9341 \
+  drivers/dma/dma_bcm2835 \
+  drivers/gpio/gpio_bcm2835 \
+  drivers/mbox/mbox_bcm2835_routines \
+  drivers/mbox/mbox_bcm2835 \
+  drivers/mbox/mbox_bcm2835_props \
+  drivers/pll/pll_bcm2835 \
+  drivers/sd/sdhc \
+  drivers/sd/sdhc_test \
+  drivers/sd/sdhost_bcm2835 \
+  drivers/sd/emmc_bcm2835 \
+  drivers/sd/emmc_bcm2835_cmd \
+  drivers/sd/emmc_bcm2835_priv \
+  drivers/sd/emmc_bcm2835_initialize \
+  drivers/sd/emmc_bcm2835_utils \
+  drivers/spi/spi_bcm2835 \
+  drivers/timer/timer_bcm2835 \
+  drivers/uart/uart_bcm2835 \
   self_test_context_switch \
-  spi \
   vc/vchiq \
   vc/service_mmal \
   vc/service_smem

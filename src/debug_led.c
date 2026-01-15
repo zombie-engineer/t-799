@@ -1,5 +1,5 @@
 #include <debug_led.h>
-#include <gpio.h>
+#include <drivers/gpio.h>
 
 #define GPIO_IDX_NATIVE_DEBUG_LED 29
 
