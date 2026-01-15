@@ -6,7 +6,7 @@
 #include <log.h>
 #include <common.h>
 #include <kmalloc.h>
-#include <bcm2835/bcm2835_emmc.h>
+#include <drivers/sd/emmc_bcm2835.h>
 
 struct blockdev_scheduler {
   struct blockdev_io io_entries[64];

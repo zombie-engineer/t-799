@@ -7,13 +7,13 @@
 #include <printf.h>
 #include <os_api.h>
 #include <fs/fs.h>
-#include <ili9341.h>
-#include <sdhc_test.h>
+#include <drivers/display/display_ili9341.h>
+#include <drivers/sd/sdhc_test.h>
 #include <errcode.h>
 #include <logger.h>
-#include <bcm2835/bcm_sdhost.h>
+#include <drivers/sd/sdhost_bcm2835.h>
 #include <kmalloc.h>
-#include <spi.h>
+#include <drivers/spi.h>
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240

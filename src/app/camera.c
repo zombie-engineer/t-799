@@ -1,6 +1,6 @@
 #include <app/camera.h>
 #include <block_device.h>
-#include <ili9341.h>
+#include <drivers/display/display_ili9341.h>
 #include <event.h>
 #include <list.h>
 #include <list_fifo.h>

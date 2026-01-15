@@ -5,7 +5,7 @@
 #include <common.h>
 #include <errcode.h>
 #include <printf.h>
-#include <bcm2835/bcm2835_emmc.h>
+#include <drivers/sd/emmc_bcm2835.h>
 #include <stringlib.h>
 #include <kmalloc.h>
 #include <os_api.h>

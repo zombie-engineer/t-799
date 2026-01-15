@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
-#include  <ili9341.h>
+#include <drivers/display/display_ili9341.h>
 
 struct block_device;
 
