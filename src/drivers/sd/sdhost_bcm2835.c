@@ -433,7 +433,11 @@ static void bcm_sdhost_setup_dma_chain(struct sdhc *s, struct sd_cmd *c)
   struct write_stream_buf *b;
 
   int dma_cb_idx_prev = -1;
-  int cb0;
+  int cb0 = 0;
+
+  if (list_empty(&s->write_stream_pending)) {
+    return;
+  }
 
   list_for_each_entry(b, &s->write_stream_pending, list) {
     b->dma_cb = bcm2835_dma_reserve_cb();

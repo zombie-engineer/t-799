@@ -103,6 +103,8 @@ static void pl011_calc_divisor(int baudrate, uint64_t clock_hz, uint32_t *idiv, 
 bool uart_pl011_init(int baudrate)
 {
   uint32_t idiv, fdiv, clock_rate_hz;
+  idiv = 1;
+  fdiv = 1;
 
   gpio_set_pin_function(GPIO_PIN_UART_TXD0, GPIO_FUNCTION_ALT_0);
   gpio_set_pin_function(GPIO_PIN_UART_RXD0, GPIO_FUNCTION_ALT_0);

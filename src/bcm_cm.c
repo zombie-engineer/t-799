@@ -441,7 +441,7 @@ bool bcm_cm_get_clock_info(int clock_id, bool *enabled, int *div,
   int parent_clk_idx;
   uint32_t r;
   uint64_t regaddr;
-  int parent_clk;
+  int parent_clk = 0;
   bool local_enabled;
 
   if (clock_id >= ARRAY_SIZE(bcm_cm_clock_id_to_offsets))

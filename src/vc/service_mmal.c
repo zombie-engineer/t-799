@@ -631,6 +631,11 @@ static int OPTIMIZED mmal_buffer_to_host_cb(const struct mmal_msg *m)
   struct mmal_buffer *b;
 
   err = mmal_buffer_to_host_msg_to_port(&m->u.buffer_from_host, &p, &b);
+  if (err) {
+    MODULE_ERR("msg_to_port error");
+    goto out_err;
+  }
+
   p->bufs.on_vc--;
   if (p->bufs.acks_count < p->bufs.total_count) {
     if (b->length || b->flags) {

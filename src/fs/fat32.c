@@ -583,7 +583,7 @@ int fat32_lookup(const struct fat32_fs *fs, const char *filepath,
   uint32_t parent_cluster0;
   char namebuf[128];
   struct fat_find_by_name_ctx ctx;
-  struct fat_dentry *current_dentry;
+  struct fat_dentry *current_dentry = NULL;
   bool last_is_dir;
 
   ctx.fs = fs;

@@ -31,7 +31,7 @@ static void print_mbox_props(void)
   uint64_t val64;
   int val, val2, i;
   unsigned clock_rate;
-  char buf[6];
+  char buf[7];
   mbox_get_firmware_rev((uint32_t *)&val);
   printf("firmware rev:    %08x\r\n", val);
   mbox_get_board_model((uint32_t *)&val);
