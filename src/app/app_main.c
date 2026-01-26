@@ -14,6 +14,8 @@
 #include <drivers/sd/sdhost_bcm2835.h>
 #include <kmalloc.h>
 #include <drivers/spi.h>
+#include <stat_fifo.h>
+#include "ui/ui.h"
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
@@ -29,273 +31,62 @@
 #define GPIO_DC    13
 #define GPIO_RESET 6
 
+#define GAP_X 2
+
+#define BPS_TEXT_POS_X 0
+#define BPS_TEXT_POS_Y 0
+#define BPS_TEXT_SIZE_X 60
+#define BPS_TEXT_SIZE_Y 20
+
+#define BPS_DIAGRAM_POS_X (BPS_TEXT_POS_X + BPS_TEXT_SIZE_X + GAP_X)
+#define BPS_DIAGRAM_POS_Y BPS_TEXT_POS_Y
+#define BPS_DIAGRAM_WIDTH (DISPLAY_WIDTH - BPS_DIAGRAM_POS_X)
+#define BPS_DIAGRAM_HEIGHT (BPS_TEXT_SIZE_Y + 1)
+
+#define FPS_TEXT_POS_X 0
+#define FPS_TEXT_POS_Y 20
+#define FPS_TEXT_SIZE_X 60
+#define FPS_TEXT_SIZE_Y 20
+
+#define FPS_DIAGRAM_POS_X (FPS_TEXT_POS_X + FPS_TEXT_SIZE_X + GAP_X)
+#define FPS_DIAGRAM_POS_Y FPS_TEXT_POS_Y
+#define FPS_DIAGRAM_WIDTH (DISPLAY_WIDTH - FPS_DIAGRAM_POS_X)
+#define FPS_DIAGRAM_HEIGHT (FPS_TEXT_SIZE_Y + 1)
 
 static struct block_device bdev_sdcard;
 static struct block_device *bdev_partition;
 static struct sdhc sdhc;
 static struct ili9341_drawframe drawframes[2];
 
-extern void fetch_clear_stats(int *out_num_buffers, int *out_total_bytes, int *out_num_bufs_on_vc);
-struct font_glyph {
-  uint8_t data[8];
+const struct ui_conf ui_conf = {
+  .diagram_bps = {
+     .text_pos_x = BPS_TEXT_POS_X,
+     .text_pos_y = BPS_TEXT_POS_Y,
+     .text_size_x = BPS_TEXT_SIZE_X,
+     .text_size_y = BPS_TEXT_SIZE_Y,
+     .graph_pos_x = BPS_DIAGRAM_POS_X,
+     .graph_pos_y = BPS_DIAGRAM_POS_Y,
+     .graph_size_x = BPS_DIAGRAM_WIDTH,
+     .graph_size_y = BPS_DIAGRAM_HEIGHT,
+     .max_value = 30000000
+  },
+  .diagram_fps = {
+     .text_pos_x = FPS_TEXT_POS_X,
+     .text_pos_y = FPS_TEXT_POS_Y,
+     .text_size_x = FPS_TEXT_SIZE_X,
+     .text_size_y = FPS_TEXT_SIZE_Y,
+     .graph_pos_x = FPS_DIAGRAM_POS_X,
+     .graph_pos_y = FPS_DIAGRAM_POS_Y,
+     .graph_size_x = FPS_DIAGRAM_WIDTH,
+     .graph_size_y = FPS_DIAGRAM_HEIGHT,
+     .max_value = CAMERA_FRAME_RATE * 1.2
+  },
+  .canvas_size_x = DISPLAY_WIDTH,
+  .canvas_size_y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
 };
 
-/*
- * 8x8 monospace debug font
- * ASCII indexed (32..90 partially filled)
- */
-static const struct font_glyph font8x8[] = {
-    /* ' ' (space) ASCII 32 */
-    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 } },
-
-    /* '!' */
-    { { 0x18,0x18,0x18,0x18,0x18,0x00,0x18,0x00 } },
-
-    /* '"' */
-    { { 0x36,0x36,0x24,0x00,0x00,0x00,0x00,0x00 } },
-
-    /* '#' */
-    { { 0x36,0x36,0x7F,0x36,0x7F,0x36,0x36,0x00 } },
-
-    /* '$' */
-    { { 0x18,0x3E,0x58,0x3C,0x1A,0x7C,0x18,0x00 } },
-
-    /* '%' */
-    { { 0x62,0x64,0x08,0x10,0x26,0x46,0x00,0x00 } },
-
-    /* '&' */
-    { { 0x30,0x48,0x30,0x4A,0x44,0x3A,0x00,0x00 } },
-
-    /* ''' */
-    { { 0x18,0x18,0x10,0x00,0x00,0x00,0x00,0x00 } },
-
-    /* '(' */
-    { { 0x0C,0x10,0x20,0x20,0x20,0x10,0x0C,0x00 } },
-
-    /* ')' */
-    { { 0x30,0x08,0x04,0x04,0x04,0x08,0x30,0x00 } },
-
-    /* '*' */
-    { { 0x00,0x24,0x18,0x7E,0x18,0x24,0x00,0x00 } },
-
-    /* '+' */
-    { { 0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00 } },
-
-    /* ',' */
-    { { 0x00,0x00,0x00,0x00,0x18,0x18,0x10,0x00 } },
-
-    /* '-' */
-    { { 0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00 } },
-
-    /* '.' */
-    { { 0x00,0x00,0x00,0x00,0x18,0x18,0x00,0x00 } },
-
-    /* '/' */
-    { { 0x02,0x04,0x08,0x10,0x20,0x40,0x00,0x00 } },
-
-    /* '0' */
-    { { 0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00 } },
-
-    /* '1' */
-    { { 0x18,0x38,0x18,0x18,0x18,0x18,0x3C,0x00 } },
-
-    /* '2' */
-    { { 0x3C,0x66,0x06,0x1C,0x30,0x66,0x7E,0x00 } },
-
-    /* '3' */
-    { { 0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00 } },
-
-    /* '4' */
-    { { 0x0C,0x1C,0x2C,0x4C,0x7E,0x0C,0x0C,0x00 } },
-
-    /* '5' */
-    { { 0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00 } },
-
-    /* '6' */
-    { { 0x1C,0x30,0x60,0x7C,0x66,0x66,0x3C,0x00 } },
-
-    /* '7' */
-    { { 0x7E,0x66,0x06,0x0C,0x18,0x18,0x18,0x00 } },
-
-    /* '8' */
-    { { 0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00 } },
-
-    /* '9' */
-    { { 0x3C,0x66,0x66,0x3E,0x06,0x0C,0x38,0x00 } },
-
-    /* ':' */
-    { { 0x00,0x18,0x18,0x00,0x18,0x18,0x00,0x00 } },
-
-    /* 'A' */
-    { { 0x18,0x24,0x42,0x7E,0x42,0x42,0x42,0x00 } },
-
-    /* 'B' */
-    { { 0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00 } },
-
-    /* 'C' */
-    { { 0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00 } },
-
-    /* 'D' */
-    { { 0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00 } },
-
-    /* 'E' */
-    { { 0x7E,0x60,0x60,0x7C,0x60,0x60,0x7E,0x00 } },
-
-    /* 'F' */
-    { { 0x7E,0x60,0x60,0x7C,0x60,0x60,0x60,0x00 } },
-
-    /* 'G' */
-    { { 0x3C,0x66,0x60,0x6E,0x66,0x66,0x3C,0x00 } },
-
-    /* 'H' */
-    { { 0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00 } },
-
-    /* 'I' */
-    { { 0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00 } },
-
-    /* 'J' */
-    { { 0x1E,0x0C,0x0C,0x0C,0x0C,0x6C,0x38,0x00 } },
-
-    /* 'K' */
-    { { 0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00 } },
-
-    /* 'L' */
-    { { 0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00 } },
-
-    /* 'M' */
-    { { 0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00 } },
-
-    /* 'N' */
-    { { 0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00 } },
-
-    /* 'O' */
-    { { 0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00 } },
-
-    /* 'P' */
-    { { 0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00 } },
-
-    /* 'Q' */
-    { { 0x3C,0x66,0x66,0x66,0x6E,0x3C,0x0E,0x00 } },
-
-    /* 'R' */
-    { { 0x7C,0x66,0x66,0x7C,0x78,0x6C,0x66,0x00 } },
-
-    /* 'S' */
-    { { 0x3C,0x66,0x30,0x18,0x0C,0x66,0x3C,0x00 } },
-
-    /* 'T' */
-    { { 0x7E,0x5A,0x18,0x18,0x18,0x18,0x3C,0x00 } },
-
-    /* 'U' */
-    { { 0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00 } },
-
-    /* 'V' */
-    { { 0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00 } },
-
-    /* 'W' */
-    { { 0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00 } },
-
-    /* 'X' */
-    { { 0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00 } },
-
-    /* 'Y' */
-    { { 0x66,0x66,0x66,0x3C,0x18,0x18,0x3C,0x00 } },
-
-    /* 'Z' */
-    { { 0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00 } },
-};
-
-
-static void u32_to_str(uint32_t v, char *out) {
-    char tmp[11];
-    int i = 0;
-
-    if (v == 0) {
-        out[0] = '0';
-        out[1] = 0;
-        return;
-    }
-
-    while (v) {
-        tmp[i++] = '0' + (v % 10);
-        v /= 10;
-    }
-
-    int j = 0;
-    while (i--) {
-        out[j++] = tmp[i];
-    }
-    out[j] = 0;
-}
-
-struct canvas {
-  uint16_t size_x;
-  uint16_t size_y;
-
-  /* pixels */
-  uint8_t *data;
-
-  /* foreground color */
-  uint8_t fg_r;
-  uint8_t fg_g;
-  uint8_t fg_b;
-
-  /* background color */
-  uint8_t bg_r;
-  uint8_t bg_g;
-  uint8_t bg_b;
-};
-
-static inline void fb_set_pixel_color(struct canvas *c,
-    unsigned x, unsigned y,
-    uint8_t r, uint8_t g, uint8_t b)
-{
-    if (x >= c->size_x|| y >= c->size_y)
-        return;
-
-    uint8_t *p = c->data + (y * c->size_x + x) * 3;
-    p[0] = r;
-    p[1] = g;
-    p[2] = b;
-}
-
-void fb_draw_char(struct canvas *c, int x, int y, char ch)
-{
-  const uint8_t *glyph;
-  int row, col;
-  uint8_t bits;
-
-  if (ch < 32 || ch > 127) {
-    printf("char: %02x, not drawing\r\n", ch);
-    return;
-  }
-
-  glyph = font8x8[ch - 32].data;
-
-  for (row = 0; row < 8; row++) {
-    bits = glyph[row];
-    for (col = 0; col < 8; col++) {
-      if (bits & (1 << (7 - col))) {
-        fb_set_pixel_color(c, x + col, y + row, c->fg_r, c->fg_g,
-          c->fg_b);
-      }
-      else
-        fb_set_pixel_color(c, x + col, y + row, c->bg_r, c->bg_g,
-          c->bg_b);
-     }
-  }
-}
-
-void fb_draw_text(struct canvas *c, int x, int y, const char *s)
-{
-  int cx = x;
-
-  while (*s) {
-    fb_draw_char(c, cx, y, *s);
-    cx += 8;
-    s++;
-  }
-}
+extern void fetch_clear_stats(uint32_t *out_num_h264_frames,
+  uint32_t *out_total_bytes, uint32_t *out_num_frames_done);
 
 static inline int app_init_sdcard(void)
 {
@@ -339,6 +130,7 @@ static inline int app_init_sdcard(void)
 }
 
 struct ili9341_per_frame_dma dmabuf_camera[1];
+
 struct ili9341_per_frame_dma dmabuf_app;
 
 static __attribute__((optimize("O0"))) int init_display_region_configs(
@@ -447,7 +239,7 @@ static inline void app_init_camera(void)
 #endif
 }
 
-static bool app_ui_draw_done = true;
+struct semaphore sem_ui_draw;
 
 static uint32_t time_now_ms(void)
 {
@@ -456,61 +248,42 @@ static uint32_t time_now_ms(void)
 
 static void app_ui_draw_done_isr(struct ili9341_per_frame_dma *buf)
 {
-  app_ui_draw_done = true;
+  os_semaphore_give_isr(&sem_ui_draw);
 }
 
 static NOOPT void app_ui_loop(void)
 {
-  char num_buf[32];
-  uint64_t ts_next_wkup, ts;
-  int num_buffers;
-  int total_bytes;
-  int num_bufs_on_vc;
+  uint64_t ts_next_wkup;
+  uint64_t ts;
+  uint32_t num_h264_frames;
+  uint32_t total_bytes;
+  uint32_t num_frames_done;
   struct ili9341_drawframe *df = &drawframes[1];
   struct ili9341_per_frame_dma *dma_io = &df->bufs[0];
+  struct ui_data d;
 
-  struct canvas c = {
-    .size_x = DISPLAY_WIDTH,
-    .size_y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
-    .data = dma_io->buf,
-    .fg_r = 255,
-    .fg_g = 0,
-    .fg_b = 0,
-    .bg_r = 0,
-    .bg_g = 0,
-    .bg_b = 0,
-  };
+  memset(dma_io->buf, 0, dma_io->buf_size);
+  ui_init(&ui_conf, dma_io->buf, dma_io->buf_size);
 
   ili9341_drawframe_set_irq(df, app_ui_draw_done_isr);
 
-  memset(dma_io->buf, 0, dma_io->buf_size);
-  ts_next_wkup = time_now_ms() + 250;
+  os_semaphore_init(&sem_ui_draw, 0, 10);
+
+  ts_next_wkup = time_now_ms() + 1000;
 
   while (1) {
     ts = time_now_ms();
-    if (ts_next_wkup > ts) {
-      printf("waiting %dms\r\n", ts_next_wkup - ts);
+    ts_next_wkup = ts + 1000;
+    fetch_clear_stats(&num_h264_frames, &total_bytes, &num_frames_done);
+    d.bitrate = total_bytes * 8;
+    d.fps = num_h264_frames;
+    ui_redraw(&d);
+    ili9341_draw_dma_buf(dma_io);
+    os_semaphore_take(&sem_ui_draw);
+    ts = time_now_ms();
+    if (ts < ts_next_wkup) {
       os_wait_ms(ts_next_wkup - ts);
     }
-
-    ts_next_wkup = time_now_ms() + 250;
-
-    fetch_clear_stats(&num_buffers, &total_bytes, &num_bufs_on_vc);
-    if (!app_ui_draw_done) {
-      continue;
-    }
-
-    app_ui_draw_done = false;
-
-    num_buf[0] = '!';
-    u32_to_str(num_buffers, num_buf + 1);
-    fb_draw_text(&c, 0, 0, num_buf);
-    u32_to_str(total_bytes, num_buf + 1);
-    fb_draw_text(&c, 0, 20, num_buf);
-    u32_to_str(num_bufs_on_vc, num_buf + 1);
-    fb_draw_text(&c, 0, 30, num_buf);
-    dcache_flush(dma_io->buf, dma_io->buf_size);
-    ili9341_draw_dma_buf(dma_io);
   }
 }
 

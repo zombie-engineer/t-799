@@ -140,15 +140,15 @@ to_remote:
 
 bool config_done = false;
 
-int num_buffers = 0;
+int stats_num_buffers_rdy_h264 = 0;
 int total_bytes = 0;
 
-void fetch_clear_stats(int *out_num_buffers, int *out_total_bytes, int *out_free_buffers)
+void fetch_clear_stats(uint32_t *out_num_buffers, uint32_t *out_total_bytes, uint32_t *out_free_buffers)
 {
   int irqflags;
   disable_irq_save_flags(irqflags);
-  *out_num_buffers = num_buffers;
-  num_buffers = 0;
+  *out_num_buffers = stats_num_buffers_rdy_h264;
+  stats_num_buffers_rdy_h264 = 0;
   *out_total_bytes = total_bytes;
   total_bytes = 0;
   *out_free_buffers = cam.port_h264_stream->bufs.on_vc;
@@ -165,8 +165,11 @@ static int OPTIMIZED camera_on_h264_buffer_ready(struct mmal_buffer *b)
   struct write_stream_buf *iobuf;
   struct write_stream_buf *iobuf_tmp;
   struct mmal_port *p = cam.port_h264_stream;
-  num_buffers++;
+
+  disable_irq_save_flags(irqflags);
+  stats_num_buffers_rdy_h264++;
   total_bytes += b->length;
+  restore_irq_flags(irqflags);
 
   disable_irq_save_flags(irqflags);
   b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);

@@ -18,6 +18,11 @@ CFLAGS := -Iinclude -g -Werror -Wall
 CFLAGS += -ffreestanding
 
 include src/Makefile
+include src/app/Makefile
+
+APP_OBJS := $(addprefix app/, $(APP_OBJS))
+OBJS := $(OBJS) $(APP_OBJS)
+$(info "objs: " $(OBJS))
 CFILES := $(addprefix src/, $(addsuffix .c, $(OBJS)))
 OBJS_REL := $(addsuffix .o, $(OBJS))
 OBJS := $(addprefix build/, $(addsuffix .o, $(OBJS)))
