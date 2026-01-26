@@ -21,7 +21,13 @@
 #include <sched.h>
 #include <irq.h>
 #include <drivers/intc/intc_bcm2835.h>
-// #include "bcm_sdhost_stat.h"
+#include "sdhost_bcm2835_stat.h"
+#include <stat_fifo.h>
+
+bool cycles_wait_had_data = false;
+uint64_t cycles_wait_start;
+uint32_t wait_cycles_data[400];
+struct stat_ringbuf stat_fifo_wait_cycles;
 
 /*
  * In manual mode we set CDIV register by calculating required CDIV from
@@ -619,12 +625,17 @@ static OPTIMIZED int bcm_sdhost_cmd_execute(struct sdhc *s, struct sd_cmd *c,
   }
 
   os_event_clear(&bcm_sdhost_block_done_event);
-  os_event_clear(&bcm_sdhost_cmd_done_event);
+  // os_event_clear(&bcm_sdhost_cmd_done_event);
   os_event_clear(&bcm_sdhost_dma_done_event);
 
   if (bcm_sdhost_log_level >= LOG_LEVEL_DEBUG2)
     BCM_SDHOST_LOG_DBG2("CMD: old:%08x,set:0x%08x, ARG:old:0x%08x,new:%08x",
       ioreg32_read(SDHOST_CMD), reg_cmd, ioreg32_read(SDHOST_ARG), c->arg);
+
+  cycles_wait_had_data = has_data;
+  if (cycles_wait_had_data) {
+    cycles_wait_start = arm_timer_get_count();
+  }
 
   ioreg32_write(SDHOST_ARG, c->arg);
   ioreg32_write(SDHOST_CMD, reg_cmd);
@@ -911,6 +922,8 @@ static int bcm_sdhost_init(void)
   os_event_init(&bcm_sdhost_cmd_done_event);
   os_event_init(&bcm_sdhost_block_done_event);
   os_event_init(&bcm_sdhost_dma_done_event);
+  stat_ringbuf_init(&stat_fifo_wait_cycles, wait_cycles_data,
+    ARRAY_SIZE(wait_cycles_data));
   return SUCCESS;
 }
 
@@ -931,12 +944,17 @@ static int bcm_sdhost_set_io_mode(struct sdhc *s, sdhc_io_mode_t mode,
 
 static void bcm_sdhost_wait_prev_done(struct sdhc *s)
 {
+  uint32_t wait_cycles;
   if (!bcm_sdhost_should_wait_last_io)
     return;
 
   bcm_sdhost_should_wait_last_io = false;
-
   bcm_sdhost_wait_last_op_complete();
+  if (cycles_wait_had_data) {
+    wait_cycles = (uint32_t)(arm_timer_get_count() - cycles_wait_start);
+    stat_ringbuf_push(&stat_fifo_wait_cycles, wait_cycles);
+    cycles_wait_had_data = false;
+  }
 }
 
 static void bcm_sdhost_notify_dma_isr(struct sdhc *s)

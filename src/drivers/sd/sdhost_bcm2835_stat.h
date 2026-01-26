@@ -1,6 +1,7 @@
 #pragma once
+#include <stdint.h>
 
-struct bcm_sdhost_wr_stat {
+struct sdhost_bcm2835_write_stat {
   int num_blocks;
   uint64_t cmd_start;
   int num_block_irqs;
@@ -10,6 +11,11 @@ struct bcm_sdhost_wr_stat {
   uint64_t wait_end;
 };
 
+extern uint64_t sdhost_wait_start;
+extern uint64_t sdhost_wait_cycles;
+
+
+#if 0
 struct bcm_sdhost_stat {
   uint32_t num_irqs;
   uint32_t num_waits;
@@ -19,9 +25,9 @@ struct bcm_sdhost_stat {
 };
 
 static struct bcm_sdhost_stat bcm_sdhost_stat = { 0 };
-static struct bcm_sdhost_wr_stat bcm_sdhost_wr_stats[128] = { 0 };
-static int bcm_sdhost_wr_stat_current_idx = 0;
-static struct bcm_sdhost_wr_stat *bcm_sdhost_wr_stat_current = NULL;
+static struct sdhost_bcm2835_write_stat sdhost_bcm2835_write_stats[128] = { 0 };
+static int sdhost_bcm2835_write_stat_current_idx = 0;
+static struct sdhost_bcm2835_write_stat *sdhost_bcm2835_write_stat_current = NULL;
 
 static inline void bcm_sdhost_stat_irq(void)
 {
@@ -45,24 +51,24 @@ static inline void bcm_sdhost_stat_wait_rdy_end(void)
     - bcm_sdhost_stat.wait_rdy_start_time;
 }
 
-static void bcm_sdhost_wr_stat_new(int num_blocks)
+static void sdhost_bcm2835_write_stat_new(int num_blocks)
 {
-  struct bcm_sdhost_wr_stat *c;
+  struct sdhost_bcm2835_write_stat *c;
 
-  if (bcm_sdhost_wr_stat_current_idx == 128)
+  if (sdhost_bcm2835_write_stat_current_idx == 128)
     return;
 
-  c = &bcm_sdhost_wr_stats[bcm_sdhost_wr_stat_current_idx++];
+  c = &sdhost_bcm2835_write_stats[sdhost_bcm2835_write_stat_current_idx++];
   c->num_blocks = num_blocks;
   c->cmd_start = arm_timer_get_count();
 
-  bcm_sdhost_wr_stat_current = c;
+  sdhost_bcm2835_write_stat_current = c;
 }
 
 #if 0
-static void bcm_sdhost_wr_stat_block_irq(void)
+static void sdhost_bcm2835_write_stat_block_irq(void)
 {
-  struct bcm_sdhost_wr_stat *c = bcm_sdhost_wr_stat_current;
+  struct sdhost_bcm2835_write_stat *c = sdhost_bcm2835_write_stat_current;
   if (!c)
     return;
 
@@ -73,35 +79,35 @@ static void bcm_sdhost_wr_stat_block_irq(void)
 }
 #endif
 
-static void bcm_sdhost_wr_stat_dma_end(void)
+static void sdhost_bcm2835_write_stat_dma_end(void)
 {
-  struct bcm_sdhost_wr_stat *c = bcm_sdhost_wr_stat_current;
+  struct sdhost_bcm2835_write_stat *c = sdhost_bcm2835_write_stat_current;
   if (!c)
     return;
 
   c->dma_end = arm_timer_get_count();
 }
 
-static void bcm_sdhost_wr_stat_wait_start(void)
+static void sdhost_bcm2835_write_stat_wait_start(void)
 {
-  struct bcm_sdhost_wr_stat *c = bcm_sdhost_wr_stat_current;
+  struct sdhost_bcm2835_write_stat *c = sdhost_bcm2835_write_stat_current;
   if (!c)
     return;
 
   c->wait_start = arm_timer_get_count();
 }
 
-static void bcm_sdhost_wr_stat_wait_end(void)
+static void sdhost_bcm2835_write_stat_wait_end(void)
 {
-  struct bcm_sdhost_wr_stat *c = bcm_sdhost_wr_stat_current;
+  struct sdhost_bcm2835_write_stat *c = sdhost_bcm2835_write_stat_current;
   if (!c)
     return;
 
   c->wait_end = arm_timer_get_count();
-  bcm_sdhost_wr_stat_current = NULL;
-  if (bcm_sdhost_wr_stat_current_idx == 128) {
+  sdhost_bcm2835_write_stat_current = NULL;
+  if (sdhost_bcm2835_write_stat_current_idx == 128) {
     for (int i = 0; i < 128; ++i) {
-      c = &bcm_sdhost_wr_stats[i];
+      c = &sdhost_bcm2835_write_stats[i];
       printf("%d %ld %d %d ", i, c->cmd_start, c->num_blocks, c->num_block_irqs);
       for (int ii = 0; ii < c->num_block_irqs; ++ii) {
         printf(" %ld", c->block_irq[ii]);
@@ -110,3 +116,4 @@ static void bcm_sdhost_wr_stat_wait_end(void)
     }
   }
 }
+#endif
