@@ -170,7 +170,6 @@ typedef enum {
 static int bcm_sdhost_log_level = LOG_LEVEL_NONE;
 static int bcm_sdhost_should_wait_last_io = false;
 
-static struct event bcm_sdhost_cmd_done_event;
 static struct event bcm_sdhost_block_done_event;
 static struct event bcm_sdhost_dma_done_event;
 
@@ -234,8 +233,6 @@ static void bcm_sdhost_irq(void)
     hcfg &= ~SDHOST_CFG_DATA_IRPT_EN;
     hcfg |= SDHOST_CFG_BLOCK_IRPT_EN;
     ioreg32_write(SDHOST_HCFG, hcfg);
-    if (!is_write)
-      os_event_notify_isr(&bcm_sdhost_cmd_done_event);
     return;
   }
 
@@ -919,7 +916,6 @@ static int bcm_sdhost_init(void)
   irq_set(BCM2835_IRQNR_SDHOST, bcm_sdhost_irq);
   bcm2835_ic_disable_irq(BCM2835_IRQNR_SDHOST);
 
-  os_event_init(&bcm_sdhost_cmd_done_event);
   os_event_init(&bcm_sdhost_block_done_event);
   os_event_init(&bcm_sdhost_dma_done_event);
   stat_ringbuf_init(&stat_fifo_wait_cycles, wait_cycles_data,
