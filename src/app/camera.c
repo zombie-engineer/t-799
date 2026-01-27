@@ -78,6 +78,8 @@ struct encoder_h264_params {
 
 static struct camera cam = { 0 };
 
+static bool cam_preview_buf_drawn = false;
+
 static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
 {
   struct list_head *node;
@@ -85,6 +87,71 @@ static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
   return node ? list_entry(node, struct mmal_buffer, list) : NULL;
 }
 
+/*
+ * Callback that draws camera preview buffer to display in response to signal
+ * from VideoCore that preview buffer is ready.
+ *
+ * IMPORTANT DETAILS:
+ *
+ * This function implements an optimized ownership management for the preview
+ * buffer which is OPPOSITE TO NAIVE EXPECTED pipeline.
+ *
+ * How expected ownership of preview buffer should work (not used here):
+ * 1. Buffer is allocated, initialized  Owned by this kernel.
+ * 2. Buffer is passed to MMAL stack to VideoCore with 'BUFFER_FROM_HOST' API.
+ *    Owned by VideoCore now.
+ * 3. VideoCore's MMAL fills the buffer with pixels and sends it with
+ *    'BUFFER_TO_HOST' API. Owned by this kernel now.
+ * 4. Kernel puts the buffer to display stack (DMA + SPI chains) to draw the
+ *    buffer on display. Still owned by this kernel.
+ * 5. Display finishes drawing the buffer and sends "done" callback from isr.
+ *    Kernel being signalled about that sends the buffer back to VideoCore
+ *    with 'BUFFER_FROM_HOST' API. Now the buffer is owned by VideoCore again.
+ *
+ * Issues with the above pipeline.
+ * - On VideoCore MMAL's side preview stream (or pipeline) is stalled for the
+ *   whole time from 4 to 5. VideoCore sees there are no free buffers for the
+ *   preview output port, so the port is marked as stalled or throttled for
+ *   this time.
+ * - (Assumed to be so) as the input to preview port itself is sourced form the
+ *   ISR souces node that is common to both the preview port and the video
+ *   port, ISR is considered throttled in response to preview port marked
+ *   throttled and by consequence video port output receives input pixel at a
+ *   slower pace.
+ * - As a result, the sub-graph ISR->camera.video port ->h264 encoder port
+ *   has a reduced FPS (last observed is 22 instead of 30) and obvious frame
+ *   drops are present in saved video
+ *
+ * OPTIMIZED PIPELINE (SHORTCUT):
+ * 1. Buffer is allocated, initialized  Owned by this kernel.
+ * 2. Buffer is passed to MMAL stack to VideoCore with 'BUFFER_FROM_HOST' API.
+ *    Owned by VideoCore now.
+ * 3. VideoCore's MMAL fills the buffer with pixels and sends it with
+ *    'BUFFER_TO_HOST' API. Owned by this kernel now.
+ * 4. Kernel requests redraw from the display stack (DMA + SPI chains) if
+ *    display is not currently drawing. Immediately kernel returns the buffer
+ *    back to VideoCore by 'BUFFER_FROM_HOST' without waiting for the "done"
+ *    callback from the display stack. Buffer is then owned by VideoCore but
+ *    is also used by the display stack.
+ * So, at 4. the buffer is shared between a producer and consumer. How safe is
+ * this in practice:
+ * - Buffer is allocated once and its address and size is always known to the
+ *   kernel.
+ * - When VideoCore finishes drawing it sends the buffer, for the kernel it is
+ *   useful as a signal that currently buffer has a frame that can be drawn and
+ *   can start drawing it.
+ * - But while this frame is being drawn, VideoCore is already owning the
+ *   buffer and probalby is in process of copying pixels of a next frame.
+ * - So the potential risk is that while display stack's DMA is copying bytes
+ *   this could become next frame in the middle of the process.
+ * - Also, because BUFFER_TO_HOST is immediately followed by BUFFER_FROM_HOST,
+ *   there is the risk that as VideoCore can also be fast to fill in the buffer
+ *   multiple times during a single DMA copy process on the display stack,
+ *   visually that might look as if the frame on the display could belong to
+ *   several different "torn" frames.
+ * - This is the only identified risk so far. Decision is in favor of h264
+ *   video output FPS, so we can live with potential frame tearing.
+ */
 static int OPTIMIZED camera_on_preview_buffer_ready(struct mmal_buffer *b)
 {
   int err;
@@ -93,7 +160,6 @@ static int OPTIMIZED camera_on_preview_buffer_ready(struct mmal_buffer *b)
   struct mmal_buffer *b2;
   struct mmal_port *p = cam.port_preview_stream;
   struct ili9341_per_frame_dma *dma_buf;
-
 
   disable_irq_save_flags(irqflags);
   b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
@@ -107,14 +173,11 @@ static int OPTIMIZED camera_on_preview_buffer_ready(struct mmal_buffer *b)
     goto to_remote;
   }
 
-  should_draw = list_empty(&p->bufs.os_side_in_process);
-  if (should_draw)
-    list_add_tail(&b->list, &p->bufs.os_side_in_process);
+  should_draw = cam_preview_buf_drawn;
+  if (cam_preview_buf_drawn)
+    cam_preview_buf_drawn = false;
 
   restore_irq_flags(irqflags);
-
-  if (!should_draw)
-    goto to_remote;
 
   dma_buf = NULL;
   for (int i = 0; i < ARRAY_SIZE(cam.preview_dma_bufs); ++i) {
@@ -127,8 +190,8 @@ static int OPTIMIZED camera_on_preview_buffer_ready(struct mmal_buffer *b)
     return ERR_INVAL;
   }
 
-  ili9341_draw_dma_buf(dma_buf);
-  return SUCCESS;
+  if (should_draw)
+    ili9341_draw_dma_buf(dma_buf);
 
 to_remote:
   err = mmal_port_buffer_to_remote(p, b);
@@ -278,18 +341,7 @@ static int mmal_set_camera_parameters(struct mmal_component *c,
 static void OPTIMIZED camera_on_preview_data_consumed_isr(
   struct ili9341_per_frame_dma *buf)
 {
-  struct mmal_port *p = cam.port_preview_stream;
-  struct mmal_buffer *b = NULL, *tmp;
-
-  list_for_each_entry_safe(b, tmp, &p->bufs.os_side_in_process, list) {
-    if (buf->handle == b->user_handle) {
-      list_move_tail(&b->list, &p->bufs.os_side_free);
-      mmal_port_buffer_consumed_isr(p, b);
-      return;
-    }
-  }
-
-  MODULE_ERR("Failed to find display buffer\r\n");
+  cam_preview_buf_drawn = true;
 }
 
 static inline int camera_cam_info_request(struct mmal_component *c,
@@ -733,6 +785,7 @@ static int camera_preview_init(struct ili9341_drawframe *drawframe,
 
   err = ili9341_drawframe_set_irq(drawframe,
     camera_on_preview_data_consumed_isr);
+  cam_preview_buf_drawn = true;
 
   err = camera_make_resizer(input_width, input_height, preview_width,
     preview_height, drawframe->num_bufs);

@@ -23,7 +23,7 @@
 #define FRAME_HEIGHT 1080
 #define PREVIEW_WIDTH 320
 #define PREVIEW_HEIGHT 180
-#define PREVIEW_ENABLE false
+#define PREVIEW_ENABLE true
 #define CAMERA_BIT_RATE (4 * 1000 * 1000)
 #define CAMERA_FRAME_RATE 30
 
@@ -133,7 +133,7 @@ struct ili9341_per_frame_dma dmabuf_camera[1];
 
 struct ili9341_per_frame_dma dmabuf_app;
 
-static __attribute__((optimize("O0"))) int init_display_region_configs(
+static int init_display_region_configs(
   struct ili9341_drawframe *df_cam,
   struct ili9341_drawframe *df_app,
   int preview_width, int preview_height,
