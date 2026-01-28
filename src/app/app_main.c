@@ -40,8 +40,8 @@
 
 #define BPS_DIAGRAM_POS_X (BPS_TEXT_POS_X + BPS_TEXT_SIZE_X + GAP_X)
 #define BPS_DIAGRAM_POS_Y BPS_TEXT_POS_Y
-#define BPS_DIAGRAM_WIDTH (DISPLAY_WIDTH - BPS_DIAGRAM_POS_X)
-#define BPS_DIAGRAM_HEIGHT (BPS_TEXT_SIZE_Y + 1)
+#define BPS_DIAGRAM_SIZE_X 80
+#define BPS_DIAGRAM_SIZE_Y (BPS_TEXT_SIZE_Y + 1)
 
 #define FPS_TEXT_POS_X 0
 #define FPS_TEXT_POS_Y 20
@@ -50,8 +50,18 @@
 
 #define FPS_DIAGRAM_POS_X (FPS_TEXT_POS_X + FPS_TEXT_SIZE_X + GAP_X)
 #define FPS_DIAGRAM_POS_Y FPS_TEXT_POS_Y
-#define FPS_DIAGRAM_WIDTH (DISPLAY_WIDTH - FPS_DIAGRAM_POS_X)
-#define FPS_DIAGRAM_HEIGHT (FPS_TEXT_SIZE_Y + 1)
+#define FPS_DIAGRAM_SIZE_X ((DISPLAY_WIDTH - FPS_DIAGRAM_POS_X) / 2)
+#define FPS_DIAGRAM_SIZE_Y (FPS_TEXT_SIZE_Y + 1)
+
+#define BPS_SD_WRITES_TEXT_POS_X (BPS_DIAGRAM_POS_X + BPS_DIAGRAM_SIZE_X + GAP_X)
+#define BPS_SD_WRITES_TEXT_POS_Y BPS_TEXT_POS_X
+#define BPS_SD_WRITES_TEXT_SIZE_X 80
+#define BPS_SD_WRITES_TEXT_SIZE_Y 20
+
+#define BPS_SD_WRITES_DIAGRAM_POS_X (BPS_SD_WRITES_TEXT_POS_X + BPS_SD_WRITES_TEXT_SIZE_X)
+#define BPS_SD_WRITES_DIAGRAM_POS_Y BPS_TEXT_POS_X
+#define BPS_SD_WRITES_DIAGRAM_SIZE_X 80
+#define BPS_SD_WRITES_DIAGRAM_SIZE_Y (BPS_SD_WRITES_TEXT_SIZE_Y + 1)
 
 static struct block_device bdev_sdcard;
 static struct block_device *bdev_partition;
@@ -66,8 +76,8 @@ const struct ui_conf ui_conf = {
      .text_size_y = BPS_TEXT_SIZE_Y,
      .graph_pos_x = BPS_DIAGRAM_POS_X,
      .graph_pos_y = BPS_DIAGRAM_POS_Y,
-     .graph_size_x = BPS_DIAGRAM_WIDTH,
-     .graph_size_y = BPS_DIAGRAM_HEIGHT,
+     .graph_size_x = BPS_DIAGRAM_SIZE_X,
+     .graph_size_y = BPS_DIAGRAM_SIZE_Y,
      .max_value = 30000000
   },
   .diagram_fps = {
@@ -77,9 +87,20 @@ const struct ui_conf ui_conf = {
      .text_size_y = FPS_TEXT_SIZE_Y,
      .graph_pos_x = FPS_DIAGRAM_POS_X,
      .graph_pos_y = FPS_DIAGRAM_POS_Y,
-     .graph_size_x = FPS_DIAGRAM_WIDTH,
-     .graph_size_y = FPS_DIAGRAM_HEIGHT,
+     .graph_size_x = FPS_DIAGRAM_SIZE_X,
+     .graph_size_y = FPS_DIAGRAM_SIZE_Y,
      .max_value = CAMERA_FRAME_RATE * 1.2
+  },
+  .diagram_bps_sd_writes = {
+     .text_pos_x = BPS_SD_WRITES_TEXT_POS_X,
+     .text_pos_y = BPS_SD_WRITES_TEXT_POS_Y,
+     .text_size_x = BPS_SD_WRITES_TEXT_SIZE_X,
+     .text_size_y = BPS_SD_WRITES_TEXT_SIZE_Y,
+     .graph_pos_x = BPS_SD_WRITES_DIAGRAM_POS_X,
+     .graph_pos_y = BPS_SD_WRITES_DIAGRAM_POS_Y,
+     .graph_size_x = BPS_SD_WRITES_DIAGRAM_SIZE_X,
+     .graph_size_y = BPS_SD_WRITES_DIAGRAM_SIZE_Y,
+     .max_value = 4000000
   },
   .canvas_size_x = DISPLAY_WIDTH,
   .canvas_size_y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
@@ -261,6 +282,7 @@ static NOOPT void app_ui_loop(void)
   struct ili9341_drawframe *df = &drawframes[1];
   struct ili9341_per_frame_dma *dma_io = &df->bufs[0];
   struct ui_data d;
+  struct sdhc_iostats sd_iostats;
 
   memset(dma_io->buf, 0, dma_io->buf_size);
   ui_init(&ui_conf, dma_io->buf, dma_io->buf_size);
@@ -275,8 +297,10 @@ static NOOPT void app_ui_loop(void)
     ts = time_now_ms();
     ts_next_wkup = ts + 1000;
     fetch_clear_stats(&num_h264_frames, &total_bytes, &num_frames_done);
+    sdhc_iostats_fetch_clear(&sd_iostats);
     d.bitrate = total_bytes * 8;
     d.fps = num_h264_frames;
+    d.bps_sd_writes = sd_iostats.num_bytes_written;
     ui_redraw(&d);
     ili9341_draw_dma_buf(dma_io);
     os_semaphore_take(&sem_ui_draw);

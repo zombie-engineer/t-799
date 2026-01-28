@@ -6,6 +6,7 @@ struct ui_data {
   uint32_t num_h264_buffers;
   uint32_t bitrate;
   uint32_t fps;
+  uint32_t bps_sd_writes;
 };
 
 struct ui_diagram_conf {
@@ -23,6 +24,7 @@ struct ui_diagram_conf {
 struct ui_conf {
   struct ui_diagram_conf diagram_bps;
   struct ui_diagram_conf diagram_fps;
+  struct ui_diagram_conf diagram_bps_sd_writes;
   uint16_t canvas_size_x;
   uint16_t canvas_size_y;
 };

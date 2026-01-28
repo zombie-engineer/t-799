@@ -287,6 +287,10 @@ typedef enum {
   SDHC_SDCARD_MODE_SPI,
 } sdhc_sdcard_mode_t;
 
+struct sdhc_iostats {
+  uint32_t num_bytes_written;
+};
+
 struct sdhc {
   sdhc_sdcard_mode_t sdcard_mode;
   struct sdhc_io io;
@@ -335,3 +339,5 @@ static inline bool sdhc_in_dma_mode(const struct sdhc *s)
   return s->io_mode == SDHC_IO_MODE_BLOCKING_DMA
     || s->io_mode == SDHC_IO_MODE_IT_DMA;
 }
+
+void sdhc_iostats_fetch_clear(struct sdhc_iostats *iostats);

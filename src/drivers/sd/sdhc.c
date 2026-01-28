@@ -16,6 +16,7 @@ typedef enum {
 static int sdhc_log_level;
 static struct sdhc *sdhc_current;
 extern struct sdhc_cmd_stat bcm_sdhost_cmd_stats;
+static struct sdhc_iostats sdhc_iostats;
 
 #define __SDHC_LOG(__level, __fmt, ...) \
   LOG(sdhc_log_level, __level, "sdhc", __fmt, ##__VA_ARGS__)
@@ -684,6 +685,7 @@ static int sdhc_write_stream_one(struct sdhc *s, struct write_stream_buf *b)
     SDHC_CHECK_ERR("Failed to WRITE MULTIPLE BLOCKS to write stream");
   }
 
+  sdhc_iostats.num_bytes_written += num_wr_blocks * s->block_size;
   s->write_stream_next_block_idx += num_wr_blocks;
   sdhc_write_stream_release_after_wr(s, num_wr_blocks);
 
@@ -807,6 +809,15 @@ int sdhc_set_io_mode(struct sdhc *sdhc, sdhc_io_mode_t mode,
     sdhc_io_mode_to_str(mode), invalidate_before_write);
 
   return SUCCESS;
+}
+
+void sdhc_iostats_fetch_clear(struct sdhc_iostats *iostats)
+{
+  int irq;
+  disable_irq_save_flags(irq);
+  *iostats = sdhc_iostats;
+  sdhc_iostats.num_bytes_written = 0;
+  restore_irq_flags(irq);
 }
 
 int sdhc_set_log_level(int l)
