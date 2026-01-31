@@ -16,6 +16,7 @@
 #include <drivers/spi.h>
 #include <stat_fifo.h>
 #include "ui/ui.h"
+#include "ui_config.h"
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
@@ -31,79 +32,24 @@
 #define GPIO_DC    13
 #define GPIO_RESET 6
 
-#define GAP_X 2
-
-#define BPS_TEXT_POS_X 0
-#define BPS_TEXT_POS_Y 0
-#define BPS_TEXT_SIZE_X 60
-#define BPS_TEXT_SIZE_Y 20
-
-#define BPS_DIAGRAM_POS_X (BPS_TEXT_POS_X + BPS_TEXT_SIZE_X + GAP_X)
-#define BPS_DIAGRAM_POS_Y BPS_TEXT_POS_Y
-#define BPS_DIAGRAM_SIZE_X 80
-#define BPS_DIAGRAM_SIZE_Y (BPS_TEXT_SIZE_Y + 1)
-
-#define FPS_TEXT_POS_X 0
-#define FPS_TEXT_POS_Y 20
-#define FPS_TEXT_SIZE_X 60
-#define FPS_TEXT_SIZE_Y 20
-
-#define FPS_DIAGRAM_POS_X (FPS_TEXT_POS_X + FPS_TEXT_SIZE_X + GAP_X)
-#define FPS_DIAGRAM_POS_Y FPS_TEXT_POS_Y
-#define FPS_DIAGRAM_SIZE_X ((DISPLAY_WIDTH - FPS_DIAGRAM_POS_X) / 2)
-#define FPS_DIAGRAM_SIZE_Y (FPS_TEXT_SIZE_Y + 1)
-
-#define BPS_SD_WRITES_TEXT_POS_X (BPS_DIAGRAM_POS_X + BPS_DIAGRAM_SIZE_X + GAP_X)
-#define BPS_SD_WRITES_TEXT_POS_Y BPS_TEXT_POS_X
-#define BPS_SD_WRITES_TEXT_SIZE_X 80
-#define BPS_SD_WRITES_TEXT_SIZE_Y 20
-
-#define BPS_SD_WRITES_DIAGRAM_POS_X (BPS_SD_WRITES_TEXT_POS_X + BPS_SD_WRITES_TEXT_SIZE_X)
-#define BPS_SD_WRITES_DIAGRAM_POS_Y BPS_TEXT_POS_X
-#define BPS_SD_WRITES_DIAGRAM_SIZE_X 80
-#define BPS_SD_WRITES_DIAGRAM_SIZE_Y (BPS_SD_WRITES_TEXT_SIZE_Y + 1)
-
 static struct block_device bdev_sdcard;
 static struct block_device *bdev_partition;
 static struct sdhc sdhc;
 static struct ili9341_drawframe drawframes[2];
 
-const struct ui_conf ui_conf = {
-  .diagram_bps = {
-     .text_pos_x = BPS_TEXT_POS_X,
-     .text_pos_y = BPS_TEXT_POS_Y,
-     .text_size_x = BPS_TEXT_SIZE_X,
-     .text_size_y = BPS_TEXT_SIZE_Y,
-     .graph_pos_x = BPS_DIAGRAM_POS_X,
-     .graph_pos_y = BPS_DIAGRAM_POS_Y,
-     .graph_size_x = BPS_DIAGRAM_SIZE_X,
-     .graph_size_y = BPS_DIAGRAM_SIZE_Y,
-     .max_value = 30000000
-  },
-  .diagram_fps = {
-     .text_pos_x = FPS_TEXT_POS_X,
-     .text_pos_y = FPS_TEXT_POS_Y,
-     .text_size_x = FPS_TEXT_SIZE_X,
-     .text_size_y = FPS_TEXT_SIZE_Y,
-     .graph_pos_x = FPS_DIAGRAM_POS_X,
-     .graph_pos_y = FPS_DIAGRAM_POS_Y,
-     .graph_size_x = FPS_DIAGRAM_SIZE_X,
-     .graph_size_y = FPS_DIAGRAM_SIZE_Y,
-     .max_value = CAMERA_FRAME_RATE * 1.2
-  },
-  .diagram_bps_sd_writes = {
-     .text_pos_x = BPS_SD_WRITES_TEXT_POS_X,
-     .text_pos_y = BPS_SD_WRITES_TEXT_POS_Y,
-     .text_size_x = BPS_SD_WRITES_TEXT_SIZE_X,
-     .text_size_y = BPS_SD_WRITES_TEXT_SIZE_Y,
-     .graph_pos_x = BPS_SD_WRITES_DIAGRAM_POS_X,
-     .graph_pos_y = BPS_SD_WRITES_DIAGRAM_POS_Y,
-     .graph_size_x = BPS_SD_WRITES_DIAGRAM_SIZE_X,
-     .graph_size_y = BPS_SD_WRITES_DIAGRAM_SIZE_Y,
-     .max_value = 4000000
-  },
-  .canvas_size_x = DISPLAY_WIDTH,
-  .canvas_size_y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
+static struct ui_data ui_data = { 0 };
+
+static struct canvas_plot_with_value_text ui_plots[] = {
+  CANVAS_PLOT_WITH_TEXT_INIT(H264_BPS, &ui_data.h264_bps     , "bps", 1024),
+  CANVAS_PLOT_WITH_TEXT_INIT(H264_FPS, &ui_data.h264_fps     , "fps", 1000),
+  CANVAS_PLOT_WITH_TEXT_INIT(SD_WR_BPS, &ui_data.sd_write_bps, "bps", 1024),
+};
+
+static struct ui ui = {
+  .canvas_size.x = DISPLAY_WIDTH,
+  .canvas_size.y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
+  .plots = ui_plots,
+  .num_plots = ARRAY_SIZE(ui_plots),
 };
 
 extern void fetch_clear_stats(uint32_t *out_num_h264_frames,
@@ -281,11 +227,10 @@ static NOOPT void app_ui_loop(void)
   uint32_t num_frames_done;
   struct ili9341_drawframe *df = &drawframes[1];
   struct ili9341_per_frame_dma *dma_io = &df->bufs[0];
-  struct ui_data d;
   struct sdhc_iostats sd_iostats;
 
   memset(dma_io->buf, 0, dma_io->buf_size);
-  ui_init(&ui_conf, dma_io->buf, dma_io->buf_size);
+  ui_init(&ui, dma_io->buf, dma_io->buf_size);
 
   ili9341_drawframe_set_irq(df, app_ui_draw_done_isr);
 
@@ -298,10 +243,10 @@ static NOOPT void app_ui_loop(void)
     ts_next_wkup = ts + 1000;
     fetch_clear_stats(&num_h264_frames, &total_bytes, &num_frames_done);
     sdhc_iostats_fetch_clear(&sd_iostats);
-    d.bitrate = total_bytes * 8;
-    d.fps = num_h264_frames;
-    d.bps_sd_writes = sd_iostats.num_bytes_written;
-    ui_redraw(&d);
+    ui_data.h264_bps = total_bytes * 8;
+    ui_data.h264_fps = num_h264_frames;
+    ui_data.sd_write_bps = sd_iostats.num_bytes_written;
+    ui_redraw(&ui_data);
     ili9341_draw_dma_buf(dma_io);
     os_semaphore_take(&sem_ui_draw);
     ts = time_now_ms();

@@ -7,41 +7,53 @@ static inline void canvas_set_pixel_color(struct canvas *c,
     uint8_t r, uint8_t g, uint8_t b)
 {
   uint8_t *p;
-  if (x >= c->size_x|| y >= c->size_y)
+
+  if (x >= c->size.x|| y >= c->size.y)
     return;
 
-  p = c->data + (y * c->size_x + x) * 3;
+  p = c->data + (y * c->size.x + x) * 3;
   p[0] = r;
   p[1] = g;
   p[2] = b;
 }
 
-void canvas_diagram_draw_one(struct canvas *c, struct diagram *d,
+void canvas_plot_draw_one(struct canvas *c, struct canvas_plot *p,
   uint32_t value)
 {
-  d->last_x++;
-  if (d->last_x > d->size_x) {
-    d->last_x = 0;
+  unsigned int y;
+  unsigned int x;
+  uint32_t value_scaled;
+
+  p->last_pos.x++;
+  if (p->last_pos.x > p->area.size.x) {
+    p->last_pos.x = 0;
   }
 
-  unsigned int x = d->last_x + d->x;
+  x = p->last_pos.x + p->area.pos.x;
 
-  uint32_t value_scaled = ((float)value / d->max_value) * d->size_y;
-  if (value_scaled > d->size_y) {
-    value_scaled = d->size_y;
+  value_scaled = ((float)value / p->max_value) * p->area.size.y;
+  if (value_scaled > p->area.size.y) {
+    value_scaled = p->area.size.y;
   }
 
-  unsigned int y = d->y + d->size_y - value_scaled;
-  printf("value: %d, scaled: %d, max:%d, y:%d\r\n", value,  value_scaled,
-    d->max_value, y);
+  y = p->area.pos.y + p->area.size.y - value_scaled;
+  printf("value: %p, scaled: %p, max:%p, y:%p\r\n", value,  value_scaled,
+    p->max_value, y);
 
-  if (x == d->x)
-    canvas_set_pixel_color(c, d->x, y, 255, 0, 0);
+  if (x == p->area.pos.x)
+    canvas_set_pixel_color(c, p->area.pos.x, y, 255, 0, 0);
   else {
-    canvas_draw_line(c, x, d->y, x, d->y + d->size_y, 0, 0, 0);
-    canvas_draw_line(c, x - 1, d->last_y, x, y, 255, 0, 0);
+    canvas_draw_line(c, x, p->area.pos.y, x, p->area.pos.y + p->area.size.y,
+      0, 0, 0);
+    canvas_draw_line(c, x - 1, p->last_pos.y, x, y, 255, 0, 0);
   }
-  d->last_y = y;
+  p->last_pos.y = y;
+}
+
+void canvas_plot_with_value_text_draw(struct canvas *c,
+  struct canvas_plot_with_value_text *p, uint32_t value)
+{
+  canvas_plot_draw_one(c, &p->plot, value);
 }
 
 void canvas_fill_rect(struct canvas *c, int x, int y, int w, int h, uint8_t r,
@@ -63,11 +75,11 @@ void canvas_fill_rect(struct canvas *c, int x, int y, int w, int h, uint8_t r,
     y = 0;
   }
 
-  if (x + w > (int)c->size_x)
-    w = c->size_x - x;
+  if (x + w > (int)c->size.x)
+    w = c->size.x - x;
 
-  if (y + h > (int)c->size_y)
-    h = c->size_y - y;
+  if (y + h > (int)c->size.y)
+    h = c->size.y - y;
 
   if (w <= 0 || h <= 0)
     return;
@@ -189,11 +201,9 @@ void canvas_draw_text(struct canvas *c, int x, int y,
   }
 }
 
-void canvas_init(struct canvas *c, uint8_t *data, uint16_t size_x,
-  uint16_t size_y)
+void canvas_init(struct canvas *c, uint8_t *data, struct canvas_size *size)
 {
-  c->size_x = size_x;
-  c->size_y = size_y;
+  c->size = *size;
   c->data = data;
-  c->stride = 3 * size_x;
+  c->stride = 3 * c->size.x;
 }
