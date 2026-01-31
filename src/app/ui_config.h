@@ -1,6 +1,5 @@
 #pragma once
 
-
 /*
  * UI:
  * 
@@ -25,7 +24,7 @@
 #define H264_FPS_TEXT_SIZE_X TEXT_SIZE_X
 #define H264_FPS_SIZE_X (TEXT_SIZE_X + PLOT_SIZE_X)
 #define H264_FPS_SIZE_Y 20
-#define H264_FPS_MAX_VALUE (CAMERA_FRAME_RATE * 1.2)
+#define H264_FPS_MAX_VALUE (CAM_VIDEO_FRAMES_PER_SEC * 1.2)
 
 #define SD_WR_BPS_X (H264_BPS_X + H264_BPS_SIZE_X)
 #define SD_WR_BPS_Y 0

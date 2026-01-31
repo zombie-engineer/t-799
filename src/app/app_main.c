@@ -16,17 +16,29 @@
 #include <drivers/spi.h>
 #include <stat_fifo.h>
 #include "ui/ui.h"
-#include "ui_config.h"
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
-#define FRAME_WIDTH 1920
-#define FRAME_HEIGHT 1080
-#define PREVIEW_WIDTH 320
-#define PREVIEW_HEIGHT 180
-#define PREVIEW_ENABLE true
-#define CAMERA_BIT_RATE (4 * 1000 * 1000)
-#define CAMERA_FRAME_RATE 30
+#define DISPLAY_PREVIEW_WIDTH 320
+#define DISPLAY_PREVIEW_HEIGHT 180
+
+#define CAM_VIDEO_FRAME_WIDTH 1920
+#define CAM_VIDEO_FRAME_HEIGHT 1080
+#define CAM_VIDEO_BUFFERS_NUM 128
+#define CAM_VIDEO_BUFFER_SIZE (256 * 1024)
+#define CAM_PREVIEW_WIDTH DISPLAY_PREVIEW_WIDTH
+#define CAM_PREVIEW_HEIGHT DISPLAY_PREVIEW_HEIGHT
+#define CAM_ENABLE_PREVIEW true
+#define CAM_VIDEO_BITRATE (4 * 1000 * 1000)
+#define CAM_VIDEO_FRAMES_PER_SEC 30
+
+#define CAM_H264_Q_MIN 10
+#define CAM_H264_Q_MAX 22
+#define CAM_H264_Q_INIT 18
+#define CAM_H264_PROFILE MMAL_VIDEO_PROFILE_H264_HIGH
+#define CAM_H264_LEVEL MMAL_VIDEO_LEVEL_H264_4
+
+#include "ui_config.h"
 
 #define GPIO_BLK   19
 #define GPIO_DC    13
@@ -47,7 +59,7 @@ static struct canvas_plot_with_value_text ui_plots[] = {
 
 static struct ui ui = {
   .canvas_size.x = DISPLAY_WIDTH,
-  .canvas_size.y = DISPLAY_HEIGHT - PREVIEW_HEIGHT,
+  .canvas_size.y = DISPLAY_HEIGHT - DISPLAY_PREVIEW_HEIGHT,
   .plots = ui_plots,
   .num_plots = ARRAY_SIZE(ui_plots),
 };
@@ -164,7 +176,8 @@ static int app_init_display(void)
   int err;
 
   err = init_display_region_configs(&drawframes[0], &drawframes[1],
-    PREVIEW_WIDTH, PREVIEW_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    DISPLAY_PREVIEW_WIDTH, DISPLAY_PREVIEW_HEIGHT,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT);
   if (err) {
     os_log("Failed to init ili9341 region config for camera, err: %d", err);
     return err;
@@ -191,12 +204,30 @@ static inline void app_init_camera(void)
   err = smem_init();
   BUG_IF(err != SUCCESS, "failed to init VideoCore service \"SMEM\"");
 
-  err = camera_init(bdev_partition,
-    FRAME_WIDTH, FRAME_HEIGHT,
-    CAMERA_FRAME_RATE,
-    CAMERA_BIT_RATE,
-    PREVIEW_ENABLE, &drawframes[0], PREVIEW_WIDTH,
-    PREVIEW_HEIGHT);
+  const struct camera_config camera_config = {
+    .block_device = bdev_partition,
+    .frame_size_x = CAM_VIDEO_FRAME_WIDTH,
+    .frame_size_y = CAM_VIDEO_FRAME_HEIGHT,
+    .frames_per_sec = CAM_VIDEO_FRAMES_PER_SEC,
+    .bit_rate = CAM_VIDEO_BITRATE,
+    .enable_preview = CAM_ENABLE_PREVIEW,
+    .preview_drawframe = &drawframes[0],
+    .preview_size_x = CAM_PREVIEW_WIDTH,
+    .preview_size_y = CAM_PREVIEW_HEIGHT,
+    .h264_buffers_num = CAM_VIDEO_BUFFERS_NUM,
+    .h264_buffer_size = CAM_VIDEO_BUFFER_SIZE,
+    .h264_encoder = {
+      .q_initial = CAM_H264_Q_INIT,
+      .q_min = CAM_H264_Q_MIN,
+      .q_max = CAM_H264_Q_MAX,
+      .profile = CAM_H264_PROFILE,
+      .level = CAM_H264_LEVEL,
+      .intraperiod = CAM_VIDEO_FRAMES_PER_SEC * 2,
+      .bitrate = CAM_VIDEO_BITRATE
+    }
+  };
+
+  err = camera_init(&camera_config);
   BUG_IF(err != SUCCESS, "failed to init camera");
 
 #if 0

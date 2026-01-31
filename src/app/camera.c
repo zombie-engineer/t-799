@@ -66,16 +66,6 @@ struct camera {
   struct ili9341_per_frame_dma *preview_dma_bufs[2];
 };
 
-struct encoder_h264_params {
-  uint32_t q_initial;
-  uint32_t q_min;
-  uint32_t q_max;
-  uint32_t intraperiod;
-  uint32_t bitrate;
-  enum mmal_video_profile profile;
-  enum mmal_video_level level;
-};
-
 static struct camera cam = { 0 };
 
 static bool cam_preview_buf_drawn = false;
@@ -419,7 +409,7 @@ out_err:
 }
 
 static int camera_encoder_params_set(struct mmal_port *e,
-  const struct encoder_h264_params *p)
+  const struct camera_video_port_config_h264 *p)
 {
   int err = SUCCESS;
   uint32_t v32;
@@ -577,22 +567,14 @@ out_err:
   return err;
 }
 
-static int camera_make_encoder(int width, int height, int frame_rate,
-  uint32_t bit_rate)
+static int camera_make_encoder(unsigned int width, unsigned int height,
+  unsigned int frames_per_sec, unsigned int bit_rate,
+  size_t requested_num_buffers, size_t requested_buf_size,
+  const struct camera_video_port_config_h264 *encoder_config)
 {
   int err = SUCCESS;
   struct mmal_component *encoder;
 
-  const struct encoder_h264_params encoder_params = {
-    .q_initial = 18,
-    .q_min = 10,
-    .q_max = 22,
-    .profile = MMAL_VIDEO_PROFILE_H264_HIGH,
-    .level = MMAL_VIDEO_LEVEL_H264_4,
-    .intraperiod = frame_rate * 2,
-    .bitrate = bit_rate
-  };
- 
   encoder = mmal_component_create("ril.video_encode");
   CHECK_ERR_PTR(encoder, "Failed to create component 'ril.video_encode'");
   if (!encoder->inputs || !encoder->outputs) {
@@ -607,10 +589,7 @@ static int camera_make_encoder(int width, int height, int frame_rate,
   CHECK_ERR("failed to enable control port");
 
   mmal_format_set(&encoder->output[0].format, MMAL_ENCODING_H264, 0, width,
-    height, frame_rate, bit_rate);
-
-  size_t requested_buf_size = 256 * 1024;
-  size_t requested_num_buffers = 128;
+    height, frames_per_sec, bit_rate);
 
   encoder->output[0].current_buffer.num = requested_num_buffers;
   encoder->output[0].current_buffer.size = requested_buf_size;
@@ -639,7 +618,7 @@ static int camera_make_encoder(int width, int height, int frame_rate,
   if (err)
     goto out_err;
 
-  err = camera_encoder_params_set(&encoder->output[0], &encoder_params);
+  err = camera_encoder_params_set(&encoder->output[0], encoder_config);
   if (err)
     goto out_err;
 
@@ -653,8 +632,9 @@ out_err:
 }
 
 
-static int camera_make_camera(int frame_width ,int frame_height,
-  int frame_rate, struct mmal_param_cam_info_cam *cam_info)
+static int camera_make_camera(unsigned int frame_width,
+  unsigned int frame_height, unsigned int frames_per_sec,
+  struct mmal_param_cam_info_cam *cam_info)
 {
   struct mmal_component *c;
   struct mmal_port *preview, *still, *video;
@@ -702,12 +682,12 @@ static int camera_make_camera(int frame_width ,int frame_height,
   CHECK_ERR("Failed to retrieve supported encodings from port");
 
   mmal_format_set(&preview->format, MMAL_ENCODING_OPAQUE,
-    MMAL_ENCODING_I420, frame_width, frame_height, frame_rate, 0);
+    MMAL_ENCODING_I420, frame_width, frame_height, frames_per_sec, 0);
   err = mmal_port_set_format(preview);
   CHECK_ERR("Failed to set format for preview capture port");
 
   mmal_format_set(&video->format, MMAL_ENCODING_OPAQUE,
-    0, frame_width, frame_height, frame_rate, 0);
+    0, frame_width, frame_height, frames_per_sec, 0);
 
   err = mmal_port_set_format(video);
   CHECK_ERR("Failed to set format for video capture port");
@@ -829,14 +809,11 @@ out_err:
   return err;
 }
 
-int camera_init(struct block_device *bdev, int frame_width, int frame_height,
-  int frame_rate, uint32_t bit_rate, bool preview_enable,
-  struct ili9341_drawframe *preview_drawframe, int preview_width,
-  int preview_height)
+int camera_init(const struct camera_config *conf)
 {
   int err;
   struct mmal_param_cam_info cam_info = {0};
-  cam.bdev = bdev;
+  cam.bdev = conf->block_device;
   cam.port_h264_stream = NULL;
   cam.port_preview_stream = NULL;
 
@@ -845,12 +822,14 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   err = camera_get_camera_info(&cam_info);
   CHECK_ERR("Failed to get num cameras");
 
-  err = camera_make_camera(frame_width, frame_height, frame_rate,
-    &cam_info.cameras[0]);
+  err = camera_make_camera(conf->frame_size_x, conf->frame_size_y,
+    conf->frames_per_sec, &cam_info.cameras[0]);
   CHECK_ERR("Failed to create camera component");
 
-  err = camera_make_encoder(frame_width, frame_height, frame_rate,
-    bit_rate);
+  err = camera_make_encoder(conf->frame_size_x, conf->frame_size_y,
+    conf->frames_per_sec, conf->bit_rate, conf->h264_buffers_num,
+    conf->h264_buffer_size, &conf->h264_encoder_config);
+
   CHECK_ERR("Failed to create encoder component");
 
   err = mmal_port_connect(cam.camera.video, cam.encoder.in);
@@ -864,9 +843,9 @@ int camera_init(struct block_device *bdev, int frame_width, int frame_height,
   CHECK_ERR("Failed to set zero copy to video.OUT");
   cam.port_h264_stream = cam.encoder.out;
 
-  if (preview_enable) {
-    err = camera_preview_init(preview_drawframe, frame_width, frame_height,
-      preview_width, preview_height, true);
+  if (conf->enable_preview) {
+    err = camera_preview_init(conf->preview_drawframe, conf->frame_size_x,
+      conf->frame_size_y, conf->preview_size_x, conf->preview_size_y, true);
     CHECK_ERR("Failed to enable preview graph when requested");
   }
 
