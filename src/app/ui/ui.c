@@ -28,7 +28,7 @@ static inline void ui_scaled_value_to_string(char *buf, size_t buf_size,
   }
 }
 
-static void plot_redraw(struct canvas_plot_with_value_text *p)
+static void ui_plot_redraw(struct canvas_plot_with_value_text *p)
 {
   char buf[64];
   const struct gfx_font *f = &font_free_sans_6pt_7b;
@@ -45,24 +45,36 @@ static void plot_redraw(struct canvas_plot_with_value_text *p)
   canvas_plot_with_value_text_draw(&ui_canvas, p, value);
 }
 
+static void ui_redraw_num_bufs(uint32_t nr_bufs_on_arm,
+  uint32_t nr_bufs_from_vc, uint32_t nr_bufs_to_vc)
+{
+  char buf[64];
+  const struct gfx_font *f = &font_free_sans_6pt_7b;
+  int x = _ui->h264_num_bufs.pos.x;
+  int y = _ui->h264_num_bufs.pos.y;
+  int size_x = _ui->h264_num_bufs.size.y;
+  int size_y = _ui->h264_num_bufs.size.y;
+
+  snprintf(buf, sizeof(buf), "%d/%d/%d", nr_bufs_on_arm, nr_bufs_from_vc,
+    nr_bufs_to_vc);
+
+  canvas_fill_rect(&ui_canvas, x, y, size_x + 60, size_y, 0, 0, 0);
+  canvas_draw_text(&ui_canvas, x, y + f->y_advance / 2, f, buf, 255, 0, 0);
+}
+
 static inline void plot_init(struct canvas_plot_with_value_text *p)
 {
-  p->plot.last_pos.y = p->plot.area.pos.y + p->plot.area.size.y;
+  p->plot.last_pos.x = p->plot.area.size.x - 1;
+  p->plot.last_pos.y = p->plot.area.size.y;
 }
 
 void ui_redraw(const struct ui_data *d)
 {
-  unsigned x0, x1, y;
-  const struct canvas_plot_with_value_text *p = &_ui->plots[0];
-
-  x0 = 2;
-  y = p->text_area.pos.y + p->text_area.size.y;
-  x1 = p->text_area.size.x + p->plot.area.size.x - x0;
-
-  canvas_draw_line(&ui_canvas, x0, y, x1, y, 0, 255, 0);
-
   for (size_t i = 0 ; i < _ui->num_plots; ++i)
-    plot_redraw(&_ui->plots[i]);
+    ui_plot_redraw(&_ui->plots[i]);
+
+  ui_redraw_num_bufs(d->h264_bufs_on_arm, d->h264_bufs_from_vc,
+    d->h264_bufs_to_vc);
 }
 
 void ui_init(struct ui *ui, uint8_t *data, size_t data_size)

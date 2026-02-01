@@ -62,10 +62,11 @@ static struct ui ui = {
   .canvas_size.y = DISPLAY_HEIGHT - DISPLAY_PREVIEW_HEIGHT,
   .plots = ui_plots,
   .num_plots = ARRAY_SIZE(ui_plots),
+  .h264_num_bufs = {
+    .pos = { .x = H264_NUM_BUFS_X, .y = H264_NUM_BUFS_Y },
+    .size = { .x = H264_NUM_BUFS_SIZE_X, .y = H264_NUM_BUFS_SIZE_Y },
+  }
 };
-
-extern void fetch_clear_stats(uint32_t *out_num_h264_frames,
-  uint32_t *out_total_bytes, uint32_t *out_num_frames_done);
 
 static inline int app_init_sdcard(void)
 {
@@ -253,12 +254,12 @@ static NOOPT void app_ui_loop(void)
 {
   uint64_t ts_next_wkup;
   uint64_t ts;
-  uint32_t num_h264_frames;
-  uint32_t total_bytes;
-  uint32_t num_frames_done;
+  uint32_t prev_bytes_from_vc;
+  uint32_t prev_frame_end_from_vc;
   struct ili9341_drawframe *df = &drawframes[1];
   struct ili9341_per_frame_dma *dma_io = &df->bufs[0];
   struct sdhc_iostats sd_iostats;
+  struct cam_port_stats cam_h264_stats;
 
   memset(dma_io->buf, 0, dma_io->buf_size);
   ui_init(&ui, dma_io->buf, dma_io->buf_size);
@@ -272,11 +273,22 @@ static NOOPT void app_ui_loop(void)
   while (1) {
     ts = time_now_ms();
     ts_next_wkup = ts + 1000;
-    fetch_clear_stats(&num_h264_frames, &total_bytes, &num_frames_done);
+    cam_port_stats_fetch(&cam_h264_stats, CAM_PORT_STATS_H264);
     sdhc_iostats_fetch_clear(&sd_iostats);
-    ui_data.h264_bps = total_bytes * 8;
-    ui_data.h264_fps = num_h264_frames;
+
+    ui_data.h264_bps = (cam_h264_stats.bytes_from_vc - prev_bytes_from_vc) * 8;
+    ui_data.h264_fps = cam_h264_stats.frame_end_from_vc -
+      prev_frame_end_from_vc;
+
+    ui_data.h264_bufs_on_arm = cam_h264_stats.bufs_on_arm;
+    ui_data.h264_bufs_from_vc = cam_h264_stats.bufs_from_vc;
+    ui_data.h264_bufs_to_vc = cam_h264_stats.bufs_to_vc;
+
     ui_data.sd_write_bps = sd_iostats.num_bytes_written;
+
+    prev_frame_end_from_vc = cam_h264_stats.frame_end_from_vc;
+    prev_bytes_from_vc = cam_h264_stats.bytes_from_vc;
+
     ui_redraw(&ui_data);
     ili9341_draw_dma_buf(dma_io);
     os_semaphore_take(&sem_ui_draw);
@@ -304,7 +316,6 @@ void NOOPT app_main(void)
 
 out:
   while (1) {
-
     asm volatile ("wfe");
   }
 }

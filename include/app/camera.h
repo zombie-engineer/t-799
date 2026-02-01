@@ -4,7 +4,22 @@
 #include <vc/service_mmal_param.h>
 #include <drivers/display/display_ili9341.h>
 
+#define CAM_PORT_STATS_H264 1
+
 struct block_device;
+
+struct cam_port_stats {
+  uint32_t bufs_from_vc;
+  uint32_t bufs_to_vc;
+  uint32_t configs_from_vc;
+  uint32_t keyframes_from_vc;
+  uint32_t frame_start_from_vc;
+  uint32_t frame_end_from_vc;
+  uint32_t nal_end_from_vc;
+  uint32_t bytes_from_vc;
+  uint16_t bufs_on_vc;
+  uint16_t bufs_on_arm;
+};
 
 struct camera_video_port_config_h264 {
   uint32_t q_initial;
@@ -32,5 +47,6 @@ struct camera_config {
 };
 
 int camera_init(const struct camera_config *conf);
+void cam_port_stats_fetch(struct cam_port_stats *dst, int stats_id);
 
 int camera_video_start(void);

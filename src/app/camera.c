@@ -50,6 +50,10 @@ struct camera_component_encoder {
   struct mmal_port *out;
 };
 
+struct camera_stats {
+  struct cam_port_stats h264;
+};
+
 struct camera {
   struct block_device *bdev;
 
@@ -60,15 +64,18 @@ struct camera {
   struct mmal_port *port_preview_stream;
   struct mmal_port *port_h264_stream;
 
-  int stat_frames;
-
   /* size = 2 is hardcoded but might be extended */
   struct ili9341_per_frame_dma *preview_dma_bufs[2];
+
+  struct camera_stats stats;
 };
 
 static struct camera cam = { 0 };
 
 static bool cam_preview_buf_drawn = false;
+
+static bool cam_h264_config_received = false;
+
 
 static inline struct mmal_buffer *mmal_buf_fifo_pop(struct list_head *l)
 {
@@ -191,20 +198,57 @@ to_remote:
   return err;
 }
 
-bool config_done = false;
-
-int stats_num_buffers_rdy_h264 = 0;
-int total_bytes = 0;
-
-void fetch_clear_stats(uint32_t *out_num_buffers, uint32_t *out_total_bytes, uint32_t *out_free_buffers)
+void cam_port_stats_fetch(struct cam_port_stats *dst, int stats_id)
 {
   int irqflags;
+  struct cam_port_stats *stats;
+
+  if (stats_id != CAM_PORT_STATS_H264)
+    return;
+  stats = &cam.stats.h264;
   disable_irq_save_flags(irqflags);
-  *out_num_buffers = stats_num_buffers_rdy_h264;
-  stats_num_buffers_rdy_h264 = 0;
-  *out_total_bytes = total_bytes;
-  total_bytes = 0;
-  *out_free_buffers = cam.port_h264_stream->bufs.on_vc;
+  *dst = *stats;
+  restore_irq_flags(irqflags);
+}
+
+static inline void cam_port_stats_on_buffer_from_vc(struct cam_port_stats *s,
+  const struct mmal_buffer *b)
+{
+  int irqflags;
+  struct cam_port_stats *stats = &cam.stats.h264;
+
+  disable_irq_save_flags(irqflags);
+
+  stats->bufs_from_vc++;
+  stats->bufs_on_arm++;
+  stats->bytes_from_vc += b->length;
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
+    stats->configs_from_vc++;
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
+    stats->keyframes_from_vc++;
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_START)
+    stats->frame_start_from_vc++;
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END)
+    stats->frame_end_from_vc++;
+
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_NAL_END)
+    stats->nal_end_from_vc++;
+
+  restore_irq_flags(irqflags);
+}
+
+static inline void cam_port_stats_on_buffer_to_vc(struct cam_port_stats *s,
+  const struct mmal_buffer *b)
+{
+  int irqflags;
+  struct cam_port_stats *stats = &cam.stats.h264;
+  disable_irq_save_flags(irqflags);
+  stats->bufs_to_vc++;
+  stats->bufs_on_arm--;
   restore_irq_flags(irqflags);
 }
 
@@ -218,11 +262,12 @@ static int OPTIMIZED camera_on_h264_buffer_ready(struct mmal_buffer *b)
   struct write_stream_buf *iobuf;
   struct write_stream_buf *iobuf_tmp;
   struct mmal_port *p = cam.port_h264_stream;
+  struct cam_port_stats *stats = &cam.stats.h264;
 
-  disable_irq_save_flags(irqflags);
-  stats_num_buffers_rdy_h264++;
-  total_bytes += b->length;
-  restore_irq_flags(irqflags);
+  cam_port_stats_on_buffer_from_vc(stats, b);
+
+  if (!(stats->keyframes_from_vc % 25))
+    os_log(".%d\r\n", stats->keyframes_from_vc);
 
   disable_irq_save_flags(irqflags);
   b2 = mmal_buf_fifo_pop(&p->bufs.os_side_consumable);
@@ -231,14 +276,17 @@ static int OPTIMIZED camera_on_h264_buffer_ready(struct mmal_buffer *b)
     return ERR_INVAL;
   }
 
-  if (!config_done && b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
-    config_done = true;
+  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {
+    if (!cam_h264_config_received)
+      cam_h264_config_received = true;
+  }
 
-  if (!config_done) {
+  if (!cam_h264_config_received) {
     disable_irq_save_flags(irqflags);
     list_del(&b->list);
     list_add_tail(&b->list, &p->bufs.os_side_free);
     restore_irq_flags(irqflags);
+    cam_port_stats_on_buffer_to_vc(stats, b);
     goto second_half;
   }
 
@@ -269,17 +317,10 @@ static int OPTIMIZED camera_on_h264_buffer_ready(struct mmal_buffer *b)
     list_del(&b->list);
     list_add_tail(&b->list, &p->bufs.os_side_free);
     restore_irq_flags(irqflags);
+    cam_port_stats_on_buffer_to_vc(stats, b);
   }
 
-#if 0
-  if (b->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {}
-  if (b->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {}
-#endif
-
 second_half:
-  if (!(cam.stat_frames % 25))
-    os_log(".%d\r\n", cam.stat_frames);
-  cam.stat_frames++;
   err = mmal_port_buffers_to_remote(p, &p->bufs.os_side_free, false);
   if (err != SUCCESS) {
     MODULE_ERR("failed to submit buffer list, err: %d", err);
@@ -828,7 +869,7 @@ int camera_init(const struct camera_config *conf)
 
   err = camera_make_encoder(conf->frame_size_x, conf->frame_size_y,
     conf->frames_per_sec, conf->bit_rate, conf->h264_buffers_num,
-    conf->h264_buffer_size, &conf->h264_encoder_config);
+    conf->h264_buffer_size, &conf->h264_encoder);
 
   CHECK_ERR("Failed to create encoder component");
 

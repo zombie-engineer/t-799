@@ -50,31 +50,31 @@ struct canvas {
   uint8_t bg_b;
 };
 
-#define CANVAS_PLOT_WITH_TEXT_INIT(__prefix, __p_value, __fmt_suffix, \
+#define CANVAS_PLOT_WITH_TEXT_INIT(__name, __p_value, __fmt_suffix, \
   __value_div) \
   { \
     .text_area = { \
       .pos = { \
-        .x = __prefix ## _X, \
-        .y = __prefix ## _Y \
+        .x = __name ## _X, \
+        .y = __name ## _Y \
       }, \
       .size = { \
-        .x = __prefix ## _TEXT_SIZE_X, \
-        .y = __prefix ## _SIZE_Y \
+        .x = TEXT_SIZE_X, \
+        .y = __name ## _SIZE_Y \
       }, \
     }, \
     .plot = { \
       .area = { \
         .pos = { \
-          .x = __prefix ## _TEXT_SIZE_X, \
-          .y = __prefix ## _Y \
+          .x = __name ## _X + TEXT_SIZE_X, \
+          .y = __name ## _Y \
         }, \
         .size = { \
-          .x = __prefix ## _X + __prefix ## _TEXT_SIZE_X, \
-          .y = __prefix ## _SIZE_Y \
+          .x = TEXT_SIZE_X + PLOT_SIZE_X - TEXT_SIZE_X, \
+          .y = __name ## _SIZE_Y \
         }, \
       }, \
-      .max_value = __prefix ## _MAX_VALUE \
+      .max_value = __name ## _MAX_VALUE \
     }, \
     .value = __p_value, \
     .fmt_suffix = __fmt_suffix, \

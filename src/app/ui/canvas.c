@@ -1,6 +1,7 @@
 #include "canvas.h"
 #include "font/gfx_font.h"
 #include <printf.h>
+#include <common.h>
 
 static inline void canvas_set_pixel_color(struct canvas *c,
     unsigned x, unsigned y,
@@ -25,29 +26,35 @@ void canvas_plot_draw_one(struct canvas *c, struct canvas_plot *p,
   uint32_t value_scaled;
 
   p->last_pos.x++;
-  if (p->last_pos.x > p->area.size.x) {
+  if (p->last_pos.x >= p->area.size.x)
     p->last_pos.x = 0;
-  }
 
   x = p->last_pos.x + p->area.pos.x;
 
   value_scaled = ((float)value / p->max_value) * p->area.size.y;
-  if (value_scaled > p->area.size.y) {
-    value_scaled = p->area.size.y;
-  }
+  value_scaled = MIN(value_scaled, p->area.size.y);
 
   y = p->area.pos.y + p->area.size.y - value_scaled;
   printf("value: %p, scaled: %p, max:%p, y:%p\r\n", value,  value_scaled,
     p->max_value, y);
 
+  canvas_draw_line(c, x, p->area.pos.y, x, p->area.pos.y + p->area.size.y,
+    0, 0, 0);
+
   if (x == p->area.pos.x)
     canvas_set_pixel_color(c, p->area.pos.x, y, 255, 0, 0);
-  else {
-    canvas_draw_line(c, x, p->area.pos.y, x, p->area.pos.y + p->area.size.y,
-      0, 0, 0);
+  else
     canvas_draw_line(c, x - 1, p->last_pos.y, x, y, 255, 0, 0);
-  }
+
   p->last_pos.y = y;
+
+  canvas_draw_line(c,
+    p->area.pos.x,
+    p->area.pos.y + p->area.size.y + 1,
+    p->area.pos.x + p->area.size.x,
+    p->area.pos.y + p->area.size.y + 1,
+    0, 255, 0);
+
 }
 
 void canvas_plot_with_value_text_draw(struct canvas *c,
