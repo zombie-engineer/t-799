@@ -15,7 +15,6 @@
 #include <sections.h>
 #include <errcode.h>
 #include <logger.h>
-#include <app/app_main.h>
 #include <config.h>
 
 EXCEPTION void fiq_handler(void)
@@ -108,6 +107,8 @@ out:
       asm volatile("wfe");
   }
 }
+
+extern void app_main(void);
 
 static void kernel_run(void)
 {

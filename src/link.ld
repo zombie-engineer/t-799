@@ -24,7 +24,7 @@ SECTIONS
   PHY_ADDR = KERNEL_START;
 
   .init.nommu PHY_ADDR : AT(PHY_ADDR) {
-    kernel/start.o(.init.nommu)
+    t-799/src/kernel/start.o(.init.nommu)
     *.o(.init.nommu)
     __stack_no_mmu_top = ALIGN(0x10);
     . += 0x400;
@@ -79,10 +79,10 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
   .text KERNEL_ADDR_SPACE_START + PHY_ADDR : AT(PHY_ADDR) {
     __text_start = .;
-    kernel/start.o(.start_el1_mmu)
+    t-799/src/kernel/start.o(.start_el1_mmu)
     *.o(.text)
     __text_end = .;
-    kernel/dma_memory.o(.text)
+    t-799/src/kernel/dma_memory.o(.text)
   }
 
   PHY_ADDR += SIZEOF(.text);
@@ -111,14 +111,14 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
 
   .stacks KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
     __stacks_start = .;
-    *.o(.stacks)
+    t-799/src/kernel/start.o(.stacks)
     __stacks_end = .;
   }
 
   PHY_ADDR += SIZEOF(.stacks);
   PHY_ADDR = ALIGN(PHY_ADDR, 4096);
   .kernel_memory KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
-    kernel/kmalloc.o(.kernel_memory)
+    t-799/src/kernel/kmalloc.o(.kernel_memory)
   }
   __kernel_memory_start = ADDR(.kernel_memory);
   __kernel_memory_end = __kernel_memory_start + SIZEOF(.kernel_memory);
@@ -126,7 +126,7 @@ PAGE_TABLE_SIZE = ALIGN(PAGE_TABLE_SIZE, 0x1000);
   PHY_ADDR += SIZEOF(.kernel_memory);
   PHY_ADDR = ALIGN(PHY_ADDR, 4096);
   .dma_memory KERNEL_ADDR_SPACE_START + PHY_ADDR (NOLOAD) : AT(PHY_ADDR) {
-    kernel/dma_memory.o(.dma_memory)
+   t-799/src/kernel/dma_memory.o(.dma_memory)
   }
 
   __dma_memory_start = ADDR(.dma_memory);

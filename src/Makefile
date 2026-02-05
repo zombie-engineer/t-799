@@ -1,7 +1,5 @@
 
-OBJS := \
-  app/app_main \
-  app/camera \
+CORE_OBJS := \
   arch/armv8/armv8 \
   arch/armv8/armv8_mmu \
   arch/armv8/armv8_cpu_context \

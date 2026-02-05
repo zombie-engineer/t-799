@@ -1,6 +1,11 @@
 #!/bin/bash
+
 set -e
-TASK_OFFSETS_BIN=build/task_offsets.bin
+: "${CROSSCOMPILE:?CROSSCOMPILE is not set}"
+: "${TO_JSON:?TO_JSON is not set}"
+: "${ELFFILE:?ELFFILE is not set}"
+
+TASK_OFFSETS_BIN=$BINFILE
 
 read8() {
     local FILENAME=$1
@@ -8,9 +13,9 @@ read8() {
     od -An -t u1 -j $OFFSET -N 1 $FILENAME | tr -d ' '
 }
 
-CROSS=/home/user_user/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin/aarch64-none-elf
-current_task=0x$($CROSS-objdump build/kernel8.elf -x  | grep -w sched | grep ff | cut -d' ' -f1)
-tasks_array=0x$($CROSS-objdump build/kernel8.elf -x  | grep -w tasks_array | grep ff | cut -d' ' -f1)
+CROSS=aarch64-none-elf
+current_task=0x$($CROSSCOMPILE-objdump $ELFFILE -x  | grep -w sched | grep ff | cut -d' ' -f1)
+tasks_array=0x$($CROSSCOMPILE-objdump $ELFFILE -x  | grep -w tasks_array | grep ff | cut -d' ' -f1)
 task_size=$(read8 $TASK_OFFSETS_BIN 0)
 task_offset_name=$(read8 $TASK_OFFSETS_BIN 1)
 task_offset_id=$(read8 $TASK_OFFSETS_BIN 2)
@@ -22,4 +27,4 @@ echo '{
   "task_offset_name" : '$task_offset_name',
   "task_offset_id" : '$task_offset_id',
   "task_offset_cpuctx" : '$task_offset_ctx'
-}'
+}' > $TO_JSON
