@@ -11,6 +11,7 @@ $(error APP_OBJS not defined)
 endif
 
 include t-799/make/toolchain.mk
+include t-799/make/common.mk
 
 include t-799/src/Makefile
 include src/Makefile
