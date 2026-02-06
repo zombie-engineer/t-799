@@ -25,10 +25,10 @@ struct dma_mem_area {
 #define __DEFINE_MEM(__log_sz, __n, __align, __section) \
   SECTION(__section) \
   ALIGNED(__align) \
-  char dma_mem_ ## __log_sz[(1<<__log_sz) * __n]
+  static char dma_mem_ ## __log_sz[(1<<__log_sz) * __n]
 
 #define __DEFINE_MEM_HEADER(__log_sz, __n) \
-  struct dma_mem_header dma_mem_hdr_ ## __log_sz[__n]
+  static struct dma_mem_header dma_mem_hdr_ ## __log_sz[__n]
 
 #define DMA_MEM_GROUP(__log_sz, __n, __align) \
   __DEFINE_MEM(__log_sz, __n, __align, ".dma_memory"); \

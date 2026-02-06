@@ -9,7 +9,7 @@
 extern char __kernel_memory_start;
 extern char __kernel_memory_end;
 
-char kernel_memory[16 * 1024 * 1024] SECTION(".kernel_memory");
+static char kernel_memory[16 * 1024 * 1024] SECTION(".kernel_memory");
 
 typedef void *(*kmalloc_fn)(size_t);
 
@@ -45,7 +45,7 @@ static void kfree_common(struct kmalloc_descriptor *d, void *addr)
 }
 
 #define DECL_MALLOC_DESC(__chunk_size_log, __nents) \
-  uint64_t kmalloc_bitmap ## __chunk_size_log[BITMAP_NUM_WORDS(__nents)]; \
+  static uint64_t kmalloc_bitmap ## __chunk_size_log[BITMAP_NUM_WORDS(__nents)]; \
   static struct kmalloc_descriptor kmalloc_descriptor ## __chunk_size_log = { \
     .bitmap = BITMAP_INIT(kmalloc_bitmap ## __chunk_size_log, __nents), \
     .chunk_size_log = __chunk_size_log \
